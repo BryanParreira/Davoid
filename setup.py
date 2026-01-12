@@ -10,18 +10,28 @@ def install():
 
     python_exe = sys.executable
     script_path = os.path.abspath("main.py")
+    repo_path = os.path.dirname(script_path)
     bin_path = "/usr/local/bin/davoid"
 
-    # Wrapper forces root and points to the hidden environment
-    wrapper = f"#!/bin/bash\nsudo {python_exe} {script_path} \"$@\""
+    # Wrapper logic: Detects --update and pulls from GitHub
+    wrapper_content = f"""#!/bin/bash
+if [ "$1" == "--update" ]; then
+    echo "[*] Davoid: Pulling latest changes from GitHub..."
+    cd {repo_path} && git pull
+    echo "[+] Update complete."
+    exit 0
+fi
+
+sudo {python_exe} {script_path} "$@"
+"""
 
     try:
         with open(bin_path, "w") as f:
-            f.write(wrapper)
+            f.write(wrapper_content)
         os.system(f"chmod +x {bin_path}")
         os.system(f"chmod +x {script_path}")
     except PermissionError:
-        print("[-] Fatal: Installation requires sudo.")
+        print("[-] Error: Run setup with sudo.")
 
 
 if __name__ == "__main__":

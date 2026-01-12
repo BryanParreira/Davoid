@@ -1,56 +1,211 @@
-# █  ██████╗ █████╗ ██╗ ██╗ ██████╗ ██╗██████╗
+# █ DAVOID : GHOST IN THE NET
 
-# █  ██╔══██╗ ██╔══██╗██║ ██║██╔═══ ██╗██║██╔══██╗
+<p align="center">
+  <img src="assets/mainframe.png" alt="Davoid Mainframe Header" width="800">
+</p>
 
-# █  ██║ ██║ ███████║██║ ██║██║ ██║██║██║ ██║
+> **Professional-grade Terminal User Interface (TUI) toolkit for network discovery, security auditing, and ethical hacking.**
 
-# █  ██║ ██║ ██╔══██║██╗ ██╔██║ ██║██║██║ ██║
+Davoid is a modular security engine built for speed, clarity, and deep-level network manipulation. It leverages **Scapy** for raw packet crafting and **Rich** to provide a high-contrast, modern terminal experience. Whether you are mapping a local subnet or performing authorized man-in-the-middle audits, Davoid provides a unified global interface for offensive and defensive security tasks.
 
-# █  ██████╔╝ ██║ ██║ ████╔╝╚██████╔╝ ██║██████╔╝
+---
 
-# █  ╚═════╝ ╚═╝ ╚═╝ ╚═══╝ ╚═════╝ ╚═╝╚═════╝
+## 🚀 One-Liner Installation
 
-[ G H O S T I N T H E N E T ]
+Deploy Davoid globally on your Mac or Linux system. This command clones the repository to `/opt/davoid`, configures an isolated Python virtual environment, and links the global `davoid` command to your PATH.
 
-Davoid is a professional-grade Terminal User Interface (TUI) toolkit for ethical hacking, network discovery, and security auditing. Built with Python and Scapy, it offers a high-contrast aesthetic while providing deep-level network manipulation capabilities.
+```bash
+curl -sL "https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh" | bash
+```
 
-🚀 One-Liner Installation
+> **Note:** Root privileges are required for installation and execution due to raw socket operations.
 
-Deploy Davoid globally on your Mac or Linux system with a single command:
+---
 
-curl -sL [https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh](https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh) | bash
+## 🛠️ Security Modules
 
-🛠️ Included Tools
+| Module               | Description                     | Technical Engine               |
+| -------------------- | ------------------------------- | ------------------------------ |
+| **Net-Mapper**       | Advanced ARP-based discovery    | Scapy `ARP()` & `Ether()`      |
+| **Live Interceptor** | Real-time packet sniffing       | Scapy `sniff()` Engine         |
+| **MITM Engine**      | Automated ARP Poisoning         | Bi-directional Cache Poisoning |
+| **Shell Forge**      | Instant reverse shell generator | Python & Bash Payload Gen      |
+| **DNS Recon**        | Domain intelligence gathering   | Socket-level DNS Querying      |
+| **Hash Cracker**     | Local MD5 wordlist recovery     | Hashlib MD5 Processing         |
 
-Network Mapper: Advanced ARP-based discovery to identify every live node and MAC address on your local subnet.
+---
 
-Live Interceptor: Real-time packet sniffer to monitor IP, TCP, and UDP traffic directly from the terminal.
+## 🏗️ Architecture
 
-MITM Engine: Automated ARP Poisoning module for authorized Man-in-the-Middle security testing.
+Davoid is built on a modular engine, ensuring that each security tool operates independently within a unified global interface.
 
-Shell Forge: Instant generator for reverse shell payloads including Bash and Python one-liners.
+- **Language:** Python 3.x
+- **Networking:** Scapy (Raw Packet Manipulation)
+- **Interface:** Rich (Terminal Layouts & Gradients)
+- **Privilege:** Global Root Execution (required for raw socket access)
+- **Path:** Installed to `/opt/davoid` with binary linked to `/usr/local/bin/davoid`
 
-🔄 Updating
+---
 
-Davoid features an integrated auto-update checker that pings GitHub for the latest version. To synchronize your local suite with the latest tools, run:
+## 📋 Requirements
 
+- **Operating System:** macOS or Linux
+- **Python:** 3.7 or higher
+- **Root Access:** Required for packet manipulation
+- **Dependencies:** Automatically installed via virtual environment
+  - Scapy
+  - Rich
+  - Additional dependencies as specified in `requirements.txt`
+
+---
+
+## 🚦 Quick Start
+
+After installation, launch Davoid from any terminal:
+
+```bash
+sudo davoid
+```
+
+Navigate through the interactive menu to select your desired security module.
+
+---
+
+## 🔄 Maintenance & Updates
+
+Davoid features an integrated auto-update engine. To synchronize your local suite with the latest security tools and patches from the main branch, simply run:
+
+```bash
 davoid --update
+```
 
-🏗️ Architecture
+Or update manually:
 
-Davoid is built on a modular engine, ensuring that each security tool operates independently within a unified interface.
+```bash
+cd /opt/davoid
+git pull origin main
+source venv/bin/activate
+pip install -r requirements.txt --upgrade
+```
 
-Language: Python 3.x
+---
 
-Networking: Scapy (Raw Packet Manipulation)
+## 🎯 Usage Examples
 
-Interface: Rich (Terminal Layouts & Gradients)
+### Network Discovery
 
-Privilege: Global Root Execution by default
+```bash
+sudo davoid
+# Select: Net-Mapper
+# Enter target IP range: 192.168.1.0/24
+```
 
-⚠️ Legal Disclaimer
+### Packet Sniffing
 
-Davoid is intended for educational purposes and authorized penetration testing only. Unauthorized access to computer systems or networks is strictly prohibited and illegal. The developer is not responsible for any damage caused by the misuse of this software. Always obtain written permission before testing any network.
+```bash
+sudo davoid
+# Select: Live Interceptor
+# Specify interface: eth0
+```
 
-Developed by Bryan Parreira
-GitHub: BryanParreira/Davoid
+### DNS Reconnaissance
+
+```bash
+sudo davoid
+# Select: DNS Recon
+# Enter domain: example.com
+```
+
+---
+
+## 🔐 Security Best Practices
+
+- Always run Davoid in isolated test environments
+- Obtain explicit written authorization before testing any network
+- Document all security assessments thoroughly
+- Follow responsible disclosure practices for any vulnerabilities discovered
+- Keep Davoid updated to the latest version
+
+---
+
+## 🐛 Troubleshooting
+
+### Permission Denied
+
+Ensure you're running with root privileges:
+
+```bash
+sudo davoid
+```
+
+### Module Not Found
+
+Verify the virtual environment is activated:
+
+```bash
+source /opt/davoid/venv/bin/activate
+```
+
+### Scapy Issues
+
+Reinstall Scapy dependencies:
+
+```bash
+pip install --upgrade scapy
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+---
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 👨‍💻 Developer
+
+**Bryan Parreira**  
+GitHub: [@BryanParreira](https://github.com/BryanParreira)
+
+---
+
+## ⚠️ Legal Disclaimer
+
+**IMPORTANT:** Davoid is intended for **educational purposes** and **authorized penetration testing only**. Unauthorized access to computer systems or networks is strictly prohibited and illegal under laws including but not limited to the Computer Fraud and Abuse Act (CFAA) and equivalent legislation worldwide.
+
+### Terms of Use:
+
+- ✅ Use only on networks you own or have explicit written permission to test
+- ✅ Educational and research purposes in controlled environments
+- ✅ Authorized security assessments with proper documentation
+- ❌ Unauthorized network scanning or intrusion
+- ❌ Malicious attacks or data theft
+- ❌ Any illegal activity
+
+**The developer assumes no liability and is not responsible for any misuse or damage caused by this program.** Users are solely responsible for ensuring their actions comply with all applicable laws and regulations.
+
+By using Davoid, you acknowledge that you have read and understood this disclaimer and agree to use this software responsibly and legally.
+
+---
+
+## 🌟 Star History
+
+If you find Davoid useful, please consider giving it a star ⭐
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ for the security community</sub>
+</p>

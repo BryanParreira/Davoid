@@ -1,7 +1,7 @@
 # DAVOID : GHOST IN THE NET
 
 <p align="center">
-  <img src="assets/mainframe.png" alt="Davoid Mainframe Header" width="800">
+  <img src="https://raw.githubusercontent.com/BryanParreira/Davoid/main/assets/mainframe.png?raw=true" alt="Davoid Mainframe Header" width="800">
 </p>
 
 > **Professional-grade Terminal User Interface (TUI) toolkit for network discovery, security auditing, and ethical hacking.**

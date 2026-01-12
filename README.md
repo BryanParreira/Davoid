@@ -1,4 +1,4 @@
-# █ DAVOID : GHOST IN THE NET
+# DAVOID : GHOST IN THE NET
 
 <p align="center">
   <img src="assets/mainframe.png" alt="Davoid Mainframe Header" width="800">

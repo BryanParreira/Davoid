@@ -1,59 +1,62 @@
-import requests
-import subprocess
 import os
+import sys
+import subprocess
+import requests
 from rich.console import Console
-from rich.panel import Panel
 
 console = Console()
 
-# Current version of the local code
 VERSION = "1.1"
-# GitHub link for the version file
-RAW_VERSION_URL = "https://raw.githubusercontent.com/BryanParreira/Davoid/main/version.txt"
-INSTALL_DIR = "/opt/davoid"
-
+REPO_URL = "https://raw.githubusercontent.com/BryanParreira/Davoid/main/core/updater.py"
 
 def check_version():
-    """Passive check to notify user of updates."""
     try:
-        response = requests.get(RAW_VERSION_URL, timeout=3)
+        response = requests.get(REPO_URL, timeout=5)
         if response.status_code == 200:
-            latest = response.text.strip()
-            if latest != VERSION:
-                console.print(Panel(
-                    f"[bold yellow]UPDATE FOUND:[/bold yellow] Davoid v{latest} is available!\n"
-                    f"[white]Run [bold red]davoid --update[/bold red] to pull the latest tools.[/white]",
-                    border_style="yellow",
-                    expand=False
-                ))
-    except Exception:
-        pass  # Fail silently if no internet
-
+            for line in response.text.splitlines():
+                if "VERSION =" in line:
+                    latest = line.split('"')[1]
+                    if latest != VERSION:
+                        console.print(f"\n[bold yellow][!] Update Available: {latest} (Current: {VERSION})[/bold yellow]")
+                        console.print("[dim]Run 'davoid --update' or use the menu to sync.[/dim]\n")
+                        return True
+    except:
+        pass
+    return False
 
 def perform_update():
-    """Active check to pull latest code and sync dependencies."""
-    console.print(
-        "[bold blue][*][/bold blue] Pulling latest changes from GitHub...")
-    try:
-        # Change to the install directory
-        os.chdir(INSTALL_DIR)
+    console.print("[bold cyan][*] Initializing Ghost-Update sequence...[/bold cyan]")
+    
+    # We create a small bash/batch script to handle the overwrite and restart
+    update_script = "update.sh" if os.name != "nt" else "update.bat"
+    
+    if os.name != "nt": # Linux/macOS
+        commands = f"""#!/bin/bash
+        sleep 2
+        git fetch --all
+        git reset --hard origin/main
+        python3 main.py
+        rm update.sh
+        """
+    else: # Windows
+        commands = f"""
+        @echo off
+        timeout /t 2 /nobreak > nul
+        git fetch --all
+        git reset --hard origin/main
+        python main.py
+        del update.bat
+        """
 
-        # Ensure git recognizes the directory as safe
-        subprocess.check_call(
-            ["sudo", "git", "config", "--global", "--add", "safe.directory", INSTALL_DIR])
+    with open(update_script, "w") as f:
+        f.write(commands)
 
-        # Force a pull from the main branch
-        subprocess.check_call(["sudo", "git", "fetch", "--all"])
-        subprocess.check_call(
-            ["sudo", "git", "reset", "--hard", "origin/main"])
-
-        # Update dependencies
-        console.print(
-            "[bold blue][*][/bold blue] Synchronizing dependencies...")
-        subprocess.check_call(
-            [f"{INSTALL_DIR}/venv/bin/pip", "install", "-r", "requirements.txt"])
-
-        console.print(
-            "[bold green][+] Davoid updated successfully! Restarting...[/bold green]")
-    except Exception as e:
-        console.print(f"[bold red][!] Update failed:[/bold red] {e}")
+    console.print("[bold green][+] Update script ready. Restarting Davoid...[/bold green]")
+    
+    if os.name != "nt":
+        os.chmod(update_script, 0o755)
+        subprocess.Popen(["/bin/bash", "./update.sh"], shell=False)
+    else:
+        subprocess.Popen([update_script], shell=True)
+    
+    sys.exit(0) # Exit the current process so files can be overwritten

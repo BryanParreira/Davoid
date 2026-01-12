@@ -16,21 +16,24 @@ echo -e "\033[0m"
 INSTALL_DIR="/opt/davoid"
 REPO_URL="https://github.com/BryanParreira/Davoid.git"
 BINARY_PATH="/usr/local/bin/davoid"
+CURRENT_USER=$(whoami)
 
-echo -e "\033[1;34m[*] Requesting root access for installation...\033[0m"
+echo -e "\033[1;34m[*] Requesting root access for system directory setup...\033[0m"
 
-# 2. Setup Directory with proper permissions
+# 2. Setup Directory
 sudo mkdir -p $INSTALL_DIR
-sudo chown $USER "$INSTALL_DIR"
+# Crucial: Give the current user ownership so the app can update itself later
+sudo chown $CURRENT_USER:$CURRENT_USER $INSTALL_DIR
 
 # 3. Clone Repository
 echo -e "\033[1;34m[*] Cloning Davoid repository...\033[0m"
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd $INSTALL_DIR && git pull
 else
-    sudo rm -rf $INSTALL_DIR
+    # Remove if exists but not a git repo to avoid clone failure
+    [ -d "$INSTALL_DIR" ] && sudo rm -rf $INSTALL_DIR 
     sudo git clone $REPO_URL $INSTALL_DIR
-    sudo chown -R $USER "$INSTALL_DIR"
+    sudo chown -R $CURRENT_USER:$CURRENT_USER $INSTALL_DIR
 fi
 
 # 4. Setup Virtual Environment
@@ -41,14 +44,15 @@ python3 -m venv venv
 if [ -f "requirements.txt" ]; then
     ./venv/bin/pip install -r requirements.txt
 else
-    # Safety fallback
-    ./venv/bin/pip install scapy rich requests
+    ./venv/bin/pip install scapy rich requests cryptography
 fi
 
-# 5. Create the Global Launcher (Works on Mac & Linux)
+# 5. Create the Global Launcher
+# We use sudo here because /usr/local/bin is root-protected
 echo -e "\033[1;34m[*] Creating global 'davoid' command...\033[0m"
 sudo bash -c "cat <<EOF > $BINARY_PATH
 #!/bin/bash
+# Running with sudo is required for Scapy (raw sockets)
 sudo $INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/main.py \"\$@\"
 EOF"
 

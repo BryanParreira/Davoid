@@ -1,3 +1,5 @@
-scapy
-rich
-requests
+# Davoid Framework Dependencies
+rich==13.7.0
+scapy==2.5.0
+requests==2.31.0
+cryptography==42.0.5

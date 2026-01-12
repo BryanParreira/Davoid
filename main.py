@@ -24,25 +24,19 @@ console = Console()
 
 
 def main():
-    # 1. Handle Command Line Arguments BEFORE UI starts
-    # This ensures that if the UI crashes, the user can still run --update
+    # FIRST: Check for arguments
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg == "--update":
+            # Call perform_update directly and exit immediately
+            from core.updater import perform_update
             perform_update()
-            sys.exit(0)
-        elif arg in ["--help", "-h"]:
-            console.print("[bold cyan]Usage:[/bold cyan] davoid [options]")
-            console.print("  --update    Pull latest tools from GitHub")
-            console.print("  --help      Show this menu")
-            sys.exit(0)
+            sys.exit(0)  # Stop here! Do not draw the menu.
 
-    # 2. Main Terminal User Interface (TUI) Loop
+    # SECOND: If no arguments, then start the TUI loop
     try:
         while True:
-            # Clear terminal for a clean, professional aesthetic
             os.system('cls' if os.name == 'nt' else 'clear')
-
             draw_header("Main Control")
 
             # Passive update check (notifies user via a yellow panel)

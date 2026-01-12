@@ -7,7 +7,7 @@ from rich.panel import Panel
 console = Console()
 
 # Current version of the local code
-VERSION = "2.6"
+VERSION = "2.8"
 # GitHub link for the version file
 RAW_VERSION_URL = "https://raw.githubusercontent.com/BryanParreira/Davoid/main/version.txt"
 INSTALL_DIR = "/opt/davoid"

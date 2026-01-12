@@ -1,0 +1,21 @@
+# Python bytecode (compiled files)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment (Local to your machine)
+venv/
+env/
+.venv/
+
+# Environment variables / Secrets
+.env
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Distribution / Build folders
+dist/
+build/
+*.egg-info/

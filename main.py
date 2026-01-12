@@ -2,6 +2,10 @@ import sys
 import os
 from rich.console import Console
 from rich.prompt import Prompt
+import warnings
+
+# Suppress the urllib3/LibreSSL warning for a cleaner TUI
+warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
 
 # Add base directory to path
 BASE_DIR = "/opt/davoid"

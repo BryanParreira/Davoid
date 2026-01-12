@@ -85,7 +85,7 @@ def network_discovery():
     except:
         subnet_hint = "192.168.1.0/24"
 
-    ip_range = console.input(f"[bold yellow]Enter Subnet [[white]{subnet_hint}[/white]]: [/bold yellow]").strip()
+    ip_range = console.input(f"[bold yellow]Enter Subnet : [/bold yellow]").strip()
     if not ip_range: ip_range = subnet_hint
 
     do_intel = console.input("[bold cyan]Perform Advanced Intelligence (OS/Ports)? (y/N): [/bold cyan]").lower() == 'y'

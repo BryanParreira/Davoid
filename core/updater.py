@@ -1,13 +1,14 @@
 import requests
+import subprocess
+import os
 from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
 
-# Current version of the user's local code
 VERSION = "2.6"
-# Your GitHub raw link for the version file
 RAW_VERSION_URL = "https://raw.githubusercontent.com/BryanParreira/Davoid/main/version.txt"
+INSTALL_DIR = "/opt/davoid"
 
 
 def check_version():
@@ -23,4 +24,27 @@ def check_version():
                     expand=False
                 ))
     except:
-        pass  # Fail silently if no internet
+        pass
+
+
+def perform_update():
+    """Logic to pull latest code and update dependencies."""
+    console.print(
+        "[bold blue][*][/bold blue] Pulling latest changes from GitHub...")
+    try:
+        # Change directory to the install path to ensure git pull works
+        os.chdir(INSTALL_DIR)
+
+        # 1. Pull latest code
+        subprocess.check_call(["git", "pull"])
+
+        # 2. Update dependencies inside the venv
+        console.print(
+            "[bold blue][*][/bold blue] Synchronizing dependencies...")
+        subprocess.check_call(
+            [f"{INSTALL_DIR}/venv/bin/pip", "install", "-r", "requirements.txt"])
+
+        console.print(
+            "[bold green][+] Davoid updated successfully! Restarting...[/bold green]")
+    except Exception as e:
+        console.print(f"[bold red][!] Update failed:[/bold red] {e}")

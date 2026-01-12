@@ -23,14 +23,22 @@ except ImportError as e:
 
 # 4. Import Security Modules
 try:
+    # Recon & Scanning
     from modules.scanner import network_discovery
     from modules.sniff import start_sniffing
-    from modules.spoof import start_mitm
-    from modules.payloads import generate_shell
     from modules.recon import dns_recon
+    
+    # Offensive Engine
+    from modules.spoof import start_mitm
+    from modules.dns_spoofer import start_dns_spoof
+    from modules.cloner import clone_site
+    
+    # Payloads & Evasion
+    from modules.payloads import generate_shell
+    from modules.crypt_keeper import encrypt_payload
     from modules.bruteforce import hash_cracker
     from modules.web_recon import web_ghost
-    from modules.crypt_keeper import encrypt_payload
+    
 except ImportError as e:
     # If a module is missing, Davoid will still run, but notify the user
     pass
@@ -57,22 +65,23 @@ def main():
             # Passive update check (Displays notification if version mismatch)
             check_version()
 
-            # Command Center UI
-            console.print("\n[bold cyan]COMMAND CENTER[/bold cyan]")
-            console.print("[bold red]>[/bold red] [1] Net-Mapper       [dim](ARP Discovery)[/dim]")
-            console.print("[bold red]>[/bold red] [2] Live Interceptor [dim](Packet Sniffing)[/dim]")
-            console.print("[bold red]>[/bold red] [3] MITM Engine      [dim](ARP Poisoning)[/dim]")
-            console.print("[bold red]>[/bold red] [4] Shell Forge      [dim](B64 Payloads)[/dim]")
-            console.print("[bold red]>[/bold red] [5] DNS Recon        [dim](Domain Intel)[/dim]")
-            console.print("[bold red]>[/bold red] [6] Hash Cracker     [dim](Wordlist Pro)[/dim]")
-            console.print("[bold red]>[/bold red] [7] Web Ghost        [dim](Sensitive Files)[/dim]")
-            console.print("[bold red]>[/bold red] [8] Crypt-Keeper     [dim](Evasion Engine)[/dim]")
-            console.print("[bold red]>[/bold red] [Q] Vanish           [dim](Exit Console)[/dim]")
+            # --- COMMAND CENTER UI ---
+            console.print("\n[bold cyan]RECON & SCANNING[/bold cyan]")
+            console.print("[bold red]>[/bold red] [1] Net-Mapper       [2] Live Interceptor  [3] DNS Recon")
+            
+            console.print("\n[bold cyan]OFFENSIVE ENGINE[/bold cyan]")
+            console.print("[bold red]>[/bold red] [4] MITM Engine      [5] DNS Spoofer       [6] Phantom Cloner")
+            
+            console.print("\n[bold cyan]PAYLOADS & EVASION[/bold cyan]")
+            console.print("[bold red]>[/bold red] [7] Shell Forge      [8] Crypt-Keeper      [9] Hash Cracker")
+            console.print("[bold red]>[/bold red] [0] Web Ghost")
+            
+            console.print("\n[bold red]>[/bold red] [Q] Vanish           [dim](Exit Console)[/dim]")
 
             # Handle user interaction
             choice = Prompt.ask(
                 "\n[bold red]davoid[/bold red]@[root]",
-                choices=["1", "2", "3", "4", "5", "6", "7", "8", "q", "Q"],
+                choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "q", "Q"],
                 show_choices=False
             )
 
@@ -82,17 +91,21 @@ def main():
             elif choice == "2":
                 start_sniffing()
             elif choice == "3":
-                start_mitm()
-            elif choice == "4":
-                generate_shell()
-            elif choice == "5":
                 dns_recon()
+            elif choice == "4":
+                start_mitm()
+            elif choice == "5":
+                start_dns_spoof()
             elif choice == "6":
-                hash_cracker()
+                clone_site()
             elif choice == "7":
-                web_ghost()
+                generate_shell()
             elif choice == "8":
                 encrypt_payload()
+            elif choice == "9":
+                hash_cracker()
+            elif choice == "0":
+                web_ghost()
             elif choice.lower() == "q":
                 console.print("\n[bold yellow]Vanish mode activated. Clearing traces...[/bold yellow]")
                 sys.exit(0)

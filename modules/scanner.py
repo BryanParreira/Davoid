@@ -140,4 +140,5 @@ def network_discovery():
     except Exception as e:
         console.print(f"[bold red]Critical Error:[/bold red] {e}")
 
-    input("\n[bold white]Press Enter to return to Command Center...[/bold white]")
+    console.print("\n[bold white]Press Enter to return to Command Center...[/bold white]", end="")
+    input()

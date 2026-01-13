@@ -24,14 +24,43 @@ curl -sL "https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh
 
 ## 🛠️ Security Modules
 
-| Module               | Description                     | Technical Engine               |
-| -------------------- | ------------------------------- | ------------------------------ |
-| **Net-Mapper**       | Advanced ARP-based discovery    | Scapy `ARP()` & `Ether()`      |
-| **Live Interceptor** | Real-time packet sniffing       | Scapy `sniff()` Engine         |
-| **MITM Engine**      | Automated ARP Poisoning         | Bi-directional Cache Poisoning |
-| **Shell Forge**      | Instant reverse shell generator | Python & Bash Payload Gen      |
-| **DNS Recon**        | Domain intelligence gathering   | Socket-level DNS Querying      |
-| **Hash Cracker**     | Local MD5 wordlist recovery     | Hashlib MD5 Processing         |
+### 1️⃣ Reconnaissance & Intelligence
+Identify every "ghost" on the wire and map the attack surface.
+
+| Tool | Key | Description |
+|------|-----|-------------|
+| **Net-Mapper** | `[1]` | Performs advanced ARP discovery to identify hosts, OS types, and hardware vendors (e.g., Sony, Samsung, Raspberry Pi) |
+| **Live Interceptor** | `[2]` | Real-time packet sniffer for capturing plaintext data and monitoring network noise |
+| **DNS Recon** | `[3]` | Gathers domain intelligence, including IP records and mail server configurations |
+| **Web Ghost** | `[4]` | Automated path fuzzer that hunts for sensitive files like `/.env`, `/.git`, and backups on web servers |
+
+### 2️⃣ Offensive Engine
+Active manipulation of network traffic and identity.
+
+| Tool | Key | Description |
+|------|-----|-------------|
+| **MITM Engine** | `[5]` | Uses ARP poisoning to position your machine between a target and the gateway for full traffic interception |
+| **DNS Spoofer** | `[6]` | Intercepts DNS queries to redirect victims to malicious IP addresses or cloned sites |
+| **Phantom Cloner** | `[7]` | Creates high-fidelity clones of any website to facilitate credential harvesting |
+| **Phantom Listener** | `[L]` | Multi-threaded TCP handler designed to catch incoming reverse shells and provide interactive remote terminal access |
+
+### 3️⃣ Payloads & Evasion
+Generate and hide the tools used to maintain access.
+
+| Tool | Key | Description |
+|------|-----|-------------|
+| **Shell Forge** | `[8]` | Payload generator supporting multiple languages (Bash, Python, PHP, Ruby, PowerShell) for diverse environments |
+| **Crypt-Keeper** | `[9]` | Evasion engine that encrypts payloads and generates self-decrypting Python loaders to bypass static antivirus signatures |
+| **Persistence Engine** | `[0]` | Automates the installation of backdoors via Crontab (Linux) or Registry Run keys (Windows) to ensure access survives reboots |
+| **Hash Cracker** | `[H]` | Multi-threaded bruteforce tool supporting MD5 and SHA256 with optional symmetric salting |
+
+### 4️⃣ System & Stealth
+Operational security and environment health.
+
+| Tool | Key | Description |
+|------|-----|-------------|
+| **Setup Auditor** | `[A]` | Performs "pre-flight check" to verify system dependencies and ensure network interface supports packet injection |
+| **Vanish** | `[Q]` | Instantly shuts down the framework and clears operational traces from the console |
 
 ---
 

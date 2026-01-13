@@ -1,18 +1,22 @@
 import sys
 import os
 import warnings
+
+# --- 1. SYSTEM SUPPRESSION LAYER ---
+# Specifically target and kill the urllib3/LibreSSL warning before imports
+warnings.filterwarnings("ignore", message=".*OpenSSL 1.1.1+.*")
+warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
+
 from rich.console import Console
 from rich.prompt import Prompt
 
-# 1. Suppress the urllib3/LibreSSL warning for a cleaner TUI experience
-warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
-
-# 2. Environment Setup
+# --- 2. ENVIRONMENT SETUP ---
+# Ensures Davoid can find its internal modules when running globally from /opt/
 BASE_DIR = "/opt/davoid"
 if os.path.exists(BASE_DIR):
     sys.path.append(BASE_DIR)
 
-# 3. Import Core & UI Logic
+# --- 3. CORE & UI LOGIC ---
 try:
     from core.ui import draw_header
     from core.updater import check_version, perform_update
@@ -20,7 +24,7 @@ except ImportError as e:
     print(f"Core components missing: {e}")
     sys.exit(1)
 
-# 4. Import Security Modules
+# --- 4. SECURITY MODULE IMPORTS ---
 try:
     # Recon & Scanning
     from modules.scanner import network_discovery
@@ -41,8 +45,6 @@ try:
     # System, Persistence & Intelligence
     from modules.auditor import run_auditor
     from modules.persistence import run_persistence_engine
-    # New CVE Engine integration
-    from modules.cve_search import lookup_cves
     
 except ImportError as e:
     # If a module is missing, Davoid will still run, but notify the user
@@ -67,7 +69,7 @@ def main():
             # Draw ASCII Header
             draw_header("Main Control")
 
-            # Passive update check
+            # Passive update check (Displays notification if version mismatch)
             check_version()
 
             # --- COMMAND CENTER UI ---
@@ -124,6 +126,7 @@ def main():
                 sys.exit(0)
 
     except KeyboardInterrupt:
+        # Prevents messy Python tracebacks on Ctrl+C
         console.print("\n\n[bold red][!] Shutdown signal received. Exiting...[/bold red]")
         sys.exit(0)
     except Exception as e:

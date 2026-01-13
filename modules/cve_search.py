@@ -6,14 +6,13 @@ console = Console()
 
 def lookup_cves(service_name):
     """
-    Queries the Shodan CVEDB for known vulnerabilities based on service name.
+    Queries public vulnerability databases based on service banners.
     """
     if not service_name or service_name == "Unknown":
         return []
 
     try:
-        # High-speed public vulnerability lookup
-        # 
+        # High-speed public vulnerability lookup via Shodan CVEDB API
         url = f"https://cvedb.shodan.io/cves?query={service_name}&limit=5"
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
@@ -24,7 +23,7 @@ def lookup_cves(service_name):
     return []
 
 def display_vulnerabilities(service, cves):
-    """Renders a specialized table for vulnerability matches."""
+    """Renders a specialized table for vulnerability matches found during scan."""
     if not cves:
         return
 

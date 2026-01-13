@@ -36,6 +36,7 @@ try:
     from modules.spoof import start_mitm
     from modules.dns_spoofer import start_dns_spoof
     from modules.cloner import clone_site
+    from modules.listener import start_listener # Integrated Listener
     
     # Payloads & Persistence
     from modules.payloads import generate_shell
@@ -79,6 +80,7 @@ def main():
             
             console.print("\n[bold cyan]OFFENSIVE ENGINE[/bold cyan]")
             console.print("[bold red]>[/bold red] [5] MITM Engine      [6] DNS Spoofer       [7] Phantom Cloner")
+            console.print("[bold red]>[/bold red] [L] Phantom Listener [dim](Catch Shells)[/dim]") # New Entry
             
             console.print("\n[bold cyan]PAYLOADS & PERSISTENCE[/bold cyan]")
             console.print("[bold red]>[/bold red] [8] Shell Forge      [9] Crypt-Keeper      [0] Persistence Engine")
@@ -92,7 +94,7 @@ def main():
             # Handle user interaction
             choice = Prompt.ask(
                 "\n[bold red]davoid[/bold red]@[root]",
-                choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "h", "H", "a", "A", "q", "Q"],
+                choices=["1", "2", "3", "4", "5", "6", "7", "l", "L", "8", "9", "0", "h", "H", "a", "A", "q", "Q"],
                 show_choices=False
             )
 
@@ -111,6 +113,8 @@ def main():
                 start_dns_spoof()
             elif choice == "7":
                 clone_site()
+            elif choice.lower() == "l": # Routing for Listener
+                start_listener()
             elif choice == "8":
                 generate_shell()
             elif choice == "9":

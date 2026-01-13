@@ -62,7 +62,7 @@ def run_auditor():
 
     # 3. WLAN Hardware Verification
     # Identify wireless interfaces from Scapy config
-    wlan_ifaces = [i.name for i in conf.ifaces.data.values() if "wlan" in i.name.lower() or "wlp" in i.name.lower()]
+    wlan_ifaces = [i.name for i in conf.ifaces.data.values() if "wlan" in i.name.lower() or "wlp" in i.name.lower() or "en" in i.name.lower()]
     
     if not wlan_ifaces:
         table.add_row("Wireless Interface", "[bold red]NONE FOUND[/bold red]", "Check USB Wi-Fi adapter")

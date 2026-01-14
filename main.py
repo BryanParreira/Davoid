@@ -33,7 +33,8 @@ try:
     from modules.web_recon import web_ghost
 
     # OSINT Hub (Holmes Engine)
-    from modules.osint_pro import username_tracker, phone_intel, geolocate, dork_generator, robots_scraper, reputation_check
+    # Added dns_intel to imports for the new Intelligence menu option
+    from modules.osint_pro import username_tracker, phone_intel, geolocate, dork_generator, robots_scraper, reputation_check, dns_intel
 
     # Offensive Hub
     from modules.spoof import MITMEngine
@@ -59,6 +60,7 @@ console = Console()
 
 
 def auto_discovery():
+    """Elite Feature: Automatic Interface and Network Detection."""
     try:
         from scapy.all import conf, get_if_addr
         active_iface = str(conf.iface)
@@ -73,10 +75,12 @@ def auto_discovery():
 
 
 def get_status():
+    """Generates the dynamic status string for the tactical header."""
     return f"[green]IFACE:[/green] {ctx.get('INTERFACE')} | [green]IP:[/green] {ctx.get('LHOST')} | [green]GW:[/green] {ctx.vars.get('GATEWAY', 'Unknown')}"
 
 
 def configure_context():
+    """Manual Overrides for the Context Engine."""
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Global Configuration", status_info=get_status())
@@ -102,6 +106,7 @@ def configure_context():
 
 
 def hub_intelligence():
+    """Intelligence Hub: Expanded with Holmes DNS Intelligence."""
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Intelligence Hub", status_info=get_status())
@@ -116,10 +121,13 @@ def hub_intelligence():
             "[bold red]>[/bold red] [U] Username Tracker [P] Phone Intel       [G] Geo-Locator")
         console.print(
             "[bold red]>[/bold red] [D] Dork Automator   [R] Robots.txt Scraper [A] Reputation Audit")
+        console.print(
+            "[bold red]>[/bold red] [N] DNS Intelligence [dim](Passive Subdomain Discovery)[/dim]")
 
         console.print("\n[bold red]>[/bold red] [B] Back to Hub")
+        # Added 'n' to the choice list for DNS Intelligence
         choice = Prompt.ask("\n[bold red]intel[/bold red]@[root]", choices=[
-                            "1", "2", "3", "4", "u", "p", "g", "d", "r", "a", "b"], show_choices=False).lower()
+                            "1", "2", "3", "4", "u", "p", "g", "d", "r", "a", "n", "b"], show_choices=False).lower()
         if choice == "1":
             network_discovery()
         elif choice == "2":
@@ -141,11 +149,14 @@ def hub_intelligence():
             robots_scraper()
         elif choice == "a":
             reputation_check()
+        elif choice == "n":
+            dns_intel()
         elif choice == "b":
             break
 
 
 def hub_offensive():
+    """Offensive Hub: Integrated MITM and Wireless Suite."""
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Offensive Hub", status_info=get_status())
@@ -174,6 +185,7 @@ def hub_offensive():
 
 
 def hub_payloads():
+    """Payload Hub: Establishing Persistence and Access."""
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Payload Hub", status_info=get_status())
@@ -206,6 +218,7 @@ def hub_payloads():
 
 
 def main():
+    """Master Hub: Categorized Operational Command."""
     if len(sys.argv) > 1 and sys.argv[1].lower() == "--update":
         perform_update()
         sys.exit(0)
@@ -248,7 +261,7 @@ def main():
         sys.exit(0)
     except Exception as e:
         console.print(f"\n[bold red][!] Error:[/bold red] {e}")
-        input("\nPress Enter...")
+        input("\nPress Enter to return...")
 
 
 if __name__ == "__main__":

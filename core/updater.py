@@ -20,25 +20,24 @@ BACKUP_DIR = "/tmp/davoid_backup"
 
 def check_version():
     """
-    Elite Feature: Passive background version check.
-    Returns True if an update is available, False otherwise.
+    Elite Feature: Passive background version check with clean parsing.
+    Returns the latest version string if an update is available, else None.
     """
     try:
-        response = requests.get(REPO_URL, timeout=5)
+        response = requests.get(REPO_URL, timeout=3)
         if response.status_code == 200:
             for line in response.text.splitlines():
                 if "VERSION =" in line:
-                    latest = line.split('"')[1]
-                    if latest != VERSION:
-                        console.print(
-                            f"\n[bold yellow][!] UPDATE AVAILABLE: {latest}[/bold yellow]")
-                        console.print(
-                            f"[dim]Current version: {VERSION}. Run 'davoid --update' to sync.[/dim]\n")
-                        return True
+                    # Cleanly extract only the version string between the quotes
+                    parts = line.split('"')
+                    if len(parts) >= 2:
+                        remote_version = parts[1]
+                        if remote_version != VERSION:
+                            return remote_version
     except Exception:
         # Silent fail to prevent crashing if there is no internet connection
         pass
-    return False
+    return None
 
 
 def create_snapshot():

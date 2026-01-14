@@ -1,122 +1,70 @@
-import socket
 import dns.resolver
-import dns.zone
-import dns.query
-import whois
+import threading
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
 from core.ui import draw_header
 
 console = Console()
 
+SUBDOMAINS = ['www', 'mail', 'remote', 'vpn', 'dev',
+              'stage', 'api', 'git', 'ssh', 'webmail', 'portal']
 
-def get_dns_records(domain, record_type):
-    """Helper to fetch DNS records safely."""
+
+def resolve_sub(domain, sub, results):
+    target = f"{sub}.{domain}"
     try:
-        answers = dns.resolver.resolve(domain, record_type)
-        return [str(rdata) for rdata in answers]
-    except Exception:
-        return []
-
-
-def check_axfr(domain, nameservers):
-    """Attempts a DNS Zone Transfer (AXFR) - A high-value vulnerability."""
-    vulnerable = []
-    for ns in nameservers:
-        try:
-            # Resolve NS to IP
-            ns_ip = socket.gethostbyname(ns)
-            zone = dns.zone.from_xfr(dns.query.xfr(ns_ip, domain))
-            if zone:
-                vulnerable.append(ns)
-        except Exception:
-            continue
-    return vulnerable
+        answers = dns.resolver.resolve(target, 'A')
+        for rdata in answers:
+            results.append((target, str(rdata)))
+    except:
+        pass
 
 
 def dns_recon():
-    draw_header("Advanced DNS Infrastructure Recon")
+    draw_header("Advanced Infrastructure Recon")
     domain = console.input(
-        "[bold yellow]Enter Target Domain (e.g., example.com): [/bold yellow]").strip()
-
+        "[bold yellow]Target Domain (example.com): [/bold yellow]").strip()
     if not domain:
         return
 
     console.print(
-        f"[*] Starting deep analysis of [bold cyan]{domain}[/bold cyan]...\n")
+        f"[*] Analyzing [bold cyan]{domain}[/bold cyan] and hunting subdomains...")
 
-    # 1. Main Infrastructure Table
-    table = Table(
-        title=f"Infrastructure Report: {domain}", border_style="bold magenta", expand=True)
-    table.add_column("Query Type", style="cyan", no_wrap=True)
-    table.add_column("Result / Value", style="white")
+    # Standard Records
+    results_table = Table(
+        title=f"Core DNS Records: {domain}", border_style="magenta")
+    results_table.add_column("Type", style="cyan")
+    results_table.add_column("Data", style="white")
 
-    try:
-        # A & AAAA Records
-        ips = get_dns_records(domain, 'A')
-        ipv6 = get_dns_records(domain, 'AAAA')
-        for ip in ips:
-            table.add_row("IPv4 Address (A)", ip)
-        for ip in ipv6:
-            table.add_row("IPv6 Address (AAAA)", ip)
-
-        # Reverse DNS for the first IP
-        if ips:
-            try:
-                ptr = socket.gethostbyaddr(ips[0])[0]
-                table.add_row("PTR (Reverse DNS)", ptr)
-            except:
-                table.add_row("PTR (Reverse DNS)", "No Record Found")
-
-        # MX Records (Mail)
-        mx_records = get_dns_records(domain, 'MX')
-        for mx in mx_records:
-            table.add_row("Mail Server (MX)", mx)
-
-        # NS Records (Nameservers)
-        ns_records = get_dns_records(domain, 'NS')
-        for ns in ns_records:
-            table.add_row("Nameserver (NS)", ns)
-
-        # TXT Records (SPF, DMARC, Verification)
-        txt_records = get_dns_records(domain, 'TXT')
-        for txt in txt_records:
-            table.add_row(
-                "TXT Record", txt[:100] + "..." if len(txt) > 100 else txt)
-
-        console.print(table)
-
-        # 2. Security Analysis Panel
-        console.print(
-            "\n[bold yellow][!] Running Security Checks...[/bold yellow]")
-
-        # Check for Zone Transfer Vulnerability
-        vuln_ns = check_axfr(domain, ns_records)
-        if vuln_ns:
-            console.print(Panel(
-                f"[bold red][CRITICAL] Zone Transfer (AXFR) Successful on: {', '.join(vuln_ns)}[/bold red]\nThis domain is leaking its entire internal DNS structure!", title="Vulnerability Found"))
-        else:
-            console.print("[green][+] Zone Transfer: Secure (Failed)[/green]")
-
-        # WHOIS Information
+    for r_type in ['A', 'MX', 'NS', 'TXT']:
         try:
-            w = whois.whois(domain)
-            whois_table = Table(
-                title="Ownership & Registration", border_style="green")
-            whois_table.add_column("Field", style="dim")
-            whois_table.add_column("Data")
-            whois_table.add_row("Registrar", str(w.registrar))
-            whois_table.add_row("Creation Date", str(w.creation_date))
-            whois_table.add_row("Expiration", str(w.expiration_date))
-            whois_table.add_row("Org", str(w.org))
-            console.print(whois_table)
+            answers = dns.resolver.resolve(domain, r_type)
+            for rdata in answers:
+                results_table.add_row(r_type, str(rdata))
         except:
-            console.print("[red][!] WHOIS lookup failed.[/red]")
+            pass
 
-    except Exception as e:
-        console.print(f"[bold red][!] Recon Failed:[/bold red] {e}")
+    console.print(results_table)
 
-    console.print(
-        f"\n[bold green][+] Reconnaissance for {domain} complete.[/bold green]")
-    input("\nPress Enter to return to main menu...")
+    # Subdomain Brute Force
+    sub_results = []
+    threads = []
+    for s in SUBDOMAINS:
+        t = threading.Thread(target=resolve_sub, args=(domain, s, sub_results))
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
+
+    if sub_results:
+        sub_table = Table(title="Discovered Subdomains", border_style="green")
+        sub_table.add_column("Subdomain", style="bold yellow")
+        sub_table.add_column("IP Address", style="white")
+        for host, ip in sub_results:
+            sub_table.add_row(host, ip)
+        console.print(sub_table)
+    else:
+        console.print("[dim][-] No common subdomains found.[/dim]")
+
+    input("\nPress Enter...")

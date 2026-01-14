@@ -24,34 +24,34 @@ curl -sL "https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh
 
 ## 🛠️ Security Modules
 
-### 1️⃣ Reconnaissance & Intelligence
-Identify every "ghost" on the wire and map the attack surface.
+### 1️⃣ Intelligence & OSINT (The Holmes Engine)
+Focused on passive and active information gathering, this hub incorporates elite features from the Mr. Holmes project.
 
 | Tool | Key | Description |
 |------|-----|-------------|
-| **Net-Mapper** | `[1]` | Performs advanced ARP discovery to identify hosts, OS types, and hardware vendors (e.g., Sony, Samsung, Raspberry Pi) |
-| **Live Interceptor** | `[2]` | Real-time packet sniffer for capturing plaintext data and monitoring network noise |
-| **DNS Recon** | `[3]` | Gathers domain intelligence, including IP records and mail server configurations |
-| **Web Ghost** | `[4]` | Automated path fuzzer that hunts for sensitive files like `/.env`, `/.git`, and backups on web servers |
+| **Net-Mapper** | `[1]` | High-speed L2/L3 discovery with CVE vulnerability mapping and hardware vendor identification |
+| **Live Interceptor** | `[2]` | Real-time traffic analysis with DNS query tracking and session token extraction |
+| **Holmes Engine** | `[3]` | Advanced profiling including Username Tracking across 10+ platforms, Phone Intelligence, and Geospatial Tracking |
+| **Web Recon** | `[4]` | Automated Robots.txt scraping and domain reputation auditing for attack surface mapping |
 
-### 2️⃣ Offensive Engine
-Active manipulation of network traffic and identity.
-
-| Tool | Key | Description |
-|------|-----|-------------|
-| **MITM Engine** | `[5]` | Uses ARP poisoning to position your machine between a target and the gateway for full traffic interception |
-| **DNS Spoofer** | `[6]` | Intercepts DNS queries to redirect victims to malicious IP addresses or cloned sites |
-| **Phantom Cloner** | `[7]` | Creates high-fidelity clones of any website to facilitate credential harvesting |
-| **Phantom Listener** | `[L]` | Multi-threaded TCP handler designed to catch incoming reverse shells and provide interactive remote terminal access |
-
-### 3️⃣ Payloads & Evasion
-Generate and hide the tools used to maintain access.
+### 2️⃣ Offensive Operations
+A powerhouse for active network manipulation and traffic redirection.
 
 | Tool | Key | Description |
 |------|-----|-------------|
-| **Shell Forge** | `[8]` | Payload generator supporting multiple languages (Bash, Python, PHP, Ruby, PowerShell) for diverse environments |
-| **Crypt-Keeper** | `[9]` | Evasion engine that encrypts payloads and generates self-decrypting Python loaders to bypass static antivirus signatures |
-| **Persistence Engine** | `[0]` | Automates the installation of backdoors via Crontab (Linux) or Registry Run keys (Windows) to ensure access survives reboots |
+| **MITM Engine** | `[5]` | Subnet-wide ARP poisoning with automatic IP forwarding configuration for macOS and Linux |
+| **DNS Spoofer** | `[6]` | Real-time hijacking of DNS queries to redirect targets to custom phishing portals |
+| **Phantom Cloner** | `[7]` | Dynamic web cloning with JS Form-Hooking for automated credential harvesting |
+| **GHOST-HUB C2** | `[8]` | Encrypted Command & Control center for remote session management and orchestration |
+
+### 3️⃣ Payloads & Post-Exploitation
+Tools for establishing persistence and maintaining access.
+
+| Tool | Key | Description |
+|------|-----|-------------|
+| **Shell Forge** | `[9]` | Multipurpose payload generator supporting Bash, Python, PHP, Ruby, and PowerShell for cross-platform exploitation |
+| **Crypt-Keeper** | `[0]` | Advanced payload encryption and evasion logic with self-decrypting loaders to bypass static AV signatures |
+| **Persistence Engine** | `[P]` | Cross-platform backdoor installation via Systemd, Cron (Linux), or Windows Registry Run keys |
 | **Hash Cracker** | `[H]` | Multi-threaded bruteforce tool supporting MD5 and SHA256 with optional symmetric salting |
 
 ### 4️⃣ System & Stealth

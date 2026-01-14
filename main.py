@@ -111,7 +111,7 @@ def hub_intelligence():
         console.print("[bold red]>[/bold red] [4] Web Ghost")
 
         console.print(
-            "\n[bold cyan]OSINT & PROFILING (Holmes Engine)[/bold cyan]")
+            "\n[bold cyan]OSINT & PROFILING[/bold cyan]")
         console.print(
             "[bold red]>[/bold red] [U] Username Tracker [P] Phone Intel       [G] Geo-Locator")
         console.print(
@@ -218,7 +218,7 @@ def main():
             console.print(
                 "\n[bold cyan]SELECT OPERATIONAL CATEGORY[/bold cyan]")
             console.print(
-                "[bold red]>[/bold red] [1] Intelligence & OSINT [dim](Recon, OSINT, Holmes Engine)[/dim]")
+                "[bold red]>[/bold red] [1] Intelligence & OSINT [dim](Recon, OSINT Engine)[/dim]")
             console.print(
                 "[bold red]>[/bold red] [2] Offensive Operations [dim](MITM, WiFi, Phishing, C2 Hub)[/dim]")
             console.print(

@@ -11,3 +11,4 @@ flask
 psutil
 netaddr
 beautifulsoup4
+hashlib

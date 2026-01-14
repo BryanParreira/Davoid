@@ -7,7 +7,8 @@ from rich.table import Table
 console = Console()
 
 
-def draw_header(title: str):
+def draw_header(title: str, status_info: str = None):
+    """Draws the Davoid logo with a tactical module title and live status bar."""
     logo = """
       ██████╗  █████╗ ██╗   ██╗ ██████╗ ██╗██████╗ 
       ██╔══██╗██╔══██╗██║   ██║██╔═══██╗██║██╔══██╗
@@ -17,7 +18,10 @@ def draw_header(title: str):
       ╚═════╝ ╚═╝  ╚═╝  ╚═══╝   ╚═════╝ ╚═╝╚═════╝ 
              [ G H O S T   I N   T H E   N E T ]
     """
+    # 1. Main Logo
     console.print(Align.center(f"[bold red]{logo}[/bold red]"))
+
+    # 2. Module Title Panel
     console.print(Align.center(
         Panel(
             f"[bold white]{title.upper()}[/bold white]",
@@ -26,6 +30,18 @@ def draw_header(title: str):
             padding=(0, 2)
         )
     ))
+
+    # 3. Elite Feature: Live Network Status Bar
+    if status_info:
+        console.print(Align.center(
+            Panel(
+                f"[bold cyan]LIVE CONTEXT:[/bold cyan] {status_info}",
+                border_style="dim blue",
+                box=box.HORIZONTALS,
+                padding=(0, 1)
+            )
+        ))
+    console.print("\n")
 
 
 def show_briefing(title, purpose, rules):

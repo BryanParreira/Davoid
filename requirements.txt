@@ -9,3 +9,5 @@ python-whois
 beautifulsoup4
 flask
 psutil
+netaddr
+beautifulsoup4

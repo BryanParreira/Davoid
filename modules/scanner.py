@@ -2,152 +2,152 @@ import socket
 import threading
 import warnings
 import requests
-from scapy.all import ARP, Ether, srp, IP, ICMP, sr1, conf
+from scapy.all import ARP, Ether, srp, IP, ICMP, TCP, sr, sr1, conf, get_if_addr
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from concurrent.futures import ThreadPoolExecutor
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from netaddr import IPNetwork
 from core.ui import draw_header
 
-# Suppress Scapy warnings for a cleaner TUI experience across OSs
+# Suppress Scapy IPv6 and Layer 2 warnings
 warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
 console = Console()
 
-# Top 20 most common ports for deep service discovery
-COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143,
-                443, 445, 993, 995, 1723, 3306, 3389, 5900, 8080, 8443]
+# Professional VulnDB Mapping
+VULN_DB = {
+    "vsFTPd 2.3.4": "CVE-2011-2523 (Backdoor)",
+    "Apache/2.4.49": "CVE-2021-41773 (Path Traversal)",
+    "OpenSSH_7.2p2": "CVE-2016-6210 (User Enum)",
+    "SMBv1": "WannaCry/EternalBlue Risk",
+    "IIS/6.0": "CVE-2017-7269 (RCE)"
+}
+
+# Top 50 Productive Ports for quick auditing
+TOP_PORTS = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139,
+             143, 443, 445, 993, 995, 1723, 3306, 3389, 5900, 8080]
 
 
-def get_vendor(mac):
-    """Identifies manufacturer via MAC OUI using a public API."""
-    try:
-        url = f"https://api.macvendors.com/{mac}"
-        response = requests.get(url, timeout=1)
-        if response.status_code == 200:
-            return response.text
-    except:
-        pass
-    return "Unknown"
+class ScannerEngine:
+    def __init__(self):
+        self.results = []
+        self.lock = threading.Lock()
 
+    def get_vendor(self, mac):
+        """Identifies manufacturer via MAC OUI."""
+        try:
+            url = f"https://api.macvendors.com/{mac}"
+            res = requests.get(url, timeout=1.5)
+            return res.text if res.status_code == 200 else "Unknown"
+        except:
+            return "Unknown"
 
-def get_os_intel(ip):
-    """
-    Stealth OS Fingerprinting via TTL (Time To Live) signatures.
-    Works cross-platform to distinguish between Windows and Linux/Unix.
-    """
-    try:
-        # Send a single ICMP packet to check TTL
-        pkt = sr1(IP(dst=ip)/ICMP(), timeout=1, verbose=0)
-        if pkt:
-            ttl = pkt.getlayer(IP).ttl
-            if ttl <= 64:
-                return "Linux/Unix"
-            elif ttl <= 128:
-                return "Windows"
-            else:
-                return "Network Device"
-    except:
-        pass
-    return "Unknown"
+    def service_audit(self, ip, port):
+        """mimics nmap -sV banner grabbing."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1.2)
+                if s.connect_ex((ip, port)) == 0:
+                    if port in [80, 443, 8080]:
+                        s.send(b"GET / HTTP/1.1\r\nHost: davoid\r\n\r\n")
+                    else:
+                        s.send(b"\r\n")
 
+                    banner = s.recv(1024).decode(
+                        'utf-8', errors='ignore').strip()
+                    if banner:
+                        for version, cve in VULN_DB.items():
+                            if version.lower() in banner.lower():
+                                return f"[bold red]VULN: {cve}[/bold red]"
+                        return banner.replace('\n', ' ')[:30]
+                    return "Open"
+        except:
+            pass
+        return None
 
-def ping_host(ip):
-    """Sends an ICMP Echo Request to wake up sleeping devices (e.g., cellphones)."""
-    try:
-        # Use a short timeout to keep the sweep fast
-        sr1(IP(dst=ip)/ICMP(), timeout=0.5, verbose=0)
-    except:
-        pass
+    def stealth_probe(self, ip):
+        """TCP SYN Discovery to find hidden mobile devices."""
+        syn_pkt = IP(dst=ip)/TCP(dport=[80, 443, 22], flags="S")
+        ans, _ = sr(syn_pkt, timeout=0.6, verbose=0)
+        if ans:
+            return True
+        return sr1(IP(dst=ip)/ICMP(), timeout=0.6, verbose=0) is not None
 
+    def network_discovery(self):
+        draw_header("Root Discovery & Deep Intelligence")
 
-def scan_service(ip, port):
-    """Attempts to grab a service banner to identify what is running on a port."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.7)
-            if s.connect_ex((ip, port)) == 0:
-                # Basic banner grab
-                s.send(b"\r\n")
-                banner = s.recv(512).decode().strip()
-                return f"P{port}: {banner[:20]}..." if banner else f"P{port}: Open"
-    except:
-        pass
-    return None
+        try:
+            local_ip = get_if_addr(conf.iface)
+            subnet_hint = str(IPNetwork(f"{local_ip}/24").cidr)
+            console.print(
+                f"[dim]Interface: {conf.iface} | Target: {subnet_hint}[/dim]")
+        except:
+            subnet_hint = "192.168.1.0/24"
+
+        target = console.input(
+            f"[bold yellow]Scan Range (Default {subnet_hint}): [/bold yellow]").strip() or subnet_hint
+        do_deep = console.input(
+            "[bold cyan]Deep Service Fingerprinting (-sV)? (y/N): [/bold cyan]").lower() == 'y'
+
+        table = Table(
+            title=f"Elite Intel: {target}", border_style="bold red", expand=True)
+        table.add_column("Host (IP)", style="cyan")
+        table.add_column("OS/Vendor", style="white")
+        table.add_column("Services/Vulns", style="bold yellow")
+        table.add_column("MAC Address", style="magenta")
+
+        active_hosts = []
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(), console=console) as progress:
+            # 1. ARP Discovery
+            task1 = progress.add_task("[cyan]L2 ARP Mapping...", total=None)
+            ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
+                         ARP(pdst=target), timeout=2, verbose=False)
+            for _, rcv in ans:
+                active_hosts.append((rcv.psrc, rcv.hwsrc))
+
+            # 2. SYN Sweep for silent hosts
+            task2 = progress.add_task(
+                "[yellow]Stealth discovery (SYN Sweep)...", total=None)
+            ip_list = [str(ip) for ip in IPNetwork(target)]
+            with ThreadPoolExecutor(max_workers=50) as executor:
+                futures = {executor.submit(
+                    self.stealth_probe, ip): ip for ip in ip_list}
+                for f in as_completed(futures):
+                    ip = futures[f]
+                    if f.result() and not any(h[0] == ip for h in active_hosts):
+                        res, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
+                                     ARP(pdst=ip), timeout=1, verbose=False)
+                        active_hosts.append(
+                            (ip, res[0][1].hwsrc if res else "Unknown"))
+
+            # 3. Final Analysis
+            task3 = progress.add_task(
+                f"[magenta]Analyzing {len(active_hosts)} live hosts...", total=len(active_hosts))
+            for ip, mac in active_hosts:
+                vendor = self.get_vendor(mac)
+
+                # OS Detection via TTL
+                os_type = "Unknown"
+                pkt = sr1(IP(dst=ip)/ICMP(), timeout=0.5, verbose=0)
+                if pkt:
+                    ttl = pkt.getlayer(IP).ttl
+                    os_type = "Linux/IoT" if ttl <= 64 else "Windows" if ttl <= 128 else "Network"
+
+                svc_info = []
+                if do_deep:
+                    with ThreadPoolExecutor(max_workers=10) as executor:
+                        results = list(executor.map(
+                            lambda p: self.service_audit(ip, p), TOP_PORTS))
+                        svc_info = [r for r in results if r]
+
+                table.add_row(ip, f"{os_type}\n({vendor})", "\n".join(
+                    svc_info) if svc_info else "Filtered", mac)
+                progress.update(task3, advance=1)
+
+        console.print("\n", table)
+        input("\nPress Enter...")
 
 
 def network_discovery():
-    draw_header("Root Discovery & Deep Intelligence")
-
-    # Detect local subnet hints based on the active interface
-    try:
-        local_ip = get_if_addr(conf.iface)
-        subnet_hint = ".".join(local_ip.split('.')[:-1]) + ".0/24"
-        console.print(
-            f"[dim]Active Interface: {conf.iface} | Suggested Subnet: {subnet_hint}[/dim]")
-    except:
-        subnet_hint = "192.168.1.0/24"
-
-    ip_range = console.input(
-        f"[bold yellow]Enter IP Range (Default {subnet_hint}): [/bold yellow]").strip() or subnet_hint
-    do_deep_scan = console.input(
-        "[bold cyan]Perform Deep Service Discovery (Slower)? (y/N): [/bold cyan]").lower() == 'y'
-
-    # Prepare results table
-    table = Table(
-        title=f"Infrastructure Intel: {ip_range}", border_style="bold red", expand=True)
-    table.add_column("IP Address", style="cyan", no_wrap=True)
-    table.add_column("OS / Vendor", style="white")
-    table.add_column("Services/Vulnerabilities", style="bold yellow")
-    table.add_column("MAC Address", style="magenta")
-
-    try:
-        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
-            # STEP 1: Ping Sweep (Wake-on-LAN)
-            # This is critical for finding mobile devices that go into sleep mode
-            progress.add_task(
-                "[cyan]Waking up sleeping devices (ICMP Sweep)...", total=None)
-            ips_to_ping = []
-            if "/" in ip_range:
-                # Basic expansion for /24 networks
-                base = ".".join(ip_range.split('.')[:-1])
-                ips_to_ping = [f"{base}.{i}" for i in range(1, 255)]
-            else:
-                ips_to_ping = [ip_range]
-
-            with ThreadPoolExecutor(max_workers=50) as executor:
-                executor.map(ping_host, ips_to_ping)
-
-            # STEP 2: ARP Discovery
-            task_scan = progress.add_task(
-                "[yellow]Scanning for active hosts...", total=None)
-            ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
-                         ARP(pdst=ip_range), timeout=2, verbose=False)
-
-            # STEP 3: Analysis and Service Mapping
-            for _, rcv in ans:
-                ip, mac = rcv.psrc, rcv.hwsrc
-                progress.update(
-                    task_scan, description=f"[magenta]Analyzing {ip}...")
-
-                vendor = get_vendor(mac)
-                os_type = get_os_intel(ip)
-
-                service_info = "Scan Skipped"
-                if do_deep_scan:
-                    found_services = []
-                    # Multi-threaded port scan for current host
-                    with ThreadPoolExecutor(max_workers=10) as executor:
-                        results = list(executor.map(
-                            lambda p: scan_service(ip, p), COMMON_PORTS))
-                        found_services = [r for r in results if r]
-
-                    service_info = "\n".join(
-                        found_services) if found_services else "No Open Ports"
-
-                table.add_row(ip, f"{os_type}\n({vendor})", service_info, mac)
-
-        console.print("\n", table)
-    except Exception as e:
-        console.print(f"[bold red][!] Scan Failed:[/bold red] {e}")
-
-    input("\nPress Enter to return to menu...")
+    engine = ScannerEngine()
+    engine.network_discovery()

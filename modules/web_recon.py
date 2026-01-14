@@ -8,61 +8,55 @@ from core.ui import draw_header
 urllib3.disable_warnings()
 console = Console()
 
-SENSITIVE_PATHS = ["/.env", "/.git/config", "/backup.sql",
-                   "/config.php", "/phpinfo.php", "/admin/"]
+PATHS = ["/.env", "/.git/config", "/backup.sql",
+         "/config.php", "/phpinfo.php", "/admin/", "/login"]
+HEADERS = ["Content-Security-Policy",
+           "Strict-Transport-Security", "X-Frame-Options"]
 
 
 def web_ghost():
-    draw_header("Web Ghost Intelligence")
+    draw_header("Web Ghost Elite: Audit & Intel")
     target = console.input(
-        "[bold yellow]Target URL (http://1.2.3.4): [/bold yellow]").strip()
+        "[bold yellow]URL (http://example.com): [/bold yellow]").strip()
     if not target.startswith("http"):
         return
 
-    # 1. Technology Fingerprinting
     try:
         r = requests.get(target, timeout=5, verify=False)
-        server = r.headers.get("Server", "Unknown")
-        powered_by = r.headers.get("X-Powered-By", "Unknown")
 
+        # 1. Security Audit
+        audit = Table(title="Security Configuration Audit",
+                      border_style="bold red")
+        audit.add_column("Security Header", style="cyan")
+        audit.add_column("Status", style="white")
+        for h in HEADERS:
+            status = "[green]Present[/green]" if h in r.headers else "[bold red]MISSING[/bold red]"
+            audit.add_row(h, status)
+        console.print(audit)
+
+        # 2. Tech Fingerprint
+        server = r.headers.get("Server", "Unknown")
         soup = BeautifulSoup(r.text, 'html.parser')
         title = soup.title.string if soup.title else "No Title"
+        console.print(
+            f"\n[green][+][/green] Server: {server} | Title: {title}")
 
-        intel_table = Table(title="Target Fingerprint", border_style="blue")
-        intel_table.add_row("Server", server)
-        intel_table.add_row("Tech Stack", powered_by)
-        intel_table.add_row("Page Title", title)
-        console.print(intel_table)
-
-        # 2. WAF Detection (Basic)
-        waf_headers = ["X-CDN", "X-WAF-Event", "cf-ray", "x-amz-cf-id"]
-        if any(h in r.headers for h in waf_headers):
-            console.print(
-                "[bold red][!] WAF/CDN Detected! Fuzzing may be blocked.[/bold red]")
+        # 3. Path Discovery
+        fuzz = Table(title="Sensitive Path Discovery", border_style="green")
+        fuzz.add_column("Path", style="cyan")
+        fuzz.add_column("Status", style="white")
+        for path in PATHS:
+            try:
+                res = requests.get(target.rstrip(
+                    "/") + path, timeout=2, verify=False, allow_redirects=False)
+                if res.status_code == 200:
+                    fuzz.add_row(path, "[bold green]200 OK[/bold green]")
+                elif res.status_code == 403:
+                    fuzz.add_row(path, "[yellow]403 Forbidden[/yellow]")
+            except:
+                pass
+        console.print(fuzz)
 
     except:
-        console.print("[red][!] Target unreachable.[/red]")
-        return
-
-    # 3. Path Fuzzing
-    fuzz_table = Table(title="Path Discovery Results", border_style="green")
-    fuzz_table.add_column("Path", style="cyan")
-    fuzz_table.add_column("Status", justify="center")
-    fuzz_table.add_column("Size", style="dim")
-
-    console.print("[*] Fuzzing high-value paths...")
-    for path in SENSITIVE_PATHS:
-        try:
-            url = target.rstrip("/") + path
-            res = requests.get(url, timeout=3, verify=False,
-                               allow_redirects=False)
-            if res.status_code == 200:
-                fuzz_table.add_row(
-                    path, "[bold green]200 OK[/bold green]", f"{len(res.content)} bytes")
-            elif res.status_code == 403:
-                fuzz_table.add_row(path, "[yellow]403 Forbidden[/yellow]", "-")
-        except:
-            pass
-
-    console.print(fuzz_table)
+        console.print("[red][!] Target offline.[/red]")
     input("\nPress Enter...")

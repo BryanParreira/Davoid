@@ -1,70 +1,96 @@
 import dns.resolver
 import threading
+import requests
+import json
 from rich.console import Console
 from rich.table import Table
 from core.ui import draw_header
 
 console = Console()
 
-SUBDOMAINS = ['www', 'mail', 'remote', 'vpn', 'dev',
-              'stage', 'api', 'git', 'ssh', 'webmail', 'portal']
+# Professional Subdomain Dictionary
+SUB_DICT = ['www', 'mail', 'remote', 'vpn', 'dev', 'stage',
+            'api', 'git', 'ssh', 'webmail', 'portal', 'admin', 'test']
 
 
-def resolve_sub(domain, sub, results):
-    target = f"{sub}.{domain}"
-    try:
-        answers = dns.resolver.resolve(target, 'A')
-        for rdata in answers:
-            results.append((target, str(rdata)))
-    except:
-        pass
+class DNSReconEngine:
+    def __init__(self, domain):
+        self.domain = domain
+        self.found_subs = []
+        self.lock = threading.Lock()
 
-
-def dns_recon():
-    draw_header("Advanced Infrastructure Recon")
-    domain = console.input(
-        "[bold yellow]Target Domain (example.com): [/bold yellow]").strip()
-    if not domain:
-        return
-
-    console.print(
-        f"[*] Analyzing [bold cyan]{domain}[/bold cyan] and hunting subdomains...")
-
-    # Standard Records
-    results_table = Table(
-        title=f"Core DNS Records: {domain}", border_style="magenta")
-    results_table.add_column("Type", style="cyan")
-    results_table.add_column("Data", style="white")
-
-    for r_type in ['A', 'MX', 'NS', 'TXT']:
+    def get_passive(self):
+        """OSINT: Queries Certificate Transparency logs for hidden subdomains."""
         try:
-            answers = dns.resolver.resolve(domain, r_type)
-            for rdata in answers:
-                results_table.add_row(r_type, str(rdata))
+            url = f"https://crt.sh/?q=%.{self.domain}&output=json"
+            res = requests.get(url, timeout=10)
+            if res.status_code == 200:
+                for entry in res.json():
+                    name = entry['name_value']
+                    for sub in name.split('\n'):
+                        if not sub.startswith('*') and sub.strip() not in self.found_subs:
+                            self.found_subs.append(sub.strip())
         except:
             pass
 
-    console.print(results_table)
+    def brute_worker(self, sub):
+        """Active Discovery: Brute forces common subdomains."""
+        target = f"{sub}.{self.domain}"
+        try:
+            dns.resolver.resolve(target, 'A')
+            with self.lock:
+                if target not in self.found_subs:
+                    self.found_subs.append(target)
+        except:
+            pass
 
-    # Subdomain Brute Force
-    sub_results = []
-    threads = []
-    for s in SUBDOMAINS:
-        t = threading.Thread(target=resolve_sub, args=(domain, s, sub_results))
-        t.start()
-        threads.append(t)
+    def run(self):
+        draw_header("Elite DNS Infrastructure Recon")
+        console.print(
+            f"[*] Analyzing [bold cyan]{self.domain}[/bold cyan]...\n")
 
-    for t in threads:
-        t.join()
+        # 1. Standard Infrastructure Records
+        table = Table(
+            title=f"Core DNS Records: {self.domain}", border_style="magenta")
+        table.add_column("Type", style="cyan")
+        table.add_column("Value", style="white")
 
-    if sub_results:
-        sub_table = Table(title="Discovered Subdomains", border_style="green")
-        sub_table.add_column("Subdomain", style="bold yellow")
-        sub_table.add_column("IP Address", style="white")
-        for host, ip in sub_results:
-            sub_table.add_row(host, ip)
-        console.print(sub_table)
-    else:
-        console.print("[dim][-] No common subdomains found.[/dim]")
+        for rtype in ['A', 'MX', 'NS', 'TXT', 'SOA']:
+            try:
+                ans = dns.resolver.resolve(self.domain, rtype)
+                for a in ans:
+                    table.add_row(rtype, str(a))
+            except:
+                pass
+        console.print(table)
 
-    input("\nPress Enter...")
+        # 2. Passive & Active Discovery
+        console.print("\n[*] Launching OSINT and Brute-Force discovery...")
+        self.get_passive()
+
+        threads = []
+        for s in SUB_DICT:
+            t = threading.Thread(target=self.brute_worker, args=(s,))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
+
+        if self.found_subs:
+            sub_table = Table(
+                title="Discovered Attack Surface (Subdomains)", border_style="green")
+            sub_table.add_column("Subdomain", style="bold yellow")
+            sub_table.add_column("Status", style="white")
+            for sub in sorted(list(set(self.found_subs))):
+                sub_table.add_row(sub, "Active")
+            console.print(sub_table)
+
+        input("\nPress Enter...")
+
+
+def dns_recon():
+    domain = console.input(
+        "[bold yellow]Target Domain (e.g., target.com): [/bold yellow]").strip()
+    if domain:
+        engine = DNSReconEngine(domain)
+        engine.run()

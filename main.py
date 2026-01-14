@@ -1,5 +1,6 @@
 from rich.prompt import Prompt
 from rich.console import Console
+from rich.table import Table
 import sys
 import os
 import warnings
@@ -22,40 +23,74 @@ if os.path.exists(BASE_DIR):
 try:
     from core.ui import draw_header
     from core.updater import check_version, perform_update
+    from core.context import ctx  # Added: Global Context Engine
 except ImportError as e:
     print(f"Core components missing: {e}")
     sys.exit(1)
 
 # --- 4. SECURITY MODULE IMPORTS ---
-# Modules are imported here to be available in the routing logic below
 try:
     # Recon & Scanning
-    from modules.scanner import network_discovery  # Upgraded with Vuln-Hunter
-    from modules.sniff import start_sniffing       # Upgraded with Protocol Intel
-    from modules.recon import dns_recon           # Upgraded with Infra Mapping
+    from modules.scanner import network_discovery
+    from modules.sniff import start_sniffing
+    from modules.recon import dns_recon
     from modules.web_recon import web_ghost
 
     # Offensive Engine
-    from modules.spoof import start_mitm           # Upgraded with Filtered WLAN
-    from modules.dns_spoofer import start_dns_spoof  # Upgraded with Harvest Hook
-    from modules.cloner import clone_site          # Upgraded with Auto-Sniffer
-    from modules.ghost_hub import run_ghost_hub    # Integrated C2 Team Server
+    from modules.spoof import MITMEngine
+    from modules.dns_spoofer import start_dns_spoof
+    from modules.cloner import clone_site
+    from modules.ghost_hub import run_ghost_hub
+    from modules.wifi_ops import run_wifi_suite
 
     # Payloads & Persistence
     from modules.payloads import generate_shell
-    # Upgraded with Polymorphic Evasion
     from modules.crypt_keeper import encrypt_payload
-    from modules.bruteforce import hash_cracker     # Upgraded with Mutation Rules
+    from modules.bruteforce import crack_hash
+    from modules.persistence import PersistenceEngine
 
     # System, Persistence & Intelligence
-    from modules.auditor import run_auditor         # Upgraded with WLAN Check
-    from modules.persistence import run_persistence_engine  # Upgraded with Stealth Hooks
+    from modules.auditor import run_auditor
 
 except ImportError as e:
     # Modules are imported dynamically; missing modules will notify the user upon selection
     pass
 
 console = Console()
+
+
+def configure_context():
+    """UI for managing global variables within the Context Engine."""
+    while True:
+        os.system('cls' if os.name == 'nt' else 'clear')
+        draw_header("Global Configuration")
+
+        table = Table(title="Current Global Context",
+                      border_style="bold magenta")
+        table.add_column("Variable", style="cyan")
+        table.add_column("Value", style="white")
+
+        for key, value in ctx.vars.items():
+            table.add_row(key, str(value))
+
+        console.print(table)
+        console.print(
+            "\n[bold red]>[/bold red] [S] Set Variable  [B] Back to Main")
+
+        choice = Prompt.ask("\n[bold red]config[/bold red]@[root]",
+                            choices=["s", "b"], show_choices=False).lower()
+
+        if choice == 's':
+            key = Prompt.ask(
+                "[bold yellow]Variable to set (e.g., LHOST): [/bold yellow]").upper()
+            val = Prompt.ask(
+                f"[bold yellow]New value for {key}: [/bold yellow]")
+            if not ctx.set(key, val):
+                console.print(
+                    f"[bold red][!] Error:[/bold red] '{key}' is not a valid global variable.")
+                input("Press Enter...")
+        else:
+            break
 
 
 def main():
@@ -79,8 +114,6 @@ def main():
             check_version()
 
             # --- COMMAND CENTER UI ---
-            # Grouped by operational phase for a 'Power' workflow
-
             console.print("\n[bold cyan]RECON & SCANNING[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [1] Net-Mapper       [2] Live Interceptor  [3] DNS Recon")
@@ -90,7 +123,7 @@ def main():
             console.print(
                 "[bold red]>[/bold red] [5] MITM Engine      [6] DNS Spoofer       [7] Phantom Cloner")
             console.print(
-                "[bold red]>[/bold red] [L] GHOST-HUB C2    [dim](Multi-Session C2 Management)[/dim]")  # Upgraded
+                "[bold red]>[/bold red] [W] WiFi-Suite       [L] GHOST-HUB C2")
 
             console.print("\n[bold cyan]PAYLOADS & PERSISTENCE[/bold cyan]")
             console.print(
@@ -99,22 +132,17 @@ def main():
 
             console.print("\n[bold cyan]SYSTEM TOOLS[/bold cyan]")
             console.print(
-                "[bold red]>[/bold red] [A] Setup Auditor    [dim](WLAN & Hardware Audit)[/dim]")
-
-            console.print(
-                "\n[bold red]>[/bold red] [Q] Vanish           [dim](Exit Console)[/dim]")
+                "[bold red]>[/bold red] [C] Config Context   [A] Setup Auditor    [Q] Vanish")
 
             # Handle user interaction with root prompt style
             choice = Prompt.ask(
                 "\n[bold red]davoid[/bold red]@[root]",
-                choices=["1", "2", "3", "4", "5", "6", "7", "l", "L",
-                         "8", "9", "0", "h", "H", "a", "A", "q", "Q"],
+                choices=["1", "2", "3", "4", "5", "6", "7", "w", "W", "l", "L",
+                         "8", "9", "0", "h", "H", "c", "C", "a", "A", "q", "Q"],
                 show_choices=False
-            )
+            ).lower()
 
             # --- ROUTING LOGIC ---
-            # Connects UI choices to the professional module functions
-
             if choice == "1":
                 network_discovery()
             elif choice == "2":
@@ -124,30 +152,47 @@ def main():
             elif choice == "4":
                 web_ghost()
             elif choice == "5":
-                start_mitm()
+                engine = MITMEngine()
+                engine.run()
             elif choice == "6":
                 start_dns_spoof()
             elif choice == "7":
                 clone_site()
-            elif choice.lower() == "l":
-                run_ghost_hub()  # Successfully routed to the new GHOST-HUB C2
+            elif choice == "w":
+                run_wifi_suite()
+            elif choice == "l":
+                run_ghost_hub()
             elif choice == "8":
                 generate_shell()
             elif choice == "9":
-                encrypt_payload()
+                path = console.input(
+                    "[bold yellow]Path to payload: [/bold yellow]")
+                if os.path.exists(path):
+                    encrypt_payload(path)
+                else:
+                    console.print("[red]File not found.[/red]")
+                    input("Press Enter...")
             elif choice == "0":
-                run_persistence_engine()
-            elif choice.lower() == "h":
-                hash_cracker()
-            elif choice.lower() == "a":
+                path = console.input(
+                    "[bold yellow]Absolute Payload Path: [/bold yellow]")
+                engine = PersistenceEngine(path)
+                engine.run()
+            elif choice == "h":
+                target = console.input(
+                    "[bold yellow]Target Hash: [/bold yellow]")
+                algo = console.input(
+                    "[bold yellow]Algo (sha256): [/bold yellow]") or "sha256"
+                crack_hash(target, algo)
+            elif choice == "c":
+                configure_context()
+            elif choice == "a":
                 run_auditor()
-            elif choice.lower() == "q":
+            elif choice == "q":
                 console.print(
                     "\n[bold yellow]Vanish mode activated. Clearing traces...[/bold yellow]")
                 sys.exit(0)
 
     except KeyboardInterrupt:
-        # Prevents messy Python tracebacks on Ctrl+C
         console.print(
             "\n\n[bold red][!] Shutdown signal received. Exiting...[/bold red]")
         sys.exit(0)

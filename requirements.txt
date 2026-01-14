@@ -6,3 +6,6 @@ pywebcopy
 python-crontab
 dnspython 
 python-whois
+beautifulsoup4
+flask
+psutil

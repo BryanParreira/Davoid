@@ -6,15 +6,11 @@ import os
 import warnings
 
 # --- 1. SYSTEM SUPPRESSION LAYER ---
-# Specifically target and kill the urllib3/LibreSSL warning before imports
 warnings.filterwarnings("ignore", message=".*OpenSSL 1.1.1+.*")
 warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
-# Suppress Scapy IPv6 warnings for a cleaner interface
 warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
 
-
 # --- 2. ENVIRONMENT SETUP ---
-# Ensures Davoid can find its internal modules when running globally
 BASE_DIR = "/opt/davoid"
 if os.path.exists(BASE_DIR):
     sys.path.append(BASE_DIR)
@@ -23,7 +19,6 @@ if os.path.exists(BASE_DIR):
 try:
     from core.ui import draw_header
     from core.updater import check_version, perform_update
-    # Global Context Engine for LHOST, INTERFACE, etc.
     from core.context import ctx
 except ImportError as e:
     print(f"Core components missing: {e}")
@@ -42,7 +37,7 @@ try:
     from modules.dns_spoofer import start_dns_spoof
     from modules.cloner import clone_site
     from modules.ghost_hub import run_ghost_hub
-    from modules.wifi_ops import run_wifi_suite  # Wireless Offensive Suite
+    from modules.wifi_ops import run_wifi_suite
 
     # Payloads & Persistence
     from modules.payloads import generate_shell
@@ -52,71 +47,84 @@ try:
 
     # System & Intelligence
     from modules.auditor import run_auditor
-
-except ImportError as e:
-    # Modules are imported dynamically; missing modules notify user upon selection
+except ImportError:
     pass
 
 console = Console()
 
 
+def auto_discovery():
+    """Elite Feature: Automatic Interface and Network Detection."""
+    try:
+        from scapy.all import conf, get_if_addr
+        # Detect active interface (e.g. en0 on Mac)
+        active_iface = str(conf.iface)
+        local_ip = get_if_addr(active_iface)
+        # Resolve default gateway
+        gw_ip = conf.route.route("0.0.0.0")[2]
+
+        # Populate context automatically
+        ctx.set("INTERFACE", active_iface)
+        ctx.set("LHOST", local_ip)
+        # Adding 'GATEWAY' to the vars manually if it's not in the original context class
+        ctx.vars["GATEWAY"] = gw_ip
+        return True
+    except:
+        return False
+
+
 def configure_context():
-    """Tactical Configuration UI for the Context Engine."""
+    """Manual Overrides for the Context Engine."""
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Global Configuration")
-
-        table = Table(title="Live Framework Context",
-                      border_style="bold magenta")
+        table = Table(title="Framework Context", border_style="bold magenta")
         table.add_column("Variable", style="cyan")
         table.add_column("Current Value", style="white")
-
         for key, value in ctx.vars.items():
             table.add_row(key, str(value))
-
         console.print(table)
         console.print(
             "\n[bold red]>[/bold red] [S] Set Variable  [B] Back to Main")
-
         choice = Prompt.ask("\n[bold red]config[/bold red]@[root]",
                             choices=["s", "b"], show_choices=False).lower()
-
         if choice == 's':
-            key = Prompt.ask(
-                "[bold yellow]Variable (e.g., LHOST, INTERFACE): [/bold yellow]").upper()
-            val = Prompt.ask(f"[bold yellow]Value for {key}: [/bold yellow]")
+            key = Prompt.ask("[bold yellow]Variable: [/bold yellow]").upper()
+            val = Prompt.ask(f"New value for {key}: ")
             if not ctx.set(key, val):
-                console.print(
-                    f"[bold red][!] Error:[/bold red] '{key}' is not a valid global variable.")
-                input("Press Enter...")
+                # Manual entry for custom vars like GATEWAY
+                ctx.vars[key] = val
         else:
             break
 
 
 def main():
-    # Handle direct CLI update calls
-    if len(sys.argv) > 1:
-        arg = sys.argv[1].lower()
-        if arg == "--update":
-            perform_update()
-            sys.exit(0)
+    # CLI Check for updates
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "--update":
+        perform_update()
+        sys.exit(0)
+
+    # 1. INITIAL AUTO-DISCOVERY
+    auto_discovery()
 
     try:
         while True:
             os.system('cls' if os.name == 'nt' else 'clear')
-            draw_header("Main Control")
+
+            # 2. DYNAMIC STATUS BAR
+            status = f"[green]IFACE:[/green] {ctx.get('INTERFACE')} | [green]IP:[/green] {ctx.get('LHOST')} | [green]GW:[/green] {ctx.vars.get('GATEWAY', 'Unknown')}"
+            draw_header("Main Control", status_info=status)
 
             # Passive update check
             check_version()
 
-            # --- PHASE 1: RECONNAISSANCE ---
+            # --- COMMAND CENTER ---
             console.print(
                 "\n[bold cyan]PHASE I: RECON & INTELLIGENCE[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [1] Net-Mapper       [2] Live Interceptor  [3] DNS Recon")
             console.print("[bold red]>[/bold red] [4] Web Ghost")
 
-            # --- PHASE 2: INITIAL ACCESS ---
             console.print(
                 "\n[bold cyan]PHASE II: OFFENSIVE ENGINE[/bold cyan]")
             console.print(
@@ -124,24 +132,18 @@ def main():
             console.print(
                 "[bold red]>[/bold red] [W] WiFi-Suite       [L] GHOST-HUB C2")
 
-            # --- PHASE 3: POST-EXPLOITATION ---
             console.print(
                 "\n[bold cyan]PHASE III: PAYLOADS & PERSISTENCE[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [8] Shell Forge      [9] Crypt-Keeper      [0] Persistence Engine")
             console.print("[bold red]>[/bold red] [H] Hash Cracker")
 
-            # --- SYSTEM & CONFIG ---
             console.print("\n[bold cyan]SYSTEM & CONFIGURATION[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [C] Global Config    [A] Setup Auditor    [Q] Vanish")
 
-            choice = Prompt.ask(
-                "\n[bold red]davoid[/bold red]@[root]",
-                choices=["1", "2", "3", "4", "5", "6", "7", "w", "W", "l", "L",
-                         "8", "9", "0", "h", "H", "c", "C", "a", "A", "q", "Q"],
-                show_choices=False
-            ).lower()
+            choice = Prompt.ask("\n[bold red]davoid[/bold red]@[root]", choices=["1", "2", "3", "4", "5", "6", "7",
+                                "w", "W", "l", "L", "8", "9", "0", "h", "H", "c", "C", "a", "A", "q", "Q"], show_choices=False).lower()
 
             # --- ROUTING LOGIC ---
             if choice == "1":
@@ -167,39 +169,35 @@ def main():
                 generate_shell()
             elif choice == "9":
                 path = console.input(
-                    "[bold yellow]Payload Path for Encryption: [/bold yellow]")
+                    "[bold yellow]Payload Path: [/bold yellow]")
                 if os.path.exists(path):
                     encrypt_payload(path)
                 else:
-                    console.print("[red][!] File not found.[/red]")
-                    input("Press Enter...")
+                    input("[red][!] File not found.[/red] Enter to continue...")
             elif choice == "0":
                 path = console.input(
-                    "[bold yellow]Payload Path for Persistence: [/bold yellow]")
-                engine = PersistenceEngine(path)
-                engine.run()
+                    "[bold yellow]Persistence Target Path: [/bold yellow]")
+                if os.path.exists(path):
+                    engine = PersistenceEngine(path)
+                    engine.run()
+                else:
+                    input("[red][!] File not found.[/red] Enter to continue...")
             elif choice == "h":
                 target = console.input(
                     "[bold yellow]Hash to Crack: [/bold yellow]")
-                algo = console.input(
-                    "[bold yellow]Algo (md5/sha1/sha256): [/bold yellow]") or "sha256"
-                crack_hash(target, algo)
+                crack_hash(target)
             elif choice == "c":
                 configure_context()
             elif choice == "a":
                 run_auditor()
             elif choice == "q":
-                console.print(
-                    "\n[bold yellow]Vanish mode activated. Clearing traces...[/bold yellow]")
                 sys.exit(0)
 
     except KeyboardInterrupt:
-        console.print(
-            "\n\n[bold red][!] Shutdown signal received. Exiting Davoid...[/bold red]")
         sys.exit(0)
     except Exception as e:
-        console.print(f"\n[bold red][!] Mainframe Error:[/bold red] {e}")
-        input("\nPress Enter to return to control...")
+        console.print(f"\n[bold red][!] Runtime Error:[/bold red] {e}")
+        input("\nPress Enter to return...")
 
 
 if __name__ == "__main__":

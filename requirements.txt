@@ -6,8 +6,8 @@ pywebcopy
 python-crontab
 dnspython 
 python-whois
-beautifulsoup4
 flask
 psutil
 netaddr
 beautifulsoup4
+phonenumbers

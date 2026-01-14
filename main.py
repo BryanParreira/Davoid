@@ -23,7 +23,8 @@ if os.path.exists(BASE_DIR):
 try:
     from core.ui import draw_header
     from core.updater import check_version, perform_update
-    from core.context import ctx  # Added: Global Context Engine
+    # Global Context Engine for LHOST, INTERFACE, etc.
+    from core.context import ctx
 except ImportError as e:
     print(f"Core components missing: {e}")
     sys.exit(1)
@@ -41,7 +42,7 @@ try:
     from modules.dns_spoofer import start_dns_spoof
     from modules.cloner import clone_site
     from modules.ghost_hub import run_ghost_hub
-    from modules.wifi_ops import run_wifi_suite
+    from modules.wifi_ops import run_wifi_suite  # Wireless Offensive Suite
 
     # Payloads & Persistence
     from modules.payloads import generate_shell
@@ -49,26 +50,26 @@ try:
     from modules.bruteforce import crack_hash
     from modules.persistence import PersistenceEngine
 
-    # System, Persistence & Intelligence
+    # System & Intelligence
     from modules.auditor import run_auditor
 
 except ImportError as e:
-    # Modules are imported dynamically; missing modules will notify the user upon selection
+    # Modules are imported dynamically; missing modules notify user upon selection
     pass
 
 console = Console()
 
 
 def configure_context():
-    """UI for managing global variables within the Context Engine."""
+    """Tactical Configuration UI for the Context Engine."""
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Global Configuration")
 
-        table = Table(title="Current Global Context",
+        table = Table(title="Live Framework Context",
                       border_style="bold magenta")
         table.add_column("Variable", style="cyan")
-        table.add_column("Value", style="white")
+        table.add_column("Current Value", style="white")
 
         for key, value in ctx.vars.items():
             table.add_row(key, str(value))
@@ -82,9 +83,8 @@ def configure_context():
 
         if choice == 's':
             key = Prompt.ask(
-                "[bold yellow]Variable to set (e.g., LHOST): [/bold yellow]").upper()
-            val = Prompt.ask(
-                f"[bold yellow]New value for {key}: [/bold yellow]")
+                "[bold yellow]Variable (e.g., LHOST, INTERFACE): [/bold yellow]").upper()
+            val = Prompt.ask(f"[bold yellow]Value for {key}: [/bold yellow]")
             if not ctx.set(key, val):
                 console.print(
                     f"[bold red][!] Error:[/bold red] '{key}' is not a valid global variable.")
@@ -94,47 +94,48 @@ def configure_context():
 
 
 def main():
-    # FIRST: Check for update argument via CLI
+    # Handle direct CLI update calls
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg == "--update":
             perform_update()
             sys.exit(0)
 
-    # SECOND: Start the TUI loop
     try:
         while True:
-            # Clear screen based on OS
             os.system('cls' if os.name == 'nt' else 'clear')
-
-            # Draw ASCII Header with current Module Title
             draw_header("Main Control")
 
-            # Passive update check (Displays notification if version mismatch)
+            # Passive update check
             check_version()
 
-            # --- COMMAND CENTER UI ---
-            console.print("\n[bold cyan]RECON & SCANNING[/bold cyan]")
+            # --- PHASE 1: RECONNAISSANCE ---
+            console.print(
+                "\n[bold cyan]PHASE I: RECON & INTELLIGENCE[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [1] Net-Mapper       [2] Live Interceptor  [3] DNS Recon")
             console.print("[bold red]>[/bold red] [4] Web Ghost")
 
-            console.print("\n[bold cyan]OFFENSIVE ENGINE[/bold cyan]")
+            # --- PHASE 2: INITIAL ACCESS ---
+            console.print(
+                "\n[bold cyan]PHASE II: OFFENSIVE ENGINE[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [5] MITM Engine      [6] DNS Spoofer       [7] Phantom Cloner")
             console.print(
                 "[bold red]>[/bold red] [W] WiFi-Suite       [L] GHOST-HUB C2")
 
-            console.print("\n[bold cyan]PAYLOADS & PERSISTENCE[/bold cyan]")
+            # --- PHASE 3: POST-EXPLOITATION ---
+            console.print(
+                "\n[bold cyan]PHASE III: PAYLOADS & PERSISTENCE[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [8] Shell Forge      [9] Crypt-Keeper      [0] Persistence Engine")
             console.print("[bold red]>[/bold red] [H] Hash Cracker")
 
-            console.print("\n[bold cyan]SYSTEM TOOLS[/bold cyan]")
+            # --- SYSTEM & CONFIG ---
+            console.print("\n[bold cyan]SYSTEM & CONFIGURATION[/bold cyan]")
             console.print(
-                "[bold red]>[/bold red] [C] Config Context   [A] Setup Auditor    [Q] Vanish")
+                "[bold red]>[/bold red] [C] Global Config    [A] Setup Auditor    [Q] Vanish")
 
-            # Handle user interaction with root prompt style
             choice = Prompt.ask(
                 "\n[bold red]davoid[/bold red]@[root]",
                 choices=["1", "2", "3", "4", "5", "6", "7", "w", "W", "l", "L",
@@ -166,22 +167,22 @@ def main():
                 generate_shell()
             elif choice == "9":
                 path = console.input(
-                    "[bold yellow]Path to payload: [/bold yellow]")
+                    "[bold yellow]Payload Path for Encryption: [/bold yellow]")
                 if os.path.exists(path):
                     encrypt_payload(path)
                 else:
-                    console.print("[red]File not found.[/red]")
+                    console.print("[red][!] File not found.[/red]")
                     input("Press Enter...")
             elif choice == "0":
                 path = console.input(
-                    "[bold yellow]Absolute Payload Path: [/bold yellow]")
+                    "[bold yellow]Payload Path for Persistence: [/bold yellow]")
                 engine = PersistenceEngine(path)
                 engine.run()
             elif choice == "h":
                 target = console.input(
-                    "[bold yellow]Target Hash: [/bold yellow]")
+                    "[bold yellow]Hash to Crack: [/bold yellow]")
                 algo = console.input(
-                    "[bold yellow]Algo (sha256): [/bold yellow]") or "sha256"
+                    "[bold yellow]Algo (md5/sha1/sha256): [/bold yellow]") or "sha256"
                 crack_hash(target, algo)
             elif choice == "c":
                 configure_context()
@@ -194,11 +195,11 @@ def main():
 
     except KeyboardInterrupt:
         console.print(
-            "\n\n[bold red][!] Shutdown signal received. Exiting...[/bold red]")
+            "\n\n[bold red][!] Shutdown signal received. Exiting Davoid...[/bold red]")
         sys.exit(0)
     except Exception as e:
-        console.print(f"\n[bold red][!] Runtime Error:[/bold red] {e}")
-        input("\nPress Enter to continue...")
+        console.print(f"\n[bold red][!] Mainframe Error:[/bold red] {e}")
+        input("\nPress Enter to return to control...")
 
 
 if __name__ == "__main__":

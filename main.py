@@ -5,11 +5,15 @@ import os
 import warnings
 
 # --- 1. SYSTEM SUPPRESSION LAYER ---
+# Specifically target and kill the urllib3/LibreSSL warning before imports
 warnings.filterwarnings("ignore", message=".*OpenSSL 1.1.1+.*")
 warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
+# Suppress Scapy IPv6 warnings for a cleaner interface
+warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
 
 
 # --- 2. ENVIRONMENT SETUP ---
+# Ensures Davoid can find its internal modules when running globally
 BASE_DIR = "/opt/davoid"
 if os.path.exists(BASE_DIR):
     sys.path.append(BASE_DIR)
@@ -23,50 +27,60 @@ except ImportError as e:
     sys.exit(1)
 
 # --- 4. SECURITY MODULE IMPORTS ---
+# Modules are imported here to be available in the routing logic below
 try:
     # Recon & Scanning
-    from modules.scanner import network_discovery
-    from modules.sniff import start_sniffing
-    from modules.recon import dns_recon
+    from modules.scanner import network_discovery  # Upgraded with Vuln-Hunter
+    from modules.sniff import start_sniffing       # Upgraded with Protocol Intel
+    from modules.recon import dns_recon           # Upgraded with Infra Mapping
     from modules.web_recon import web_ghost
 
     # Offensive Engine
-    from modules.spoof import start_mitm
-    from modules.dns_spoofer import start_dns_spoof
-    from modules.cloner import clone_site
-    # UPGRADED: C2 Hub replaces basic listener
-    from modules.ghost_hub import run_ghost_hub
+    from modules.spoof import start_mitm           # Upgraded with Filtered WLAN
+    from modules.dns_spoofer import start_dns_spoof  # Upgraded with Harvest Hook
+    from modules.cloner import clone_site          # Upgraded with Auto-Sniffer
+    from modules.ghost_hub import run_ghost_hub    # Integrated C2 Team Server
 
     # Payloads & Persistence
     from modules.payloads import generate_shell
+    # Upgraded with Polymorphic Evasion
     from modules.crypt_keeper import encrypt_payload
-    from modules.bruteforce import hash_cracker
+    from modules.bruteforce import hash_cracker     # Upgraded with Mutation Rules
 
     # System, Persistence & Intelligence
-    from modules.auditor import run_auditor
-    from modules.persistence import run_persistence_engine
+    from modules.auditor import run_auditor         # Upgraded with WLAN Check
+    from modules.persistence import run_persistence_engine  # Upgraded with Stealth Hooks
 
 except ImportError as e:
-    # Modules are imported dynamically to keep the core stable
+    # Modules are imported dynamically; missing modules will notify the user upon selection
     pass
 
 console = Console()
 
 
 def main():
+    # FIRST: Check for update argument via CLI
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg == "--update":
             perform_update()
             sys.exit(0)
 
+    # SECOND: Start the TUI loop
     try:
         while True:
+            # Clear screen based on OS
             os.system('cls' if os.name == 'nt' else 'clear')
+
+            # Draw ASCII Header with current Module Title
             draw_header("Main Control")
+
+            # Passive update check (Displays notification if version mismatch)
             check_version()
 
             # --- COMMAND CENTER UI ---
+            # Grouped by operational phase for a 'Power' workflow
+
             console.print("\n[bold cyan]RECON & SCANNING[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [1] Net-Mapper       [2] Live Interceptor  [3] DNS Recon")
@@ -75,9 +89,8 @@ def main():
             console.print("\n[bold cyan]OFFENSIVE ENGINE[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [5] MITM Engine      [6] DNS Spoofer       [7] Phantom Cloner")
-            # UPGRADED ENTRY
             console.print(
-                "[bold red]>[/bold red] [L] GHOST-HUB C2    [dim](Multi-Session)[/dim]")
+                "[bold red]>[/bold red] [L] GHOST-HUB C2    [dim](Multi-Session C2 Management)[/dim]")  # Upgraded
 
             console.print("\n[bold cyan]PAYLOADS & PERSISTENCE[/bold cyan]")
             console.print(
@@ -86,12 +99,12 @@ def main():
 
             console.print("\n[bold cyan]SYSTEM TOOLS[/bold cyan]")
             console.print(
-                "[bold red]>[/bold red] [A] Setup Auditor    [dim](Pre-flight Check)[/dim]")
+                "[bold red]>[/bold red] [A] Setup Auditor    [dim](WLAN & Hardware Audit)[/dim]")
 
             console.print(
                 "\n[bold red]>[/bold red] [Q] Vanish           [dim](Exit Console)[/dim]")
 
-            # Handle user interaction
+            # Handle user interaction with root prompt style
             choice = Prompt.ask(
                 "\n[bold red]davoid[/bold red]@[root]",
                 choices=["1", "2", "3", "4", "5", "6", "7", "l", "L",
@@ -100,6 +113,8 @@ def main():
             )
 
             # --- ROUTING LOGIC ---
+            # Connects UI choices to the professional module functions
+
             if choice == "1":
                 network_discovery()
             elif choice == "2":
@@ -115,7 +130,7 @@ def main():
             elif choice == "7":
                 clone_site()
             elif choice.lower() == "l":
-                run_ghost_hub()  # ROUTED TO NEW C2 HUB
+                run_ghost_hub()  # Successfully routed to the new GHOST-HUB C2
             elif choice == "8":
                 generate_shell()
             elif choice == "9":
@@ -132,6 +147,7 @@ def main():
                 sys.exit(0)
 
     except KeyboardInterrupt:
+        # Prevents messy Python tracebacks on Ctrl+C
         console.print(
             "\n\n[bold red][!] Shutdown signal received. Exiting...[/bold red]")
         sys.exit(0)

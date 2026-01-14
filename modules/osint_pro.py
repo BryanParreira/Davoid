@@ -3,6 +3,7 @@ import phonenumbers
 import urllib3
 import dns.resolver
 import re
+import json
 from phonenumbers import carrier, geocoder, timezone
 from rich.console import Console
 from rich.table import Table
@@ -98,7 +99,7 @@ def phone_intel():
         console.print(f"[red][!] Processing Error: {e}[/red]")
     input("\nPress Enter...")
 
-# --- 3. GEOSPATIAL & INFRASTRUCTURE ---
+# --- 3. GEOSPATIAL & INFRASTRUCTURE (FIXED) ---
 
 
 def geolocate():
@@ -108,11 +109,22 @@ def geolocate():
     if not target:
         return
 
+    # Use a tactical user-agent to ensure connectivity
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+
     try:
-        res = requests.get(
-            f"http://ip-api.com/json/{target}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,query", timeout=5).json()
+        # API fields optimized for peak intelligence collection
+        fields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,query"
+        url = f"http://ip-api.com/json/{target}?fields={fields}"
+
+        response = requests.get(url, headers=headers, timeout=10)
+        res = response.json()
+
         if res.get('status') == 'fail':
-            console.print(f"[red][!] API Error: {res.get('message')}[/red]")
+            console.print(
+                f"[red][!] API Error: {res.get('message', 'Unknown failure')}[/red]")
             return
 
         table = Table(
@@ -129,11 +141,18 @@ def geolocate():
         table.add_row("Timezone", res.get('timezone'))
 
         console.print(table)
+
+        # Link to external evidence
+        maps_url = f"https://www.google.com/maps?q={res.get('lat')},{res.get('lon')}"
+        console.print(f"\n[dim][*] Evidence Map: {maps_url}[/dim]")
+
+    except requests.exceptions.Timeout:
         console.print(
-            f"\n[dim][*] Visual Evidence: https://www.google.com/maps?q={res.get('lat')},{res.get('lon')}[/dim]")
-    except:
-        console.print("[red][!] Connectivity Error to Geolocation API.[/red]")
-    input("\nPress Enter...")
+            "[red][!] Error: Connection to Geolocator API timed out.[/red]")
+    except Exception as e:
+        console.print(f"[red][!] Connectivity Error: {e}[/red]")
+
+    input("\nPress Enter to return...")
 
 # --- 4. ROBOTS & HIDDEN PATH SCRAPER ---
 
@@ -159,7 +178,8 @@ def robots_scraper():
                               border_style="yellow")
                 table.add_column("Sensitive Path", style="dim white")
                 for path in disallowed[:20]:  # Limit to top 20 for readability
-                    table.add_row(path.split(": ")[1])
+                    table.add_row(path.split(": ")[
+                                  1] if ": " in path else path)
                 console.print(table)
             else:
                 console.print(
@@ -216,26 +236,40 @@ def dns_intel():
     try:
         # Querying public Certificate Transparency logs (crt.sh)
         url = f"https://crt.sh/?q=%.{domain}&output=json"
-        res = requests.get(url, timeout=10)
+        res = requests.get(url, timeout=15)
+
         if res.status_code == 200:
-            for entry in res.json():
-                name = entry['name_value']
-                for sub in name.split('\n'):
-                    if not sub.startswith('*'):
-                        subdomains.add(sub.strip())
+            try:
+                data = res.json()
+                for entry in data:
+                    name = entry['name_value']
+                    for sub in name.split('\n'):
+                        if not sub.startswith('*') and domain in sub:
+                            subdomains.add(sub.strip())
+            except json.JSONDecodeError:
+                console.print("[red][!] Error parsing passive DNS data.[/red]")
+                return
 
-        table = Table(
-            title=f"Passive Subdomain Discovery: {domain}", border_style="cyan")
-        table.add_column("Subdomain", style="white")
+        if subdomains:
+            table = Table(
+                title=f"Passive Subdomain Discovery: {domain}", border_style="cyan")
+            table.add_column("Subdomain", style="white")
 
-        for s in sorted(list(subdomains))[:25]:  # Show top 25
-            table.add_row(s)
+            for s in sorted(list(subdomains))[:25]:  # Show top 25
+                table.add_row(s)
 
-        console.print(table)
-        console.print(
-            f"\n[dim][*] Total passive assets identified: {len(subdomains)}[/dim]")
-    except:
-        console.print("[red][!] Passive DNS lookup failed.[/red]")
+            console.print(table)
+            console.print(
+                f"\n[dim][*] Total passive assets identified: {len(subdomains)}[/dim]")
+        else:
+            console.print(
+                "[yellow][!] No passive subdomains found in CT logs.[/yellow]")
+
+    except requests.exceptions.Timeout:
+        console.print("[red][!] Passive DNS service timed out.[/red]")
+    except Exception as e:
+        console.print(f"[red][!] Passive DNS lookup failed: {e}[/red]")
+
     input("\nPress Enter...")
 
 # --- 7. TACTICAL GOOGLE DORK ENGINE ---

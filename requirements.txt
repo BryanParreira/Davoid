@@ -4,3 +4,5 @@ requests
 cryptography
 pywebcopy
 python-crontab
+dnspython 
+python-whois

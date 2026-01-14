@@ -25,10 +25,11 @@ except ImportError as e:
     sys.exit(1)
 
 # --- 4. SECURITY MODULE IMPORTS ---
+# We use explicit imports to ensure 'start_sniffing' and others are available
 try:
     # Recon & Scanning
     from modules.scanner import network_discovery
-    from modules.sniff import start_sniffing
+    from modules.sniff import SnifferEngine  # Import the Class
     from modules.recon import dns_recon
     from modules.web_recon import web_ghost
 
@@ -47,8 +48,9 @@ try:
 
     # System & Intelligence
     from modules.auditor import run_auditor
-except ImportError:
-    pass
+except ImportError as e:
+    # Diagnostic print if a module fails to load
+    print(f"[!] Warning: Some modules failed to load: {e}")
 
 console = Console()
 
@@ -66,7 +68,6 @@ def auto_discovery():
         # Populate context automatically
         ctx.set("INTERFACE", active_iface)
         ctx.set("LHOST", local_ip)
-        # Adding 'GATEWAY' to the vars manually if it's not in the original context class
         ctx.vars["GATEWAY"] = gw_ip
         return True
     except:
@@ -92,30 +93,27 @@ def configure_context():
             key = Prompt.ask("[bold yellow]Variable: [/bold yellow]").upper()
             val = Prompt.ask(f"New value for {key}: ")
             if not ctx.set(key, val):
-                # Manual entry for custom vars like GATEWAY
                 ctx.vars[key] = val
         else:
             break
 
 
 def main():
-    # CLI Check for updates
     if len(sys.argv) > 1 and sys.argv[1].lower() == "--update":
         perform_update()
         sys.exit(0)
 
-    # 1. INITIAL AUTO-DISCOVERY
+    # INITIAL AUTO-DISCOVERY
     auto_discovery()
 
     try:
         while True:
             os.system('cls' if os.name == 'nt' else 'clear')
 
-            # 2. DYNAMIC STATUS BAR
+            # DYNAMIC STATUS BAR
             status = f"[green]IFACE:[/green] {ctx.get('INTERFACE')} | [green]IP:[/green] {ctx.get('LHOST')} | [green]GW:[/green] {ctx.vars.get('GATEWAY', 'Unknown')}"
             draw_header("Main Control", status_info=status)
 
-            # Passive update check
             check_version()
 
             # --- COMMAND CENTER ---
@@ -149,7 +147,9 @@ def main():
             if choice == "1":
                 network_discovery()
             elif choice == "2":
-                start_sniffing()
+                # Correctly Instantiating the Elite SnifferEngine
+                engine = SnifferEngine()
+                engine.start()
             elif choice == "3":
                 dns_recon()
             elif choice == "4":

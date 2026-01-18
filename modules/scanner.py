@@ -82,10 +82,10 @@ class ScannerEngine:
             console.print(
                 f"[dim]Interface: {conf.iface} | Target: {subnet_hint}[/dim]")
         except:
-            subnet_hint = "192.168.1.0/24"
+            subnet_hint = ""
 
         target = console.input(
-            f"[bold yellow]Scan Range (Default {subnet_hint}): [/bold yellow]").strip() or subnet_hint
+            f"[bold yellow]Scan Range: [/bold yellow]").strip() or subnet_hint
         do_deep = console.input(
             "[bold cyan]Deep Service Fingerprinting (-sV)? (y/N): [/bold cyan]").lower() == 'y'
 

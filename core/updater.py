@@ -83,7 +83,7 @@ def perform_update():
     """Performs a deep-sync with visual progress and error recovery."""
     os.system('cls' if os.name == 'nt' else 'clear')
     console.print(Panel(
-        "[bold cyan]Davoid Tactical Update Dashboard[/bold cyan]", border_style="cyan", expand=False))
+        "[bold cyan]Davoid Updating[/bold cyan]", border_style="cyan", expand=False))
 
     if not os.path.exists(INSTALL_DIR):
         console.print(

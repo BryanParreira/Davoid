@@ -89,40 +89,57 @@ class ScannerEngine:
         do_deep = console.input(
             "[bold cyan]Deep Service Fingerprinting (-sV)? (y/N): [/bold cyan]").lower() == 'y'
 
-        table = Table(
-            title=f"Elite Intel: {target}", border_style="bold red", expand=True)
-        table.add_column("Host (IP)", style="cyan")
-        table.add_column("OS/Vendor", style="white")
-        table.add_column("Services/Vulns", style="bold yellow")
-        table.add_column("MAC Address", style="magenta")
-
         active_hosts = []
-        with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(), console=console) as progress:
-            # 1. ARP Discovery
-            task1 = progress.add_task("[cyan]L2 ARP Mapping...", total=None)
+
+        # --- IMPROVED PROGRESS SYSTEM ---
+        # We use 'transient=True' so the bars vanish after the scan, keeping the UI clean.
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=40, pulse_style="red"),
+            console=console,
+            transient=True 
+        ) as progress:
+
+            # 1. ARP Mapping Task
+            arp_task = progress.add_task("[cyan]L2 ARP Mapping...", total=None)
             ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
                          ARP(pdst=target), timeout=2, verbose=False)
             for _, rcv in ans:
                 active_hosts.append((rcv.psrc, rcv.hwsrc))
+            
+            # Complete the ARP line and change text
+            progress.update(arp_task, description="[green]L2 ARP Mapping Complete", completed=100, total=100)
 
-            # 2. SYN Sweep for silent hosts
-            task2 = progress.add_task(
-                "[yellow]Stealth discovery (SYN Sweep)...", total=None)
+            # 2. Stealth Discovery Task
+            syn_task = progress.add_task("[yellow]Stealth discovery (SYN Sweep)...", total=None)
             ip_list = [str(ip) for ip in IPNetwork(target)]
+            
             with ThreadPoolExecutor(max_workers=50) as executor:
-                futures = {executor.submit(
-                    self.stealth_probe, ip): ip for ip in ip_list}
+                futures = {executor.submit(self.stealth_probe, ip): ip for ip in ip_list}
                 for f in as_completed(futures):
                     ip = futures[f]
                     if f.result() and not any(h[0] == ip for h in active_hosts):
+                        # Attempt to resolve MAC for found hidden hosts
                         res, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
-                                     ARP(pdst=ip), timeout=1, verbose=False)
+                                     ARP(pdst=ip), timeout=0.8, verbose=False)
                         active_hosts.append(
                             (ip, res[0][1].hwsrc if res else "Unknown"))
+            
+            progress.update(syn_task, description="[green]Stealth Sweep Complete", completed=100, total=100)
 
-            # 3. Final Analysis
-            task3 = progress.add_task(
+            # 3. Deep Analysis Task
+            analysis_task = progress.add_task(
                 f"[magenta]Analyzing {len(active_hosts)} live hosts...", total=len(active_hosts))
+            
+            # Prepare the final results table
+            table = Table(
+                title=f"Elite Intel: {target}", border_style="bold red", expand=True)
+            table.add_column("Host (IP)", style="cyan")
+            table.add_column("OS/Vendor", style="white")
+            table.add_column("Services/Vulns", style="bold yellow")
+            table.add_column("MAC Address", style="magenta")
+
             for ip, mac in active_hosts:
                 vendor = self.get_vendor(mac)
 
@@ -142,10 +159,13 @@ class ScannerEngine:
 
                 table.add_row(ip, f"{os_type}\n({vendor})", "\n".join(
                     svc_info) if svc_info else "Filtered", mac)
-                progress.update(task3, advance=1)
+                
+                # Advance the third bar
+                progress.update(analysis_task, advance=1)
 
+        # Print final table only after progress bars are finished and cleared
         console.print("\n", table)
-        input("\nPress Enter...")
+        input("\n[bold white]Press Enter to continue...[/bold white]")
 
 
 def network_discovery():

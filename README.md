@@ -116,35 +116,6 @@ git pull origin main
 source venv/bin/activate
 pip install -r requirements.txt --upgrade
 ```
-
----
-
-## 🎯 Usage Examples
-
-### Network Discovery
-
-```bash
-sudo davoid
-# Select: Net-Mapper
-# Enter target IP range: 192.168.1.0/24
-```
-
-### Packet Sniffing
-
-```bash
-sudo davoid
-# Select: Live Interceptor
-# Specify interface: eth0
-```
-
-### DNS Reconnaissance
-
-```bash
-sudo davoid
-# Select: DNS Recon
-# Enter domain: example.com
-```
-
 ---
 
 ## 🔐 Security Best Practices

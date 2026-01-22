@@ -253,7 +253,11 @@ def main():
             elif choice == "c":
                 configure_context()
             elif choice == "a":
-                run_auditor()
+                if run_auditor is not None:
+                    run_auditor()
+                else:
+                    console.print("[bold red][!] Error: Auditor module is not available (Import Failed).[/bold red]")
+                    input("\nPress Enter to return...")
             elif choice == "u":
                 perform_update()
             elif choice == "q":

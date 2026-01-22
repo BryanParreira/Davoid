@@ -262,13 +262,12 @@ def main():
             elif choice == "c":
                 configure_context()
             elif choice == "a":
-                # Check for None to prevent 'NoneType' error and added return prompt
                 if run_auditor:
                     run_auditor()
                     input("\nAudit Complete. Press Enter to return to main menu...")
                 else:
                     console.print(
-                        "[red][!] Error: Auditor module failed to import during startup.[/red]")
+                        "[bold red][!] Auditor module is not available (Import failed).[/bold red]")
                     input("\nPress Enter to return...")
             elif choice == "u":
                 perform_update()

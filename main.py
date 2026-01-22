@@ -53,6 +53,7 @@ try:
     from modules.auditor import run_auditor
 except ImportError as e:
     print(f"[!] Warning: Module initialization failed: {e}")
+    run_auditor = None
 
 console = Console()
 

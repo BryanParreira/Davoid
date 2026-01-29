@@ -50,6 +50,7 @@ class ScannerEngine:
             return "Unknown"
 
         try:
+            # Note: API rate limits apply
             url = f"https://api.macvendors.com/{mac}"
             res = requests.get(url, timeout=2)
             vendor = res.text if res.status_code == 200 else "Unknown"
@@ -61,7 +62,7 @@ class ScannerEngine:
     def os_fingerprint(self, ip):
         """Advanced OS Fingerprinting using TTL and TCP Window behavior."""
         try:
-            # Add randomized jitter to the probe timing for stealth
+            # Stealth jitter for OS probe
             if self.stealth_delay > 0:
                 time.sleep(random.uniform(0.1, self.stealth_delay))
 
@@ -89,16 +90,15 @@ class ScannerEngine:
                 elif ttl <= 255:
                     return "Network Device (Cisco/Solaris/FreeBSD)"
 
-            # Fallback to ICMP TTL discovery if TCP fails
+            # Fallback to ICMP if TCP is shielded
             pkt_icmp = sr1(IP(dst=ip)/ICMP(), timeout=0.8, verbose=0)
             if pkt_icmp:
                 ttl = pkt_icmp.getlayer(IP).ttl
                 if ttl <= 64:
-                    return "Linux / IoT (ICMP Guess)"
-                elif ttl <= 128:
+                    return "Linux / Mac (ICMP Guess)"
+                if ttl <= 128:
                     return "Windows (ICMP Guess)"
-                else:
-                    return "Network Infrastructure"
+                return "Network Infrastructure"
         except:
             pass
         return "Unknown / Shielded"
@@ -106,7 +106,6 @@ class ScannerEngine:
     def service_audit(self, ip, port):
         """Performs banner grabbing and matches against VULN_DB."""
         try:
-            # Stealth: Randomized delay before banner grabbing
             if self.stealth_delay > 0:
                 time.sleep(random.uniform(0.5, self.stealth_delay * 2))
 
@@ -115,8 +114,6 @@ class ScannerEngine:
                 if s.connect_ex((ip, port)) == 0:
                     if port in [80, 8080, 8000]:
                         s.send(b"GET / HTTP/1.1\r\nHost: davoid\r\n\r\n")
-                    elif port == 443:
-                        s.send(b"\r\n")
                     else:
                         s.send(b"\r\n")
 
@@ -126,7 +123,6 @@ class ScannerEngine:
                         for version, cve in VULN_DB.items():
                             if version.lower() in banner.lower():
                                 return f"[bold red]{port}: {version} -> {cve}[/bold red]"
-
                         clean_banner = banner.split(
                             '\n')[0].replace('\r', '')[:35]
                         return f"[green]{port}:[/green] {clean_banner}"
@@ -136,8 +132,7 @@ class ScannerEngine:
         return None
 
     def stealth_probe(self, ip):
-        """TCP SYN Discovery to find hosts that block ICMP (Stealth)."""
-        # Stealth: Half-open scan avoids establishing full TCP sessions
+        """TCP SYN Discovery (Half-Open) to bypass standard logging."""
         syn_pkt = IP(dst=ip)/TCP(dport=[80, 443, 22, 53], flags="S")
         ans, _ = sr(syn_pkt, timeout=0.8, verbose=0)
         if ans:
@@ -147,31 +142,29 @@ class ScannerEngine:
     def network_discovery(self):
         draw_header("Root Discovery & Deep Intelligence")
 
-        # --- Dynamic Variable Configuration ---
+        # Context Discovery
         try:
             local_ip = get_if_addr(conf.iface)
             subnet_hint = str(IPNetwork(f"{local_ip}/24").cidr)
             console.print(Panel(
-                f"Interface: [bold cyan]{conf.iface}[/bold cyan] | Local IP: [bold cyan]{local_ip}[/bold cyan]\nDefault Subnet: [bold cyan]{subnet_hint}[/bold cyan]",
-                title="Network Context", border_style="dim"))
+                f"Interface: [bold cyan]{conf.iface}[/bold cyan] | Local IP: [bold cyan]{local_ip}[/bold cyan]\nDefault Subnet: [bold cyan]{subnet_hint}[/bold cyan]", title="Network Context", border_style="dim"))
         except:
             subnet_hint = "192.168.1.0/24"
 
-        # User Input for Scan Variables
+        # --- USER INPUT FOR VARIABLES ---
         target = Prompt.ask(
             "[bold yellow]Scan Range[/bold yellow]", default=subnet_hint).strip()
 
         port_choice = Prompt.ask(
-            "[bold yellow]Ports to audit[/bold yellow]",
+            "[bold yellow]Ports to audit[/bold yellow] (common / all / custom)",
             choices=["common", "all", "custom"],
             default="common"
         )
-
         if port_choice == "all":
             scan_ports = list(range(1, 1025))
         elif port_choice == "custom":
             custom_input = console.input(
-                "[bold cyan]Enter ports (e.g. 80,443,8080): [/bold cyan]")
+                "[bold cyan]Enter ports (e.g. 80,443): [/bold cyan]")
             scan_ports = [int(p.strip()) for p in custom_input.split(",")]
         else:
             scan_ports = TOP_PORTS
@@ -179,13 +172,11 @@ class ScannerEngine:
         intensity = int(Prompt.ask(
             "[bold yellow]Scan Intensity (Threads)[/bold yellow]", default="40"))
 
-        # --- NEW STEALTH CONFIGURATION ---
         stealth_mode = Confirm.ask(
-            "[bold magenta]Enable Stealth Timing (Slow/Safe Scan)?[/bold magenta]", default=False)
+            "[bold magenta]Enable Stealth Timing (Safe Scan)?[/bold magenta]", default=False)
         if stealth_mode:
             self.stealth_delay = float(Prompt.ask(
-                "[bold magenta]Max Delay between packets (seconds)[/bold magenta]", default="2.0"))
-            # Force low thread count for stealth
+                "[bold magenta]Max Delay (seconds)[/bold magenta]", default="2.0"))
             intensity = min(intensity, 10)
             console.print(
                 "[dim magenta][*] Stealth Active: Throttling scan to 10 threads max.[/dim magenta]")
@@ -203,21 +194,18 @@ class ScannerEngine:
             console=console
         ) as progress:
 
-            # Phase 1: Layer 2 ARP Mapping
-            task1 = progress.add_task(
-                "[cyan]L2 ARP Mapping (Subnet Discovery)...", total=None)
+            # Phase 1: ARP Mapping
+            task1 = progress.add_task("[cyan]L2 ARP Mapping...", total=None)
             ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
                          ARP(pdst=target), timeout=2, verbose=False)
             for _, rcv in ans:
                 active_hosts.append({"ip": rcv.psrc, "mac": rcv.hwsrc})
-            progress.update(task1, completed=100,
-                            description="[cyan]ARP Discovery Finished.")
+            progress.update(task1, completed=100)
 
-            # Phase 2: Stealth SYN Sweep for hidden hosts
+            # Phase 2: Stealth SYN Sweep
             ip_list = [str(ip) for ip in IPNetwork(target)]
             task2 = progress.add_task(
                 "[yellow]Stealth Scanning (SYN Sweep)...", total=len(ip_list))
-
             with ThreadPoolExecutor(max_workers=intensity) as executor:
                 futures = {executor.submit(
                     self.stealth_probe, ip): ip for ip in ip_list}
@@ -230,12 +218,12 @@ class ScannerEngine:
                         mac = res[0][1].hwsrc if res else "Unknown"
                         active_hosts.append({"ip": ip, "mac": mac})
 
-            # Phase 3: Intelligence & Service Fingerprinting
+            # Phase 3: Intelligence
             table = Table(
                 title=f"Elite Intel: {target}", border_style="bold red", expand=True)
-            table.add_column("Host (IP)", style="cyan", no_wrap=True)
+            table.add_column("Host (IP)", style="cyan")
             table.add_column("OS Fingerprint", style="bold magenta")
-            table.add_column("Services & Vulnerabilities", style="bold yellow")
+            table.add_column("Services", style="yellow")
             table.add_column("MAC / Vendor", style="dim")
 
             task3 = progress.add_task(
@@ -245,8 +233,6 @@ class ScannerEngine:
                 ip = host["ip"]
                 mac = host["mac"]
                 vendor = self.get_vendor(mac)
-
-                # Advanced OS Detection
                 os_type = self.os_fingerprint(ip)
 
                 svc_info = []
@@ -259,19 +245,12 @@ class ScannerEngine:
                             if res:
                                 svc_info.append(res)
 
-                table.add_row(
-                    ip,
-                    os_type,
-                    "\n".join(
-                        svc_info) if svc_info else "[dim]None Detected[/dim]",
-                    f"{mac}\n[white]{vendor}[/white]"
-                )
+                table.add_row(ip, os_type, "\n".join(svc_info)
+                              if svc_info else "None", f"{mac}\n{vendor}")
                 progress.update(task3, advance=1)
 
         console.print("\n", table)
-        console.print(
-            f"[bold green][+] Total Active Hosts Found: {len(active_hosts)}[/bold green]")
-        input("\nPress Enter to return to main menu...")
+        input("\nPress Enter to return...")
 
 
 def network_discovery():

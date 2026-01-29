@@ -1,165 +1,284 @@
+from rich.prompt import Prompt
+from rich.console import Console
+from rich.table import Table
 import sys
 import os
 import warnings
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.prompt import Prompt
 
 # --- 1. SYSTEM SUPPRESSION LAYER ---
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", message=".*OpenSSL 1.1.1+.*")
+warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
+warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
 
 # --- 2. ENVIRONMENT SETUP ---
+# Fixes pathing so modules can always find core/
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.append(SCRIPT_DIR)
 
-# --- 3. CORE & MODULE IMPORTS ---
+# Fallback for global installation
+BASE_DIR = "/opt/davoid"
+if os.path.exists(BASE_DIR) and BASE_DIR not in sys.path:
+    sys.path.append(BASE_DIR)
+
+# --- 3. CORE & UI LOGIC ---
 try:
     from core.ui import draw_header
+    from core.updater import check_version, perform_update
     from core.context import ctx
-    # Import Hub Launchers
-    from modules.scanner import network_discovery
-    from modules.sniff import run_sniffer
-    from modules.recon import dns_recon
-    from modules.web_recon import web_ghost
-    from modules.spoof import start_mitm
-    from modules.dns_spoofer import start_dns_spoof
-    from modules.cloner import clone_site
-    from modules.ghost_hub import GhostHubManager
-    from modules.wifi_ops import run_wifi_suite
-    from modules.payloads import generate_shell
-    from modules.bruteforce import start_crack
+except ImportError as e:
+    print(f"Core components missing: {e}")
+    sys.exit(1)
+
+# --- 4. SECURITY MODULE IMPORTS ---
+
+# A. System Tools (The Auditor) - Isolated to ensure it always loads
+try:
     from modules.auditor import run_auditor
 except ImportError as e:
-    print(f"[!] Error: Critical module missing: {e}")
-    sys.exit(1)
+    print(f"[!] Warning: Auditor module failed to load: {e}")
+    run_auditor = None
+
+# B. Recon & OSINT Hub
+try:
+    from modules.scanner import network_discovery
+    from modules.sniff import SnifferEngine
+    from modules.recon import dns_recon
+    from modules.web_recon import web_ghost
+    # OSINT Hub (Holmes Engine)
+    from modules.osint_pro import (username_tracker, phone_intel, geolocate,
+                                   dork_generator, robots_scraper, reputation_check, dns_intel)
+except ImportError as e:
+    print(f"[!] Warning: Recon/OSINT modules limited: {e}")
+
+# C. Offensive & Payload Hub
+try:
+    from modules.spoof import MITMEngine
+    from modules.dns_spoofer import start_dns_spoof
+    from modules.cloner import clone_site
+    from modules.ghost_hub import run_ghost_hub
+    from modules.wifi_ops import run_wifi_suite
+    from modules.payloads import generate_shell
+    from modules.crypt_keeper import encrypt_payload
+    from modules.bruteforce import crack_hash
+    from modules.persistence import PersistenceEngine
+except ImportError as e:
+    print(f"[!] Warning: Offensive modules limited: {e}")
 
 console = Console()
 
+# --- 5. SUPPORT FUNCTIONS ---
 
-class DavoidConsole:
-    def __init__(self):
-        self.modules = {
-            "scanner": network_discovery,
-            "sniffer": run_sniffer,
-            "dns_recon": dns_recon,
-            "web_recon": web_ghost,
-            "mitm": start_mitm,
-            "dns_spoof": start_dns_spoof,
-            "cloner": clone_site,
-            "ghost_hub": GhostHubManager,
-            "wifi": run_wifi_suite,
-            "payload_forge": generate_shell,
-            "cracker": start_crack,
-            "auditor": run_auditor
-        }
 
-    def get_status_line(self):
-        return f"[green]IFACE:[/green] {ctx.get('INTERFACE')} | [green]LHOST:[/green] {ctx.get('LHOST')} | [red]MODULE:[/red] {ctx.selected_module or 'None'}"
+def auto_discovery():
+    """Elite Feature: Automatic Interface and Network Detection."""
+    try:
+        from scapy.all import conf, get_if_addr
+        active_iface = str(conf.iface)
+        local_ip = get_if_addr(active_iface)
+        gw_ip = conf.route.route("0.0.0.0")[2]
+        ctx.set("INTERFACE", active_iface)
+        ctx.set("LHOST", local_ip)
+        ctx.vars["GATEWAY"] = gw_ip
+        return True
+    except:
+        return False
 
-    def help(self):
-        table = Table(title="Davoid Console Commands",
-                      border_style="cyan", box=None)
-        table.add_column("Command", style="bold yellow")
-        table.add_column("Description", style="white")
-        table.add_row("help", "Show this help menu")
-        table.add_row("use <module>", "Select a module to work with")
-        table.add_row("set <key> <val>", "Set a global or module variable")
-        table.add_row("show options", "Display current configuration")
-        table.add_row("show modules", "List all available modules")
-        table.add_row("run", "Execute the selected module")
-        table.add_row("back", "Deselect current module")
-        table.add_row("exit / quit", "Terminate Davoid")
-        console.print(table)
 
-    def run_console(self):
+def get_status():
+    """Generates the dynamic status string for the tactical header."""
+    return f"[green]IFACE:[/green] {ctx.get('INTERFACE')} | [green]IP:[/green] {ctx.get('LHOST')} | [green]GW:[/green] {ctx.vars.get('GATEWAY', 'Unknown')}"
+
+
+def configure_context():
+    """Manual Overrides for the Context Engine."""
+    while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Interactive Command Hub",
-                    status_info=self.get_status_line())
+        draw_header("Global Configuration", status_info=get_status())
+        table = Table(title="Framework Context", border_style="bold magenta")
+        table.add_column("Variable")
+        table.add_column("Value")
+        for k, v in ctx.vars.items():
+            table.add_row(k, str(v))
+        console.print(table)
+        console.print(
+            "\n[bold red]>[/bold red] [S] Set Variable  [B] Back to Hub")
+        choice = Prompt.ask("\n[bold red]config[/bold red]@[root]",
+                            choices=["s", "b"], show_choices=False).lower()
+        if choice == 's':
+            key = Prompt.ask("[bold yellow]Variable: [/bold yellow]").upper()
+            val = Prompt.ask(f"New value: ")
+            if not ctx.set(key, val):
+                ctx.vars[key] = val
+        else:
+            break
 
+# --- 6. CATEGORY SUB-MENUS ---
+
+
+def hub_intelligence():
+    """Intelligence Hub: Expanded with Holmes DNS Intelligence."""
+    while True:
+        os.system('cls' if os.name == 'nt' else 'clear')
+        draw_header("Intelligence Hub", status_info=get_status())
+        console.print("\n[bold cyan]NETWORK & INFRASTRUCTURE[/bold cyan]")
+        console.print(
+            "[bold red]>[/bold red] [1] Net-Mapper       [2] Live Interceptor  [3] DNS Recon")
+        console.print("[bold red]>[/bold red] [4] Web Ghost")
+
+        console.print(
+            "\n[bold cyan]OSINT & PROFILING[/bold cyan]")
+        console.print(
+            "[bold red]>[/bold red] [U] Username Tracker [P] Phone Intel       [G] Geo-Locator")
+        console.print(
+            "[bold red]>[/bold red] [D] Dork Automator   [R] Robots.txt Scraper [A] Reputation Audit")
+        console.print(
+            "[bold red]>[/bold red] [N] DNS Intelligence [dim](Passive Subdomain Discovery)[/dim]")
+
+        console.print("\n[bold red]>[/bold red] [B] Back to Hub")
+        choice = Prompt.ask("\n[bold red]intel[/bold red]@[root]", choices=[
+                            "1", "2", "3", "4", "u", "p", "g", "d", "r", "a", "n", "b"], show_choices=False).lower()
+        if choice == "1":
+            network_discovery()
+        elif choice == "2":
+            engine = SnifferEngine()
+            engine.start()
+        elif choice == "3":
+            dns_recon()
+        elif choice == "4":
+            web_ghost()
+        elif choice == "u":
+            username_tracker()
+        elif choice == "p":
+            phone_intel()
+        elif choice == "g":
+            geolocate()
+        elif choice == "d":
+            dork_generator()
+        elif choice == "r":
+            robots_scraper()
+        elif choice == "a":
+            reputation_check()
+        elif choice == "n":
+            dns_intel()
+        elif choice == "b":
+            break
+
+
+def hub_offensive():
+    """Offensive Hub: Integrated MITM and Wireless Suite."""
+    while True:
+        os.system('cls' if os.name == 'nt' else 'clear')
+        draw_header("Offensive Hub", status_info=get_status())
+        console.print("\n[bold cyan]TRAFFIC MANIPULATION[/bold cyan]")
+        console.print(
+            "[bold red]>[/bold red] [1] MITM Engine      [2] DNS Spoofer       [3] Phantom Cloner")
+        console.print("\n[bold cyan]WIRELESS & CONTROL[/bold cyan]")
+        console.print(
+            "[bold red]>[/bold red] [W] WiFi-Suite       [L] GHOST-HUB C2")
+        console.print("\n[bold red]>[/bold red] [B] Back to Hub")
+        choice = Prompt.ask("\n[bold red]offensive[/bold red]@[root]",
+                            choices=["1", "2", "3", "w", "l", "b"], show_choices=False).lower()
+        if choice == "1":
+            engine = MITMEngine()
+            engine.run()
+        elif choice == "2":
+            start_dns_spoof()
+        elif choice == "3":
+            clone_site()
+        elif choice == "w":
+            run_wifi_suite()
+        elif choice == "l":
+            run_ghost_hub()
+        elif choice == "b":
+            break
+
+
+def hub_payloads():
+    """Payload Hub: Establishing Persistence and Access."""
+    while True:
+        os.system('cls' if os.name == 'nt' else 'clear')
+        draw_header("Payload Hub", status_info=get_status())
+        console.print("\n[bold cyan]PAYLOADS & EVASION[/bold cyan]")
+        console.print(
+            "[bold red]>[/bold red] [1] Shell Forge      [2] Crypt-Keeper")
+        console.print("\n[bold cyan]POST-EXPLOITATION[/bold cyan]")
+        console.print(
+            "[bold red]>[/bold red] [3] Persistence Engine [4] Hash Cracker")
+        console.print("\n[bold red]>[/bold red] [B] Back to Hub")
+        choice = Prompt.ask("\n[bold red]payload[/bold red]@[root]",
+                            choices=["1", "2", "3", "4", "b"], show_choices=False).lower()
+        if choice == "1":
+            generate_shell()
+        elif choice == "2":
+            path = console.input("[bold yellow]Payload: [/bold yellow]")
+            if os.path.exists(path):
+                encrypt_payload(path)
+        elif choice == "3":
+            path = console.input("[bold yellow]Target Path: [/bold yellow]")
+            if os.path.exists(path):
+                engine = PersistenceEngine(path)
+                engine.run()
+        elif choice == "4":
+            crack_hash(console.input("Hash: "))
+        elif choice == "b":
+            break
+
+# --- 7. MASTER COMMAND HUB ---
+
+
+def main():
+    """Master Hub: Categorized Operational Command."""
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "--update":
+        perform_update()
+        sys.exit(0)
+    auto_discovery()
+    try:
         while True:
-            try:
-                prompt_label = f"davoid({ctx.selected_module or 'root'})"
-                cmd_input = console.input(
-                    f"[bold red]{prompt_label}[/bold red] > ").strip().split()
-
-                if not cmd_input:
-                    continue
-
-                cmd = cmd_input[0].lower()
-
-                if cmd in ["exit", "quit", "q"]:
-                    console.print(
-                        "[yellow][*] Shutting down mainframe...[/yellow]")
-                    break
-
-                elif cmd == "help":
-                    self.help()
-
-                elif cmd == "show":
-                    if len(cmd_input) > 1 and cmd_input[1] == "modules":
-                        console.print(
-                            f"[bold cyan]Available Modules:[/bold cyan] {', '.join(self.modules.keys())}")
-                    elif len(cmd_input) > 1 and cmd_input[1] == "options":
-                        table = Table(
-                            title="Framework Configuration", border_style="magenta")
-                        table.add_column("Variable", style="cyan")
-                        table.add_column("Value", style="white")
-                        for k, v in ctx.vars.items():
-                            table.add_row(k, str(v))
-                        console.print(table)
-
-                elif cmd == "use":
-                    if len(cmd_input) > 1:
-                        mod_name = cmd_input[1].lower()
-                        if mod_name in self.modules:
-                            ctx.selected_module = mod_name
-                        else:
-                            console.print(
-                                f"[red][!] Module '{mod_name}' not found.[/red]")
-                    else:
-                        console.print(
-                            "[red][!] Usage: use <module_name>[/red]")
-
-                elif cmd == "set":
-                    if len(cmd_input) > 2:
-                        ctx.set(cmd_input[1], cmd_input[2])
-                        console.print(
-                            f"[green][+] {cmd_input[1].upper()} => {cmd_input[2]}[/green]")
-                    else:
-                        console.print(
-                            "[red][!] Usage: set <VARIABLE> <VALUE>[/red]")
-
-                elif cmd == "run" or cmd == "exploit":
-                    if ctx.selected_module:
-                        # Clear screen for module execution
-                        os.system('cls' if os.name == 'nt' else 'clear')
-                        self.modules[ctx.selected_module]()
-                        # After module finishes, redraw header
-                        input(
-                            "\nExecution Finished. Press Enter to return to console...")
-                        os.system('cls' if os.name == 'nt' else 'clear')
-                        draw_header("Interactive Command Hub",
-                                    status_info=self.get_status_line())
-                    else:
-                        console.print(
-                            "[red][!] No module selected. Use 'use <module>' first.[/red]")
-
-                elif cmd == "back":
-                    ctx.selected_module = None
-
+            os.system('cls' if os.name == 'nt' else 'clear')
+            draw_header("Master Command Hub", status_info=get_status())
+            check_version()
+            console.print(
+                "\n[bold cyan]SELECT OPERATIONAL CATEGORY[/bold cyan]")
+            console.print(
+                "[bold red]>[/bold red] [1] Intelligence & OSINT [dim](Recon, OSINT Engine)[/dim]")
+            console.print(
+                "[bold red]>[/bold red] [2] Offensive Operations [dim](MITM, WiFi, Phishing, C2 Hub)[/dim]")
+            console.print(
+                "[bold red]>[/bold red] [3] Payloads & Post-Exploit [dim](Forge, Persistence, Cracking)[/dim]")
+            console.print("\n[bold cyan]SYSTEM TOOLS[/bold cyan]")
+            console.print(
+                "[bold red]>[/bold red] [C] Global Config       [A] Setup Auditor")
+            console.print(
+                "[bold red]>[/bold red] [U] Update Mainframe    [Q] Vanish (Exit)")
+            choice = Prompt.ask("\n[bold red]davoid[/bold red]@[root]", choices=[
+                                "1", "2", "3", "c", "a", "u", "q"], show_choices=False).lower()
+            if choice == "1":
+                hub_intelligence()
+            elif choice == "2":
+                hub_offensive()
+            elif choice == "3":
+                hub_payloads()
+            elif choice == "c":
+                configure_context()
+            elif choice == "a":
+                if run_auditor:
+                    run_auditor()
+                    input("\nAudit Complete. Press Enter to return to main menu...")
                 else:
                     console.print(
-                        f"[red][!] Unknown command: {cmd}. Type 'help' for options.[/red]")
-
-            except KeyboardInterrupt:
-                console.print(
-                    "\n[yellow][*] Use 'exit' to quit safely.[/yellow]")
-            except Exception as e:
-                console.print(f"[bold red][!] Console Error: {e}[/bold red]")
+                        "[bold red][!] Auditor module is not available (Import failed).[/bold red]")
+                    input("\nPress Enter to return...")
+            elif choice == "u":
+                perform_update()
+            elif choice == "q":
+                sys.exit(0)
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except Exception as e:
+        console.print(f"\n[bold red][!] Error:[/bold red] {e}")
+        input("\nPress Enter to return...")
 
 
 if __name__ == "__main__":
-    app = DavoidConsole()
-    app.run_console()
+    main()

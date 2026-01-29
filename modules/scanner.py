@@ -162,7 +162,7 @@ class ScannerEngine:
             "[bold yellow]Scan Range[/bold yellow]", default=subnet_hint).strip()
 
         port_choice = Prompt.ask(
-            "[bold yellow]Ports to audit[/bold yellow] (common / all / custom)",
+            "[bold yellow]Ports to audit[/bold yellow]",
             choices=["common", "all", "custom"],
             default="common"
         )

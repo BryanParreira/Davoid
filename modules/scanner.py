@@ -149,14 +149,14 @@ class ScannerEngine:
             console.print(Panel(
                 f"Interface: [bold cyan]{conf.iface}[/bold cyan] | Local IP: [bold cyan]{local_ip}[/bold cyan]\nDefault Subnet: [bold cyan]{subnet_hint}[/bold cyan]", title="Network Context", border_style="dim"))
         except:
-            subnet_hint = "192.168.1.0/24"
+            subnet_hint = ""
 
         # --- USER INPUT FOR VARIABLES ---
         target = Prompt.ask(
             "[bold yellow]Scan Range[/bold yellow]", default=subnet_hint).strip()
 
         port_choice = Prompt.ask(
-            "[bold yellow]Ports to audit[/bold yellow] (common / all / custom)",
+            "[bold yellow]Ports to audit[/bold yellow]",
             choices=["common", "all", "custom"],
             default="common"
         )

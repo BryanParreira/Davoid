@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.prompt import Confirm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.ui import draw_header
 
@@ -46,6 +47,7 @@ class WebGhost:
         self.target = target.rstrip("/")
         self.session = requests.Session()
         self.session.verify = False
+        self.proxies_enabled = False
         
         # [STEALTH] PROXY SUPPORT: Route traffic through Tor (default port 9050)
         if use_tor:
@@ -53,6 +55,7 @@ class WebGhost:
                 'http': 'socks5h://127.0.0.1:9050',
                 'https': 'socks5h://127.0.0.1:9050'
             }
+            self.proxies_enabled = True
         
         # [STEALTH] Randomize the initial header
         self.session.headers = {
@@ -99,8 +102,9 @@ class WebGhost:
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
 
         try:
-            # [STEALTH] Add jitter delay to break traffic patterns
-            time.sleep(random.uniform(0.5, 1.5))
+            # [STEALTH] Add jitter delay to break traffic patterns if using proxy
+            if self.proxies_enabled:
+                time.sleep(random.uniform(0.5, 1.5))
             
             # Increased timeout slightly for Tor latency
             res = self.session.get(url, timeout=10, allow_redirects=False)
@@ -118,13 +122,39 @@ class WebGhost:
     def run(self):
         draw_header("Web Ghost Elite: Professional Auditor")
         
-        try:
-            if self.session.proxies:
-                console.print("[*] Stealth Mode: [bold green]ON[/bold green] (Tor Proxy Active)\n")
-                
-            console.print(f"[*] Analyzing target: [bold yellow]{self.target}[/bold yellow]\n")
-            r = self.session.get(self.target, timeout=10)
+        if self.proxies_enabled:
+            console.print("[*] Stealth Mode: [bold green]ON[/bold green] (Attempting Tor Connection...)\n")
             
+        console.print(f"[*] Analyzing target: [bold yellow]{self.target}[/bold yellow]\n")
+        
+        try:
+            r = self.session.get(self.target, timeout=10)
+        except requests.exceptions.ConnectionError as e:
+            # Handle the specific SOCKS connection error
+            if "SOCKS" in str(e) or "Connection refused" in str(e):
+                console.print("\n[bold red][!] ERROR: Tor Proxy Unreachable (127.0.0.1:9050)[/bold red]")
+                console.print("[yellow]It appears Tor is not running. Your connection was refused.[/yellow]")
+                
+                if Confirm.ask("[bold white]Disable Proxy (Stealth OFF) and continue?[/bold white]"):
+                    console.print("\n[red][!] SWITCHING TO CLEARNET. STEALTH DISABLED.[/red]")
+                    self.session.proxies = {}
+                    self.proxies_enabled = False
+                    try:
+                        r = self.session.get(self.target, timeout=10)
+                    except Exception as e2:
+                         console.print(f"[bold red][!] Connection failed even without proxy: {e2}[/bold red]")
+                         return
+                else:
+                    console.print("[dim]Aborting scan...[/dim]")
+                    return
+            else:
+                console.print(f"[bold red][!] Target Connectivity Error: {e}[/bold red]")
+                return
+        except Exception as e:
+            console.print(f"[bold red][!] Unexpected Error: {e}[/bold red]")
+            return
+
+        try:
             # 1. Header Audit
             console.print(self.audit_headers(r.headers))
 
@@ -169,8 +199,6 @@ class WebGhost:
 
             console.print(discovery_table)
 
-        except requests.exceptions.RequestException as e:
-            console.print(f"[bold red][!] Target Connectivity Error: {e}[/bold red]")
         except Exception as e:
             console.print(f"[bold red][!] Audit Error: {e}[/bold red]")
         

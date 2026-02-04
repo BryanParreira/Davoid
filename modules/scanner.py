@@ -4,7 +4,8 @@ import warnings
 import requests
 import time
 import random
-from scapy.all import ARP, Ether, srp, IP, ICMP, TCP, sr, sr1, conf, get_if_addr
+# [STEALTH] Added RandShort and send for randomization and RST injection
+from scapy.all import ARP, Ether, srp, IP, ICMP, TCP, sr, sr1, conf, get_if_addr, send, RandShort
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
@@ -67,8 +68,9 @@ class ScannerEngine:
                 time.sleep(random.uniform(0.1, self.stealth_delay))
 
             # Probe common ports to elicit a TCP response
+            # [STEALTH] Randomize source port here as well
             pkt = sr1(
-                IP(dst=ip)/TCP(dport=[80, 443, 22, 445], flags="S"), timeout=1, verbose=0)
+                IP(dst=ip)/TCP(sport=RandShort(), dport=[80, 443, 22, 445], flags="S"), timeout=1, verbose=0)
 
             if pkt and pkt.haslayer(TCP):
                 ttl = pkt.getlayer(IP).ttl
@@ -132,12 +134,43 @@ class ScannerEngine:
         return None
 
     def stealth_probe(self, ip):
-        """TCP SYN Discovery (Half-Open) to bypass standard logging."""
-        syn_pkt = IP(dst=ip)/TCP(dport=[80, 443, 22, 53], flags="S")
-        ans, _ = sr(syn_pkt, timeout=0.8, verbose=0)
-        if ans:
-            return True
-        return sr1(IP(dst=ip)/ICMP(), timeout=0.8, verbose=0) is not None
+        """
+        [STEALTH] Advanced TCP SYN 'Half-Open' Scan.
+        Sends SYN, listens for SYN-ACK, then sends RST to avoid full connection logging.
+        """
+        # [STEALTH] Randomize source port to mimic dynamic traffic
+        src_port = RandShort()
+        
+        try:
+            # 1. Send SYN to common ports
+            # flags="S" is SYN
+            syn_pkt = IP(dst=ip)/TCP(sport=src_port, dport=[80, 443, 22, 53], flags="S")
+            
+            # 2. Wait for responses
+            ans, _ = sr(syn_pkt, timeout=1.0, verbose=0)
+            
+            is_live = False
+            
+            for sent, received in ans:
+                if received.haslayer(TCP):
+                    flags = received.getlayer(TCP).flags
+                    # 0x12 is SYN-ACK (Port Open)
+                    if flags == 0x12:
+                        is_live = True
+                        # 3. [STEALTH] Send RST to close half-open connection immediately
+                        # This prevents the server from logging a 'timeout' or 'incomplete' error
+                        rst_pkt = IP(dst=ip)/TCP(sport=src_port, dport=received.sport, flags="R")
+                        send(rst_pkt, verbose=0)
+            
+            if is_live:
+                return True
+
+            # Fallback: ICMP
+            ping = sr1(IP(dst=ip)/ICMP(), timeout=0.8, verbose=0)
+            return ping is not None
+            
+        except Exception:
+            return False
 
     def network_discovery(self):
         draw_header("Root Discovery & Deep Intelligence")
@@ -213,9 +246,13 @@ class ScannerEngine:
                     ip = futures[f]
                     progress.update(task2, advance=1)
                     if f.result() and not any(h["ip"] == ip for h in active_hosts):
-                        res, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
-                                     ARP(pdst=ip), timeout=1, verbose=False)
-                        mac = res[0][1].hwsrc if res else "Unknown"
+                        # Attempt to resolve MAC for new host found via SYN scan
+                        try:
+                            res, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
+                                         ARP(pdst=ip), timeout=1, verbose=False)
+                            mac = res[0][1].hwsrc if res else "Unknown"
+                        except:
+                            mac = "Unknown"
                         active_hosts.append({"ip": ip, "mac": mac})
 
             # Phase 3: Intelligence

@@ -2,6 +2,8 @@ import requests
 import urllib3
 import re
 import threading
+import time
+import random
 from bs4 import BeautifulSoup
 from rich.console import Console
 from rich.table import Table
@@ -31,13 +33,30 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "Controls Metadata Leakage"
 }
 
+# [STEALTH] List of Rotating User-Agents to mimic legitimate traffic
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
+]
+
 class WebGhost:
-    def __init__(self, target):
+    def __init__(self, target, use_tor=True):
         self.target = target.rstrip("/")
         self.session = requests.Session()
         self.session.verify = False
+        
+        # [STEALTH] PROXY SUPPORT: Route traffic through Tor (default port 9050)
+        if use_tor:
+            self.session.proxies = {
+                'http': 'socks5h://127.0.0.1:9050',
+                'https': 'socks5h://127.0.0.1:9050'
+            }
+        
+        # [STEALTH] Randomize the initial header
         self.session.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Davoid-WebAudit/2.0"
+            "User-Agent": random.choice(USER_AGENTS)
         }
 
     def audit_headers(self, headers):
@@ -73,10 +92,19 @@ class WebGhost:
         return intel
 
     def check_path(self, path):
-        """Worker function for concurrent path discovery."""
+        """Worker function for concurrent path discovery with Stealth."""
         url = f"{self.target}{path}"
+        
+        # [STEALTH] Rotate User-Agent for this specific request
+        self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
+
         try:
-            res = self.session.get(url, timeout=3, allow_redirects=False)
+            # [STEALTH] Add jitter delay to break traffic patterns
+            time.sleep(random.uniform(0.5, 1.5))
+            
+            # Increased timeout slightly for Tor latency
+            res = self.session.get(url, timeout=10, allow_redirects=False)
+            
             if res.status_code == 200:
                 return (path, "[bold green]200 OK[/bold green]")
             elif res.status_code == 403:
@@ -91,8 +119,11 @@ class WebGhost:
         draw_header("Web Ghost Elite: Professional Auditor")
         
         try:
+            if self.session.proxies:
+                console.print("[*] Stealth Mode: [bold green]ON[/bold green] (Tor Proxy Active)\n")
+                
             console.print(f"[*] Analyzing target: [bold yellow]{self.target}[/bold yellow]\n")
-            r = self.session.get(self.target, timeout=5)
+            r = self.session.get(self.target, timeout=10)
             
             # 1. Header Audit
             console.print(self.audit_headers(r.headers))
@@ -148,7 +179,8 @@ class WebGhost:
 def web_ghost():
     target = console.input("[bold yellow]Enter Target URL (e.g., https://example.com): [/bold yellow]").strip()
     if target.startswith("http"):
-        scanner = WebGhost(target)
+        # Initializing with Stealth enabled by default
+        scanner = WebGhost(target, use_tor=True)
         scanner.run()
     else:
         console.print("[red][!] Invalid URL format.[/red]")

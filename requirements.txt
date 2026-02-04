@@ -1,10 +1,10 @@
 rich
 scapy
-requests
+requests[socks]
 cryptography
 pywebcopy
 python-crontab
-dnspython 
+dnspython
 python-whois
 flask
 psutil
@@ -12,7 +12,3 @@ netaddr
 beautifulsoup4
 phonenumbers
 asyncio
-
-
-
-

@@ -43,18 +43,17 @@ if [[ "$OS_TYPE" == "linux" ]]; then
     # Debian/Ubuntu/Kali Logic
     if command -v apt-get &> /dev/null; then
         echo "    -> Updating package lists..."
-        sudo apt-get update -qq
+        # redirect stdin to /dev/null to prevent curl | bash interruption
+        sudo apt-get update -qq < /dev/null
         
         echo "    -> Installing Tools via apt..."
-        # Added: nmap, tcpdump, aircrack-ng, net-tools, wireless-tools, git
         sudo apt-get install -y tor macchanger python3-venv libpcap-dev \
-                                nmap tcpdump aircrack-ng net-tools wireless-tools git
+                                nmap tcpdump aircrack-ng net-tools wireless-tools git < /dev/null
         
-        # Ensure Tor service is started
         if ! systemctl is-active --quiet tor; then
             echo "    -> Starting Tor Service..."
-            sudo systemctl enable tor
-            sudo systemctl start tor
+            sudo systemctl enable tor < /dev/null
+            sudo systemctl start tor < /dev/null
         fi
     else
         echo -e "\033[1;33m[!] Warning: 'apt-get' not found. Manually install: tor, nmap, macchanger, aircrack-ng\033[0m"
@@ -64,12 +63,11 @@ elif [[ "$OS_TYPE" == "mac" ]]; then
     # macOS Logic (Homebrew)
     if command -v brew &> /dev/null; then
         echo "    -> Installing Tools via Homebrew..."
-        # Added: nmap, tcpdump, aircrack-ng, git
-        brew install tor macchanger nmap tcpdump aircrack-ng git
+        # redirect stdin to /dev/null to prevent curl | bash interruption
+        brew install tor macchanger nmap tcpdump aircrack-ng git < /dev/null
         
-        # Start Tor service on macOS
         echo "    -> Starting Tor Service..."
-        brew services start tor
+        brew services start tor < /dev/null
     else
         echo -e "\033[1;31m[!] Error: Homebrew not found. Dependencies cannot be installed automatically.\033[0m"
         echo -e "\033[1;33m[!] Please install Homebrew or manually install: tor nmap aircrack-ng\033[0m"
@@ -82,11 +80,11 @@ fi
 echo -e "\033[1;34m[*] Syncing Davoid source code...\033[0m"
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd $INSTALL_DIR
-    sudo git pull origin main
+    sudo git pull origin main < /dev/null
     sudo chown -R $USER:$OWNER_GROUP $INSTALL_DIR
 else
     sudo rm -rf $INSTALL_DIR
-    sudo git clone $REPO_URL $INSTALL_DIR
+    sudo git clone $REPO_URL $INSTALL_DIR < /dev/null
     sudo chown -R $USER:$OWNER_GROUP $INSTALL_DIR
 fi
 
@@ -98,7 +96,6 @@ python3 -m venv venv
 ./venv/bin/pip install --upgrade pip > /dev/null
 
 if [ -f "requirements.txt" ]; then
-    # Install dependencies with SOCKS support for Tor
     ./venv/bin/pip install -r requirements.txt
     ./venv/bin/pip install requests[socks] 
 else

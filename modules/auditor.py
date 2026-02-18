@@ -3,9 +3,10 @@ import subprocess
 import platform
 import os
 import socket
+import questionary
 from rich.console import Console
 from rich.table import Table
-from core.ui import draw_header
+from core.ui import draw_header, Q_STYLE
 
 console = Console()
 
@@ -89,7 +90,7 @@ class DavoidAuditor:
         # Security Posture Audit
         self.run_posture_audit()
 
-        input("\nAudit Complete. Press Enter to return...")
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
 
 def run_auditor():

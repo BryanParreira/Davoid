@@ -3,11 +3,15 @@ import multiprocessing
 import os
 import sys
 import itertools
+import time
+import questionary
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 from rich.panel import Panel
+from core.ui import draw_header, Q_STYLE
 
 console = Console()
+
 
 class HashEngine:
     def __init__(self, algo="sha256"):
@@ -23,9 +27,9 @@ class HashEngine:
         word = word.strip()
         if not word:
             return []
-            
+
         variants = {word, word.upper(), word.lower(), word.capitalize()}
-        
+
         # Common padding (Years, sequences)
         suffixes = ["123", "1234", "2024", "2025", "2026", "!", "!!", "@"]
         current_variants = list(variants)
@@ -35,12 +39,12 @@ class HashEngine:
 
         # Leet-speak transformation map
         leet_map = {'a': '@', 'e': '3', 'i': '1', 'o': '0', 's': '$', 't': '7'}
-        
+
         # Create a leet variant
         leet_word = "".join(leet_map.get(c.lower(), c) for c in word)
         variants.add(leet_word)
         variants.add(leet_word.capitalize())
-        
+
         return list(variants)
 
     def crack_worker(self, target, wordlist_chunk, queue):
@@ -49,7 +53,7 @@ class HashEngine:
             for word in wordlist_chunk:
                 if self.stop_event.is_set():
                     return
-                
+
                 for variant in self.mutate(word):
                     # Direct check against the hashing algorithm
                     h = hashlib.new(self.algo)
@@ -64,17 +68,22 @@ class HashEngine:
     def run(self, target_hash):
         """Main orchestrator for the multi-core cracking operation."""
         draw_header("Cracker-Pro: Multi-Core Mutation Engine")
-        
-        path = console.input("[bold yellow]Wordlist Path (e.g., rockyou.txt): [/bold yellow]").strip()
-        if not os.path.exists(path):
+
+        path = questionary.text(
+            "Wordlist Path (e.g., rockyou.txt):", style=Q_STYLE).ask()
+        if not path or not os.path.exists(path):
             return console.print("[red][!] Error: Wordlist file not found.[/red]")
 
         # Algorithm selection (Auto-detect length as a fallback)
-        if len(target_hash) == 32: self.algo = "md5"
-        elif len(target_hash) == 40: self.algo = "sha1"
-        elif len(target_hash) == 64: self.algo = "sha256"
-        
-        console.print(f"[*] Detected Algorithm: [bold cyan]{self.algo.upper()}[/bold cyan]")
+        if len(target_hash) == 32:
+            self.algo = "md5"
+        elif len(target_hash) == 40:
+            self.algo = "sha1"
+        elif len(target_hash) == 64:
+            self.algo = "sha256"
+
+        console.print(
+            f"[*] Detected Algorithm: [bold cyan]{self.algo.upper()}[/bold cyan]")
 
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -83,13 +92,15 @@ class HashEngine:
             total_words = len(words)
             num_cores = multiprocessing.cpu_count()
             chunk_size = max(1, total_words // num_cores)
-            chunks = [words[i:i + chunk_size] for i in range(0, total_words, chunk_size)]
+            chunks = [words[i:i + chunk_size]
+                      for i in range(0, total_words, chunk_size)]
 
             # Using a Queue to communicate found password back to main process
             found_queue = multiprocessing.Queue()
             processes = []
 
-            console.print(f"[*] Dispatching tasks across {num_cores} logical cores...")
+            console.print(
+                f"[*] Dispatching tasks across {num_cores} logical cores...")
 
             with Progress(
                 SpinnerColumn(),
@@ -99,12 +110,13 @@ class HashEngine:
                 TimeElapsedColumn(),
                 console=console
             ) as progress:
-                
-                progress.add_task(f"Cracking {target_hash[:10]}...", total=total_words)
+
+                progress.add_task(
+                    f"Cracking {target_hash[:10]}...", total=total_words)
 
                 for chunk in chunks:
                     p = multiprocessing.Process(
-                        target=self.crack_worker, 
+                        target=self.crack_worker,
                         args=(target_hash, chunk, found_queue)
                     )
                     p.start()
@@ -131,20 +143,24 @@ class HashEngine:
                     title="Crack Completed", border_style="green"
                 ))
             else:
-                console.print("\n[red][!] Exhausted wordlist. No match found.[/red]")
+                console.print(
+                    "\n[red][!] Exhausted wordlist. No match found.[/red]")
 
         except Exception as e:
             console.print(f"[red][!] Cracking error: {e}[/red]")
 
-def draw_header(text):
-    console.print(Panel(f"[bold white]{text}[/bold white]", border_style="magenta", expand=False))
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
-def start_crack():
-    target = console.input("[bold yellow]Enter Target Hash: [/bold yellow]").strip()
-    if target:
+
+def start_crack(target_hash=None):
+    if not target_hash:
+        target_hash = questionary.text(
+            "Enter Target Hash:", style=Q_STYLE).ask()
+
+    if target_hash:
         engine = HashEngine()
-        engine.run(target)
+        engine.run(target_hash)
+
 
 if __name__ == "__main__":
-    import time
     start_crack()

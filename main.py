@@ -68,9 +68,17 @@ try:
 except ImportError as e:
     print(f"[!] Warning: Offensive modules limited: {e}")
 
+# D. Advanced & AI Capabilities (NEW)
+try:
+    from modules.ai_assist import run_ai_console
+    from modules.reporter import generate_report
+except ImportError as e:
+    print(f"[!] Warning: AI/Reporting modules missing: {e}")
+
 console = Console()
 
 # --- 5. SUPPORT FUNCTIONS ---
+
 
 def auto_discovery():
     """Elite Feature: Automatic Interface and Network Detection."""
@@ -83,7 +91,7 @@ def auto_discovery():
             gw_ip = conf.route.route("0.0.0.0")[2]
         except:
             gw_ip = "Unknown"
-            
+
         ctx.set("INTERFACE", active_iface)
         ctx.set("LHOST", local_ip)
         ctx.vars["GATEWAY"] = gw_ip
@@ -91,34 +99,44 @@ def auto_discovery():
     except:
         return False
 
+
 def randomize_identity():
     """
     [STEALTH] Rotates the MAC address to mask hardware identity.
     Requires 'macchanger' or standard ip/ifconfig tools.
     """
     iface = ctx.get("INTERFACE") or "eth0"
-    console.print(f"[dim][*] Attempting Identity Rotation for {iface}...[/dim]")
-    
+    console.print(
+        f"[dim][*] Attempting Identity Rotation for {iface}...[/dim]")
+
     # Method 1: Macchanger (Preferred)
     if shutil.which("macchanger"):
         try:
-            subprocess.run(["ifconfig", iface, "down"], check=False, stdout=subprocess.DEVNULL)
-            subprocess.run(["macchanger", "-r", iface], check=False, stdout=subprocess.DEVNULL)
-            subprocess.run(["ifconfig", iface, "up"], check=False, stdout=subprocess.DEVNULL)
-            console.print(f"[bold green][+] Identity Randomized (Macchanger)[/bold green]")
+            subprocess.run(["ifconfig", iface, "down"],
+                           check=False, stdout=subprocess.DEVNULL)
+            subprocess.run(["macchanger", "-r", iface],
+                           check=False, stdout=subprocess.DEVNULL)
+            subprocess.run(["ifconfig", iface, "up"],
+                           check=False, stdout=subprocess.DEVNULL)
+            console.print(
+                f"[bold green][+] Identity Randomized (Macchanger)[/bold green]")
             return
         except:
             pass
-            
+
     # Method 2: Manual Link Set (Fallback)
     try:
         # Generate random hex bytes
         import random
-        mac = "02:00:00:%02x:%02x:%02x" % (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-        subprocess.run(f"ip link set dev {iface} address {mac}", shell=True, stderr=subprocess.DEVNULL)
-        console.print(f"[bold green][+] Identity Randomized (Manual Link)[/bold green]")
+        mac = "02:00:00:%02x:%02x:%02x" % (random.randint(
+            0, 255), random.randint(0, 255), random.randint(0, 255))
+        subprocess.run(
+            f"ip link set dev {iface} address {mac}", shell=True, stderr=subprocess.DEVNULL)
+        console.print(
+            f"[bold green][+] Identity Randomized (Manual Link)[/bold green]")
     except Exception as e:
         console.print(f"[yellow][!] Identity Rotation Skipped: {e}[/yellow]")
+
 
 def vanish_sequence():
     """
@@ -126,9 +144,9 @@ def vanish_sequence():
     Wipes all logs, captures, and temporary files created during the session.
     """
     console.print("\n[bold red]INITIATING VANISH SEQUENCE...[/bold red]")
-    
+
     targets = ["logs", "clones", "payloads", "__pycache__"]
-    
+
     for t in targets:
         path = os.path.join(os.getcwd(), t)
         if os.path.exists(path):
@@ -137,13 +155,15 @@ def vanish_sequence():
                 console.print(f"[dim][-] Wiped: {path}[/dim]")
             except Exception as e:
                 console.print(f"[red][!] Failed to wipe {t}: {e}[/red]")
-    
+
     console.print("[bold green][*] Evidence cleared. Ghost out.[/bold green]")
     sys.exit(0)
+
 
 def get_status():
     """Generates the dynamic status string for the tactical header."""
     return f"[green]IFACE:[/green] {ctx.get('INTERFACE')} | [green]IP:[/green] {ctx.get('LHOST')} | [green]GW:[/green] {ctx.vars.get('GATEWAY', 'Unknown')}"
+
 
 def configure_context():
     """Manual Overrides for the Context Engine."""
@@ -174,6 +194,7 @@ def configure_context():
             break
 
 # --- 6. CATEGORY SUB-MENUS ---
+
 
 def hub_intelligence():
     """Intelligence Hub: Expanded with Holmes DNS Intelligence."""
@@ -223,6 +244,7 @@ def hub_intelligence():
         elif choice == "b":
             break
 
+
 def hub_offensive():
     """Offensive Hub: Integrated MITM and Wireless Suite."""
     while True:
@@ -250,6 +272,7 @@ def hub_offensive():
             run_ghost_hub()
         elif choice == "b":
             break
+
 
 def hub_payloads():
     """Payload Hub: Establishing Persistence and Access."""
@@ -283,17 +306,18 @@ def hub_payloads():
 
 # --- 7. MASTER COMMAND HUB ---
 
+
 def main():
     """Master Hub: Categorized Operational Command."""
     if len(sys.argv) > 1 and sys.argv[1].lower() == "--update":
         perform_update()
         sys.exit(0)
-    
+
     # 1. Startup: Detect interface and attempt identity rotation
     auto_discovery()
     # Optional: Uncomment to force rotation on every startup
-    # randomize_identity() 
-    
+    # randomize_identity()
+
     try:
         while True:
             os.system('cls' if os.name == 'nt' else 'clear')
@@ -307,19 +331,33 @@ def main():
                 "[bold red]>[/bold red] [2] Offensive Operations [dim](MITM, WiFi, Phishing, C2 Hub)[/dim]")
             console.print(
                 "[bold red]>[/bold red] [3] Payloads & Post-Exploit [dim](Forge, Persistence, Cracking)[/dim]")
+
+            # [NEW] AI & Reporting Integration
+            console.print("\n[bold cyan]ADVANCED CAPABILITIES[/bold cyan]")
+            console.print(
+                "[bold red]>[/bold red] [4] AI Cortex (Ollama)  [dim](Chat, Log Analysis, Strategy)[/dim]")
+            console.print(
+                "[bold red]>[/bold red] [5] Generate Report     [dim](Compile Logs to HTML)[/dim]")
+
             console.print("\n[bold cyan]SYSTEM TOOLS[/bold cyan]")
             console.print(
                 "[bold red]>[/bold red] [C] Global Config       [A] Setup Auditor")
             console.print(
                 "[bold red]>[/bold red] [U] Update Mainframe    [Q] VANISH (Secure Exit)")
+
             choice = Prompt.ask("\n[bold red]davoid[/bold red]@[root]", choices=[
-                                "1", "2", "3", "c", "a", "u", "q"], show_choices=False).lower()
+                                "1", "2", "3", "4", "5", "c", "a", "u", "q"], show_choices=False).lower()
+
             if choice == "1":
                 hub_intelligence()
             elif choice == "2":
                 hub_offensive()
             elif choice == "3":
                 hub_payloads()
+            elif choice == "4":
+                run_ai_console()
+            elif choice == "5":
+                generate_report()
             elif choice == "c":
                 configure_context()
             elif choice == "a":
@@ -335,7 +373,7 @@ def main():
             elif choice == "q":
                 # Execute forensic cleanup
                 vanish_sequence()
-                
+
     except KeyboardInterrupt:
         # Catch Ctrl+C and offer cleanup
         if console.input("\n[bold yellow]Wipe evidence before exit? (Y/n): [/bold yellow]").lower() != 'n':
@@ -344,6 +382,7 @@ def main():
     except Exception as e:
         console.print(f"\n[bold red][!] Error:[/bold red] {e}")
         input("\nPress Enter to return...")
+
 
 if __name__ == "__main__":
     main()

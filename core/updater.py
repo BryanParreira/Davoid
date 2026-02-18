@@ -3,11 +3,12 @@ import sys
 import shutil
 import subprocess
 import requests
-import hashlib
+import questionary
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.table import Table
+from core.ui import Q_STYLE
 
 console = Console()
 
@@ -33,6 +34,8 @@ def check_version():
                     if len(parts) >= 2:
                         remote_version = parts[1]
                         if remote_version != VERSION:
+                            console.print(
+                                f"[bold yellow][!] Update Available: {remote_version} (Current: {VERSION})[/bold yellow]")
                             return remote_version
     except Exception:
         # Silent fail to prevent crashing if there is no internet connection
@@ -93,7 +96,8 @@ def perform_update():
     # 1. Create Backup Snapshot
     console.print("[*] Creating pre-update snapshot...")
     if not create_snapshot():
-        if console.input("[yellow]Continue without backup? (y/N): [/yellow]").lower() != 'y':
+        # Updated to use questionary for consistent UI
+        if not questionary.confirm("Snapshot failed. Continue without backup?", default=False, style=Q_STYLE).ask():
             return
 
     try:

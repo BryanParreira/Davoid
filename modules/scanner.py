@@ -4,16 +4,15 @@ import warnings
 import requests
 import time
 import random
-# [STEALTH] Added RandShort and send for randomization and RST injection
+import questionary
 from scapy.all import ARP, Ether, srp, IP, ICMP, TCP, sr, sr1, conf, get_if_addr, send, RandShort
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.panel import Panel
-from rich.prompt import Prompt, Confirm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from netaddr import IPNetwork
-from core.ui import draw_header
+from core.ui import draw_header, Q_STYLE  # Import the global style
 
 # Suppress Scapy IPv6 and Layer 2 warnings for a cleaner output
 warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
@@ -30,7 +29,6 @@ VULN_DB = {
     "HFS 2.3": "CVE-2014-6287 (RCE)"
 }
 
-# Auditing common high-value ports
 TOP_PORTS = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139,
              143, 443, 445, 993, 995, 1723, 3306, 3389, 5432, 5900, 8000, 8080, 8443]
 
@@ -38,20 +36,16 @@ TOP_PORTS = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139,
 class ScannerEngine:
     def __init__(self):
         self.results = []
-        self.vendor_cache = {}  # Prevent repeated API calls
+        self.vendor_cache = {}
         self.lock = threading.Lock()
-        self.stealth_delay = 0  # Default to no delay
+        self.stealth_delay = 0
 
     def get_vendor(self, mac):
-        """Identifies manufacturer via MAC OUI with local caching."""
         if mac in self.vendor_cache:
             return self.vendor_cache[mac]
-
         if mac == "Unknown" or ":" not in mac:
             return "Unknown"
-
         try:
-            # Note: API rate limits apply
             url = f"https://api.macvendors.com/{mac}"
             res = requests.get(url, timeout=2)
             vendor = res.text if res.status_code == 200 else "Unknown"
@@ -61,56 +55,31 @@ class ScannerEngine:
             return "Unknown"
 
     def os_fingerprint(self, ip):
-        """Advanced OS Fingerprinting using TTL and TCP Window behavior."""
         try:
-            # Stealth jitter for OS probe
             if self.stealth_delay > 0:
                 time.sleep(random.uniform(0.1, self.stealth_delay))
-
-            # Probe common ports to elicit a TCP response
-            # [STEALTH] Randomize source port here as well
-            pkt = sr1(
-                IP(dst=ip)/TCP(sport=RandShort(), dport=[80, 443, 22, 445], flags="S"), timeout=1, verbose=0)
-
+            pkt = sr1(IP(dst=ip)/TCP(sport=RandShort(),
+                      dport=[80, 443, 22, 445], flags="S"), timeout=1, verbose=0)
             if pkt and pkt.haslayer(TCP):
                 ttl = pkt.getlayer(IP).ttl
                 window = pkt.getlayer(TCP).window
-
-                # TTL + Window Size Analysis (Nmap-style heuristics)
                 if ttl <= 64:
-                    if window == 5840 or window == 29200:
-                        return "Linux (Kernel 2.6+ / 3.x)"
-                    if window <= 1024:
-                        return "iOS / Apple Embedded"
-                    return "Linux / IoT / Android"
+                    return "Linux/Unix"
                 elif ttl <= 128:
-                    if window == 8192:
-                        return "Windows 7 / 10 / Server"
-                    if window == 65535:
-                        return "Windows XP / 2003"
-                    return "Windows (Generic)"
+                    return "Windows"
                 elif ttl <= 255:
-                    return "Network Device (Cisco/Solaris/FreeBSD)"
-
-            # Fallback to ICMP if TCP is shielded
+                    return "Cisco/Network"
             pkt_icmp = sr1(IP(dst=ip)/ICMP(), timeout=0.8, verbose=0)
             if pkt_icmp:
-                ttl = pkt_icmp.getlayer(IP).ttl
-                if ttl <= 64:
-                    return "Linux / Mac (ICMP Guess)"
-                if ttl <= 128:
-                    return "Windows (ICMP Guess)"
-                return "Network Infrastructure"
+                return "Unknown (ICMP Responsive)"
         except:
             pass
         return "Unknown / Shielded"
 
     def service_audit(self, ip, port):
-        """Performs banner grabbing and matches against VULN_DB."""
         try:
             if self.stealth_delay > 0:
                 time.sleep(random.uniform(0.5, self.stealth_delay * 2))
-
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(1.5)
                 if s.connect_ex((ip, port)) == 0:
@@ -118,127 +87,88 @@ class ScannerEngine:
                         s.send(b"GET / HTTP/1.1\r\nHost: davoid\r\n\r\n")
                     else:
                         s.send(b"\r\n")
-
                     banner = s.recv(1024).decode(
                         'utf-8', errors='ignore').strip()
                     if banner:
                         for version, cve in VULN_DB.items():
                             if version.lower() in banner.lower():
                                 return f"[bold red]{port}: {version} -> {cve}[/bold red]"
-                        clean_banner = banner.split(
-                            '\n')[0].replace('\r', '')[:35]
-                        return f"[green]{port}:[/green] {clean_banner}"
+                        return f"[green]{port}:[/green] {banner[:35]}"
                     return f"[green]{port}:[/green] Open"
         except:
             pass
         return None
 
     def stealth_probe(self, ip):
-        """
-        [STEALTH] Advanced TCP SYN 'Half-Open' Scan.
-        Sends SYN, listens for SYN-ACK, then sends RST to avoid full connection logging.
-        """
-        # [STEALTH] Randomize source port to mimic dynamic traffic
-        src_port = RandShort()
-        
         try:
-            # 1. Send SYN to common ports
-            # flags="S" is SYN
-            syn_pkt = IP(dst=ip)/TCP(sport=src_port, dport=[80, 443, 22, 53], flags="S")
-            
-            # 2. Wait for responses
+            src_port = RandShort()
+            syn_pkt = IP(dst=ip)/TCP(sport=src_port,
+                                     dport=[80, 443, 22, 53], flags="S")
             ans, _ = sr(syn_pkt, timeout=1.0, verbose=0)
-            
-            is_live = False
-            
             for sent, received in ans:
-                if received.haslayer(TCP):
-                    flags = received.getlayer(TCP).flags
-                    # 0x12 is SYN-ACK (Port Open)
-                    if flags == 0x12:
-                        is_live = True
-                        # 3. [STEALTH] Send RST to close half-open connection immediately
-                        # This prevents the server from logging a 'timeout' or 'incomplete' error
-                        rst_pkt = IP(dst=ip)/TCP(sport=src_port, dport=received.sport, flags="R")
-                        send(rst_pkt, verbose=0)
-            
-            if is_live:
-                return True
-
-            # Fallback: ICMP
-            ping = sr1(IP(dst=ip)/ICMP(), timeout=0.8, verbose=0)
-            return ping is not None
-            
-        except Exception:
+                if received.haslayer(TCP) and received.getlayer(TCP).flags == 0x12:
+                    send(IP(dst=ip)/TCP(sport=src_port,
+                         dport=received.sport, flags="R"), verbose=0)
+                    return True
+            return False
+        except:
             return False
 
     def network_discovery(self):
         draw_header("Root Discovery & Deep Intelligence")
 
-        # Context Discovery
         try:
             local_ip = get_if_addr(conf.iface)
             subnet_hint = str(IPNetwork(f"{local_ip}/24").cidr)
-            console.print(Panel(
-                f"Interface: [bold cyan]{conf.iface}[/bold cyan] | Local IP: [bold cyan]{local_ip}[/bold cyan]\nDefault Subnet: [bold cyan]{subnet_hint}[/bold cyan]", title="Network Context", border_style="dim"))
         except:
-            subnet_hint = ""
+            subnet_hint = "192.168.1.0/24"
 
-        # --- USER INPUT FOR VARIABLES ---
-        target = Prompt.ask(
-            "[bold yellow]Scan Range[/bold yellow]", default=subnet_hint).strip()
+        # --- INTERACTIVE CONFIGURATION ---
+        target = questionary.text(
+            "Target Subnet:", default=subnet_hint, style=Q_STYLE).ask()
 
-        port_choice = Prompt.ask(
-            "[bold yellow]Ports to audit[/bold yellow]",
-            choices=["common", "all", "custom"],
-            default="common"
-        )
-        if port_choice == "all":
+        port_mode = questionary.select(
+            "Scan Profile:",
+            choices=["Fast (Top 20 Ports)",
+                     "Full Range (1-1024)", "Custom Range"],
+            style=Q_STYLE
+        ).ask()
+
+        scan_ports = TOP_PORTS
+        if "Full" in port_mode:
             scan_ports = list(range(1, 1025))
-        elif port_choice == "custom":
-            custom_input = console.input(
-                "[bold cyan]Enter ports (e.g. 80,443): [/bold cyan]")
-            scan_ports = [int(p.strip()) for p in custom_input.split(",")]
-        else:
-            scan_ports = TOP_PORTS
+        elif "Custom" in port_mode:
+            p_str = questionary.text(
+                "Enter Ports (e.g. 80,443):", style=Q_STYLE).ask()
+            scan_ports = [int(p) for p in p_str.split(",")]
 
-        intensity = int(Prompt.ask(
-            "[bold yellow]Scan Intensity (Threads)[/bold yellow]", default="40"))
+        intensity = int(questionary.select(
+            "Scan Intensity (Threads):",
+            choices=["Stealth (10 Threads)", "Balanced (40 Threads)",
+                     "Aggressive (100 Threads)"],
+            default="Balanced (40 Threads)",
+            style=Q_STYLE
+        ).ask().split('(')[1].split(' ')[0])
 
-        stealth_mode = Confirm.ask(
-            "[bold magenta]Enable Stealth Timing (Safe Scan)?[/bold magenta]", default=False)
-        if stealth_mode:
-            self.stealth_delay = float(Prompt.ask(
-                "[bold magenta]Max Delay (seconds)[/bold magenta]", default="2.0"))
-            intensity = min(intensity, 10)
-            console.print(
-                "[dim magenta][*] Stealth Active: Throttling scan to 10 threads max.[/dim magenta]")
+        do_deep = questionary.confirm(
+            "Enable Deep Service Fingerprinting? (-sV)", default=False, style=Q_STYLE).ask()
 
-        do_deep = Confirm.ask(
-            "[bold cyan]Enable Deep Service Fingerprinting? (-sV)[/bold cyan]", default=False)
-
+        # --- EXECUTION ---
         active_hosts = []
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(), TimeElapsedColumn(), console=console) as progress:
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TimeElapsedColumn(),
-            console=console
-        ) as progress:
-
-            # Phase 1: ARP Mapping
-            task1 = progress.add_task("[cyan]L2 ARP Mapping...", total=None)
+            # ARP
+            task1 = progress.add_task("[cyan]Mapping L2 Layer...", total=100)
             ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
                          ARP(pdst=target), timeout=2, verbose=False)
             for _, rcv in ans:
                 active_hosts.append({"ip": rcv.psrc, "mac": rcv.hwsrc})
             progress.update(task1, completed=100)
 
-            # Phase 2: Stealth SYN Sweep
+            # SYN Sweep
             ip_list = [str(ip) for ip in IPNetwork(target)]
             task2 = progress.add_task(
-                "[yellow]Stealth Scanning (SYN Sweep)...", total=len(ip_list))
+                "[yellow]Stealth SYN Sweep...", total=len(ip_list))
             with ThreadPoolExecutor(max_workers=intensity) as executor:
                 futures = {executor.submit(
                     self.stealth_probe, ip): ip for ip in ip_list}
@@ -246,48 +176,37 @@ class ScannerEngine:
                     ip = futures[f]
                     progress.update(task2, advance=1)
                     if f.result() and not any(h["ip"] == ip for h in active_hosts):
-                        # Attempt to resolve MAC for new host found via SYN scan
-                        try:
-                            res, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") /
-                                         ARP(pdst=ip), timeout=1, verbose=False)
-                            mac = res[0][1].hwsrc if res else "Unknown"
-                        except:
-                            mac = "Unknown"
-                        active_hosts.append({"ip": ip, "mac": mac})
+                        active_hosts.append({"ip": ip, "mac": "Unknown"})
 
-            # Phase 3: Intelligence
+            # Analysis
             table = Table(
                 title=f"Elite Intel: {target}", border_style="bold red", expand=True)
-            table.add_column("Host (IP)", style="cyan")
-            table.add_column("OS Fingerprint", style="bold magenta")
+            table.add_column("Host", style="cyan")
+            table.add_column("OS", style="bold magenta")
             table.add_column("Services", style="yellow")
-            table.add_column("MAC / Vendor", style="dim")
+            table.add_column("Vendor", style="dim")
 
             task3 = progress.add_task(
-                f"[magenta]Analyzing {len(active_hosts)} live hosts...", total=len(active_hosts))
-
+                f"[magenta]Deep Analysis...", total=len(active_hosts))
             for host in active_hosts:
-                ip = host["ip"]
-                mac = host["mac"]
+                ip, mac = host["ip"], host["mac"]
                 vendor = self.get_vendor(mac)
                 os_type = self.os_fingerprint(ip)
-
                 svc_info = []
                 if do_deep:
-                    with ThreadPoolExecutor(max_workers=15) as executor:
+                    with ThreadPoolExecutor(max_workers=20) as executor:
                         futures = [executor.submit(
                             self.service_audit, ip, p) for p in scan_ports]
                         for f in as_completed(futures):
-                            res = f.result()
-                            if res:
-                                svc_info.append(res)
+                            if f.result():
+                                svc_info.append(f.result())
 
                 table.add_row(ip, os_type, "\n".join(svc_info)
                               if svc_info else "None", f"{mac}\n{vendor}")
                 progress.update(task3, advance=1)
 
-        console.print("\n", table)
-        input("\nPress Enter to return...")
+        console.print(table)
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
 
 def network_discovery():

@@ -9,20 +9,37 @@ from rich import box
 from rich.table import Table
 from rich.layout import Layout
 from rich.text import Text
+from questionary import Style
 
 console = Console()
+
+# --- GLOBAL THEME DEFINITION ---
+# This ensures every module shares the exact same colors and behavior
+Q_STYLE = Style([
+    ('qmark', 'fg:#ff0000 bold'),       # Token in front of the question
+    ('question', 'fg:#ffffff bold'),    # Question text
+    ('answer', 'fg:#ff0000 bold'),      # Submitted answer
+    ('pointer', 'fg:#ff0000 bold'),     # Pointer used in select
+    ('highlighted', 'fg:#ff0000 bold'),  # Pointed-at choice
+    ('selected', 'fg:#cc5454'),         # Checkbox selected
+    ('separator', 'fg:#666666'),        # Separator
+    ('instruction', 'fg:#666666 italic')  # User instructions
+])
 
 
 def get_system_metrics():
     """Captures real-time system telemetry."""
-    cpu_usage = psutil.cpu_percent(interval=None)
-    ram_usage = psutil.virtual_memory().percent
+    try:
+        cpu_usage = psutil.cpu_percent(interval=None)
+        ram_usage = psutil.virtual_memory().percent
 
-    # Color coding for metrics
-    cpu_color = "green" if cpu_usage < 50 else "yellow" if cpu_usage < 80 else "red"
-    ram_color = "green" if ram_usage < 50 else "yellow" if ram_usage < 80 else "red"
+        # Color coding for metrics
+        cpu_color = "green" if cpu_usage < 50 else "yellow" if cpu_usage < 80 else "red"
+        ram_color = "green" if ram_usage < 50 else "yellow" if ram_usage < 80 else "red"
 
-    return f"CPU: [{cpu_color}]{cpu_usage}%[/{cpu_color}] | RAM: [{ram_color}]{ram_usage}%[/{ram_color}]"
+        return f"CPU: [{cpu_color}]{cpu_usage}%[/{cpu_color}] | RAM: [{ram_color}]{ram_usage}%[/{ram_color}]"
+    except:
+        return "Telemetry Offline"
 
 
 def draw_header(title: str, context=None):

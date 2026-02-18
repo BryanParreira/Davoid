@@ -20,35 +20,27 @@ BACKUP_DIR = "/tmp/davoid_backup"
 
 
 def check_version():
-    """
-    Elite Feature: Passive background version check with clean parsing.
-    Returns the latest version string if an update is available, else None.
-    """
+    """Passive background version check."""
     try:
         response = requests.get(REPO_URL, timeout=3)
         if response.status_code == 200:
             for line in response.text.splitlines():
                 if "VERSION =" in line:
-                    # Cleanly extract only the version string between the quotes
                     parts = line.split('"')
                     if len(parts) >= 2:
                         remote_version = parts[1]
                         if remote_version != VERSION:
-                            console.print(
-                                f"[bold yellow][!] Update Available: {remote_version} (Current: {VERSION})[/bold yellow]")
                             return remote_version
     except Exception:
-        # Silent fail to prevent crashing if there is no internet connection
         pass
     return None
 
 
 def create_snapshot():
-    """Elite Feature: Creates a fail-safe backup before updating."""
+    """Creates a fail-safe backup before updating."""
     try:
         if os.path.exists(BACKUP_DIR):
             shutil.rmtree(BACKUP_DIR)
-        # Snapshot the core logic while ignoring the heavy virtual environment
         shutil.copytree(INSTALL_DIR, BACKUP_DIR, ignore=shutil.ignore_patterns(
             'venv', '.git', '__pycache__'))
         return True
@@ -58,14 +50,12 @@ def create_snapshot():
 
 
 def rollback():
-    """Restores the framework to the last stable snapshot in case of failure."""
+    """Restores the framework to the last stable snapshot."""
     console.print(
-        "[bold red][!] Update Interrupted. Initiating Emergency Rollback...[/bold red]")
+        "[bold red][!] Update Interrupted. Initiating Rollback...[/bold red]")
     try:
         if not os.path.exists(BACKUP_DIR):
-            console.print(
-                "[bold red][!] Critical: No backup found to restore.[/bold red]")
-            return
+            return console.print("[bold red][!] Critical: No backup found.[/bold red]")
 
         for item in os.listdir(BACKUP_DIR):
             s = os.path.join(BACKUP_DIR, item)
@@ -75,48 +65,38 @@ def rollback():
                 shutil.copytree(s, d)
             else:
                 shutil.copy2(s, d)
-        console.print(
-            "[bold green][+] Rollback Successful. Framework Stabilized.[/bold green]")
+        console.print("[bold green][+] Rollback Successful.[/bold green]")
     except Exception as e:
         console.print(
             f"[bold red][!] Total System Failure during rollback: {e}[/bold red]")
 
 
 def perform_update():
-    """Performs a deep-sync with visual progress and error recovery."""
     os.system('cls' if os.name == 'nt' else 'clear')
+    # Updated to Red styling
     console.print(Panel(
-        "[bold cyan]Davoid Updating[/bold cyan]", border_style="cyan", expand=False))
+        "[bold white]Davoid Mainframe Update[/bold white]", border_style="red", expand=False))
 
     if not os.path.exists(INSTALL_DIR):
         console.print(
             f"[bold red][!] Error:[/bold red] {INSTALL_DIR} not found.")
         return
 
-    # 1. Create Backup Snapshot
-    console.print("[*] Creating pre-update snapshot...")
+    console.print("[dim white][*] Creating pre-update snapshot...[/dim white]")
     if not create_snapshot():
-        # UPDATED: Using Questionary for the unified interface style
-        should_continue = questionary.confirm(
-            "Backup failed. Continue anyway?",
-            default=False,
-            style=Q_STYLE
-        ).ask()
-
-        if not should_continue:
+        if not questionary.confirm("Snapshot failed. Continue anyway?", default=False, style=Q_STYLE).ask():
             return
 
     try:
         with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=40),
+            SpinnerColumn(style="bold red"),
+            TextColumn("[bold white]{task.description}[/bold white]"),
+            BarColumn(bar_width=40, style="red",
+                      complete_style="bold red", finished_style="bold green"),
             console=console
         ) as progress:
 
-            # 2. Sync Source Code
-            task1 = progress.add_task(
-                "[white]Syncing Mainframe components...", total=100)
+            task1 = progress.add_task("Syncing Core Components...", total=100)
             os.chdir(INSTALL_DIR)
             subprocess.run(["git", "fetch", "--all"],
                            check=True, capture_output=True)
@@ -126,9 +106,8 @@ def perform_update():
                            check=True, capture_output=True)
             progress.update(task1, completed=100)
 
-            # 3. Synchronize Dependencies
             task2 = progress.add_task(
-                "[white]Synchronizing Environment...", total=100)
+                "Synchronizing Environment...", total=100)
             pip_path = os.path.join(INSTALL_DIR, "venv/bin/pip")
             req_path = os.path.join(INSTALL_DIR, "requirements.txt")
 
@@ -137,22 +116,20 @@ def perform_update():
                                "--upgrade"], check=True, capture_output=True)
             progress.update(task2, completed=100)
 
-        # Integrity Report
-        table = Table(title="Update Integrity Report",
-                      border_style="green", box=None)
-        table.add_column("Component", style="cyan")
-        table.add_column("Status", style="bold green")
+        # Integrity Report with Red Theme
+        table = Table(title="Integrity Status", border_style="red", box=None)
+        table.add_column("Component", style="white")
+        table.add_column("Status", style="bold red")
         table.add_row("Core Engine", "VERIFIED")
         table.add_row("Dependencies", "SYNCHRONIZED")
         console.print(table)
 
-        console.print("[bold green][+] Update Complete![/bold green]")
-        console.print(
-            "[bold yellow][!] Please restart Davoid to load the new modules.[/bold yellow]\n")
+        console.print("[bold red][+] Update Complete.[/bold red]")
+        console.print("[dim]Restart Davoid to apply changes.[/dim]\n")
         sys.exit(0)
 
     except Exception as e:
-        console.print(f"[bold red][!] Update Error:[/bold red] {e}")
+        console.print(f"[bold red][!] Update Critical Failure:[/bold red] {e}")
         rollback()
 
 

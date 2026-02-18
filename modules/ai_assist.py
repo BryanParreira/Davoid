@@ -2,20 +2,18 @@ import requests
 import json
 import os
 import sys
+import questionary
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
-from rich.markdown import Markdown
+from core.ui import draw_header, Q_STYLE
 
 console = Console()
 
 
 class AIEngine:
     def __init__(self, model="llama3"):
-        # Default Ollama local API endpoint
         self.base_url = "http://localhost:11434/api"
         self.model = model
-        # History stores the conversation context
         self.history = []
 
     def check_connection(self):
@@ -39,12 +37,10 @@ class AIEngine:
             pass
         return []
 
-    def chat(self, user_input, system_role="You are a senior cybersecurity expert and penetration tester assistant. Your answers should be technical, concise, and focused on ethical security auditing. You are helpful and tactical."):
+    def chat(self, user_input, system_role="You are a senior cybersecurity expert. Be technical, concise, and focused on ethical security auditing."):
         """
-        Sends a prompt to the model and streams the response to the console.
-        Maintains conversation history for a continuous chat experience.
+        Sends a prompt to the model and streams the response.
         """
-        # Construct the full message chain: System Instruction -> History -> Current Input
         messages = [{"role": "system", "content": system_role}] + \
             self.history + [{"role": "user", "content": user_input}]
 
@@ -56,7 +52,6 @@ class AIEngine:
 
         full_response = ""
         try:
-            # Stream the response for a real-time typing effect
             with requests.post(f"{self.base_url}/chat", json=payload, stream=True) as r:
                 console.print(
                     f"\n[bold cyan]AI ({self.model}):[/bold cyan] ", end="")
@@ -73,7 +68,6 @@ class AIEngine:
                             continue
             print("\n")
 
-            # Update history context to maintain conversation continuity
             self.history.append({"role": "user", "content": user_input})
             self.history.append(
                 {"role": "assistant", "content": full_response})
@@ -89,27 +83,22 @@ class AIEngine:
 
         try:
             with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                # Truncate to first 8000 chars to avoid hitting context window limits
                 data = f.read()[:8000]
 
             prompt = (
-                "Analyze the following scan data/log from a security audit. "
-                "Identify critical vulnerabilities, misconfigurations, or sensitive data leaks. "
-                "Suggest specific remediation steps or further exploitation verification commands.\n\n"
+                "Analyze the following scan data. Identify critical vulnerabilities and suggest remediation.\n\n"
                 f"LOG DATA:\n{data}"
             )
 
             console.print(Panel(
                 f"Sending {os.path.basename(log_path)} to AI Cortex...", style="bold magenta"))
-            # We don't save analysis to the main chat history to keep the context clean
             self.chat(
-                prompt, system_role="You are an expert vulnerability analyst. Provide a structured report with findings and remediation.")
+                prompt, system_role="You are an expert vulnerability analyst. Provide a structured report.")
 
         except Exception as e:
             console.print(f"[red][!] Failed to read log file: {e}[/red]")
 
     def clear_history(self):
-        """Resets the conversation memory."""
         self.history = []
         console.print("[dim][*] Conversation memory wiped.[/dim]")
 
@@ -117,8 +106,7 @@ class AIEngine:
 def run_ai_console():
     """Main entry point for the AI module."""
     console.clear()
-    console.print(Panel.fit(
-        "[bold white]Davoid AI Cortex (Powered by Ollama)[/bold white]", border_style="cyan"))
+    draw_header("AI Cortex (Ollama Engine)")
 
     engine = AIEngine()
 
@@ -127,76 +115,75 @@ def run_ai_console():
         console.print(
             "[bold red][!] Ollama is not reachable on localhost:11434.[/bold red]")
         console.print(
-            "[yellow]Tip: Install Ollama and run 'ollama serve' in a separate terminal.[/yellow]")
-        console.print("[dim]Download from: https://ollama.com[/dim]")
-        input("\nPress Enter to return...")
+            "[yellow]Tip: Run 'ollama serve' in a separate terminal.[/yellow]")
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
     # 2. Model Selection
     models = engine.list_models()
+    default_model = "llama3"
+
     if models:
-        console.print(f"[green]Available Models:[/green] {', '.join(models)}")
-        default_model = models[0] if models else "llama3"
-        try:
-            sel = Prompt.ask("Select Model", default=default_model)
-            engine.model = sel
-        except KeyboardInterrupt:
-            return
-    else:
-        console.print(
-            "[yellow][!] No models found. Using default 'llama3'. Ensure you have pulled a model (e.g., 'ollama pull llama3').[/yellow]")
+        default_model = questionary.select(
+            "Select AI Model:",
+            choices=models,
+            style=Q_STYLE
+        ).ask()
+
+    engine.model = default_model
 
     # 3. Interactive Loop
     while True:
-        console.print("\n[bold cyan]AI OPERATIONS[/bold cyan]")
-        console.print("[1] Chat / Strategize [dim](Interactive Session)[/dim]")
-        console.print(
-            "[2] Analyze Logs      [dim](Feed scan results to AI)[/dim]")
-        console.print("[3] Clear Memory      [dim](Reset chat history)[/dim]")
-        console.print("[B] Back to Main Menu")
+        os.system('cls' if os.name == 'nt' else 'clear')
+        draw_header(f"AI Cortex: {engine.model}")
 
-        choice = Prompt.ask(
-            "\n[bold cyan]ai[/bold cyan]@[root]", choices=["1", "2", "3", "b"])
+        choice = questionary.select(
+            "AI Operations:",
+            choices=[
+                "1. Chat / Strategize (Interactive)",
+                "2. Analyze Logs (Scan Analysis)",
+                "3. Clear Memory",
+                "Back to Main Menu"
+            ],
+            style=Q_STYLE
+        ).ask()
 
-        if choice == "1":
-            console.print(
-                "[dim]Entering Chat Mode. Type 'exit' to stop.[/dim]")
+        if "Chat" in choice:
+            console.print("[dim]Chat Active. Type 'exit' to return.[/dim]")
             while True:
                 try:
-                    q = console.input("[bold green]Operator>[/bold green] ")
-                    if q.lower() in ['exit', 'quit', 'back']:
+                    q = questionary.text("Operator>", style=Q_STYLE).ask()
+                    if not q or q.lower() in ['exit', 'quit', 'back']:
                         break
-                    if q.strip():
-                        engine.chat(q)
+                    engine.chat(q)
                 except KeyboardInterrupt:
                     break
 
-        elif choice == "2":
+        elif "Analyze" in choice:
             log_dir = "logs"
             if os.path.exists(log_dir) and os.listdir(log_dir):
                 logs = sorted(os.listdir(log_dir))
 
-                # Show list of logs
-                log_list_str = "\n".join(
-                    [f"[{i}] {log}" for i, log in enumerate(logs)])
-                console.print(
-                    Panel(log_list_str, title="Available Logs", border_style="blue"))
+                target_log = questionary.select(
+                    "Select Log File:",
+                    choices=logs,
+                    style=Q_STYLE
+                ).ask()
 
-                try:
-                    idx_input = Prompt.ask("Select Log ID")
-                    idx = int(idx_input)
-                    if 0 <= idx < len(logs):
-                        engine.analyze_log(os.path.join(log_dir, logs[idx]))
-                    else:
-                        console.print("[red]Invalid ID.[/red]")
-                except ValueError:
-                    console.print("[red]Invalid Input.[/red]")
+                if target_log:
+                    engine.analyze_log(os.path.join(log_dir, target_log))
+                    questionary.press_any_key_to_continue(style=Q_STYLE).ask()
             else:
-                console.print(
-                    "[yellow][!] No logs found in 'logs/' directory. Run a scan first.[/yellow]")
+                console.print("[yellow][!] No logs found.[/yellow]")
+                questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
-        elif choice == "3":
+        elif "Clear" in choice:
             engine.clear_history()
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
-        elif choice == "b":
+        elif "Back" in choice:
             break
+
+
+if __name__ == "__main__":
+    run_ai_console()

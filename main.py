@@ -37,6 +37,7 @@ except ImportError as e:
     sys.exit(1)
 
 # --- 4. MODULE IMPORTS ---
+# We wrap these in try/except to prevent the app from crashing if one file is missing
 try:
     from modules.auditor import run_auditor
 except ImportError: run_auditor = None
@@ -60,9 +61,11 @@ try:
     from modules.crypt_keeper import encrypt_payload
     from modules.bruteforce import crack_hash
     from modules.persistence import PersistenceEngine
-    # NEW AUTOPILOT IMPORT
+    # FIXED: Added the Autopilot Import here
     from modules.autopilot import run_autopilot
-except ImportError: pass
+except ImportError: 
+    # Fallback if autopilot module is missing
+    run_autopilot = None
 
 try:
     from modules.ai_assist import run_ai_console
@@ -166,30 +169,31 @@ def configure_context():
         else:
             break
 
-# --- 7. MISSION MENUS ---
+# --- 7. MISSION MENUS (Consolidated) ---
 
-def menu_recon():
-    """Streamlined Reconnaissance Menu"""
+def mission_recon():
+    """
+    Consolidated Reconnaissance Menu.
+    Combines Network, Web, DNS, and OSINT into logical flows.
+    """
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Reconnaissance", context=ctx)
+        draw_header("Target Acquisition", context=ctx)
         
         choice = questionary.select(
-            "Select Target Type:",
+            "Select Recon Objective:",
             choices=[
                 questionary.Separator("--- AUTOMATION ---"),
-                Choice("AUTO-PILOT (Hunter Killer Mode)", value="auto"),
+                Choice("Auto-Pilot (Hunter Killer)", value="auto"),
                 
-                questionary.Separator("--- NETWORK & INFRASTRUCTURE ---"),
-                Choice("Network Mapper (Active Discovery)", value="net"),
-                Choice("Web Vulnerability Scanner", value="web"),
-                Choice("DNS Intelligence (Active & Passive)", value="dns"),
-                Choice("Robots.txt & Reputation", value="meta"),
+                questionary.Separator("--- TARGET INFRASTRUCTURE ---"),
+                Choice("Scan Network (Discovery)", value="net"),
+                Choice("Scan Website (Vulnerabilities)", value="web"),
+                Choice("Analyze DNS (Domains)", value="dns"),
                 
-                questionary.Separator("--- PERSON & IDENTITY ---"),
-                Choice("Username & Social Media", value="user"),
-                Choice("Phone Number Intelligence", value="phone"),
-                Choice("Geo-Location Tracking", value="geo"),
+                questionary.Separator("--- TARGET IDENTITY ---"),
+                Choice("Profile Person (OSINT)", value="person"),
+                Choice("Profile Location (Geo)", value="geo"),
                 
                 questionary.Separator("--- NAVIGATION ---"),
                 Choice("Back", value="back")
@@ -197,65 +201,97 @@ def menu_recon():
             style=q_style
         ).ask()
 
-        if choice == "auto": run_autopilot()
-        elif choice == "net": network_discovery()
-        elif choice == "web": 
-            sub = questionary.select("Web Module:", choices=["Vulnerability Scan", "Google Dorks"], style=q_style).ask()
-            if sub == "Vulnerability Scan": web_ghost()
-            else: dork_generator()
+        if choice == "auto":
+            if run_autopilot: run_autopilot()
+            else: console.print("[red]Autopilot module not found.[/red]"); time.sleep(2)
+        
+        elif choice == "net":
+            # Combined Scanner and Sniffer
+            sub = questionary.select("Network Tool:", choices=["Active Discovery (Mapper)", "Passive Sniffer (Interceptor)"], style=q_style).ask()
+            if "Active" in sub: network_discovery()
+            else: 
+                e = SnifferEngine()
+                e.start()
+        
+        elif choice == "web":
+            # Combined Web Tools
+            sub = questionary.select("Web Tool:", choices=["Vulnerability Scanner", "Dork Generator", "Robots.txt Scraper", "Reputation Check"], style=q_style).ask()
+            if "Scanner" in sub: web_ghost()
+            elif "Dork" in sub: dork_generator()
+            elif "Robots" in sub: robots_scraper()
+            elif "Reputation" in sub: reputation_check()
+            
         elif choice == "dns":
-            sub = questionary.select("DNS Mode:", choices=["Active Recon (Brute Force)", "Passive Intel (Logs)"], style=q_style).ask()
+            # Combined DNS Tools
+            sub = questionary.select("DNS Mode:", choices=["Active (Brute Force)", "Passive (Logs)"], style=q_style).ask()
             if "Active" in sub: dns_recon()
             else: dns_intel()
-        elif choice == "meta":
-            sub = questionary.select("Metadata Tool:", choices=["Robots.txt", "Reputation Check"], style=q_style).ask()
-            if "Robots" in sub: robots_scraper()
-            else: reputation_check()
-        elif choice == "user": username_tracker()
-        elif choice == "phone": phone_intel()
+            
+        elif choice == "person":
+            # Combined Person OSINT
+            sub = questionary.select("Tracking Mode:", choices=["Username Tracker", "Phone Intelligence"], style=q_style).ask()
+            if "Username" in sub: username_tracker()
+            else: phone_intel()
+            
         elif choice == "geo": geolocate()
         elif choice == "back": break
 
-def menu_interception():
-    """Traffic Operations Menu"""
+def mission_assault():
+    """
+    Consolidated Assault Menu.
+    Combines Network Attacks, WiFi, and Cracking.
+    """
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Traffic Interception", context=ctx)
+        draw_header("Direct Action", context=ctx)
 
         choice = questionary.select(
-            "Select Operation:",
+            "Select Attack Vector:",
             choices=[
-                Choice("Live Traffic Sniffer", value="sniff"),
+                questionary.Separator("--- NETWORK & WIFI ---"),
                 Choice("Man-in-the-Middle (MITM)", value="mitm"),
                 Choice("DNS Hijacker (Spoofer)", value="dns"),
+                Choice("WiFi Warfare Suite", value="wifi"),
+                
+                questionary.Separator("--- SOCIAL & CREDENTIALS ---"),
+                Choice("Website Cloner (Phishing)", value="clone"),
+                Choice("Hash Cracker", value="crack"),
+                
+                questionary.Separator("--- NAVIGATION ---"),
                 Choice("Back", value="back")
             ],
             style=q_style
         ).ask()
 
-        if choice == "sniff": 
-            e = SnifferEngine()
-            e.start()
-        elif choice == "mitm": 
+        if choice == "mitm": 
             try:
                 e = MITMEngine()
                 e.run()
             except Exception as e: console.print(f"[red]{e}[/red]")
         elif choice == "dns": start_dns_spoof()
+        elif choice == "wifi": run_wifi_suite()
+        elif choice == "clone": clone_site()
+        elif choice == "crack": 
+            h = console.input("[bold yellow]Hash to crack: [/bold yellow]")
+            if h: crack_hash(h)
         elif choice == "back": break
 
-def menu_weaponization():
-    """Payloads & Persistence Menu"""
+def mission_infra():
+    """
+    Consolidated Infrastructure Menu.
+    Combines Payloads, C2, and Persistence.
+    """
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Weaponization", context=ctx)
+        draw_header("Infrastructure & C2", context=ctx)
 
         choice = questionary.select(
-            "Select Tool:",
+            "Select Operation:",
             choices=[
-                Choice("Payload Builder (Shell Forge)", value="forge"),
-                Choice("Payload Encryptor (Crypt-Keeper)", value="crypt"),
-                Choice("Persistence Installer", value="persist"),
+                Choice("Generate Payload", value="forge"),
+                Choice("Encrypt Payload", value="crypt"),
+                Choice("Install Persistence", value="persist"),
+                Choice("Launch C2 Server (Ghost Hub)", value="c2"),
                 Choice("Back", value="back")
             ],
             style=q_style
@@ -270,30 +306,7 @@ def menu_weaponization():
             if p: 
                 e = PersistenceEngine(p)
                 e.run()
-        elif choice == "back": break
-
-def menu_assault():
-    """Direct Action Menu"""
-    while True:
-        os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Assault Operations", context=ctx)
-
-        choice = questionary.select(
-            "Select Attack Vector:",
-            choices=[
-                Choice("WiFi Warfare Suite", value="wifi"),
-                Choice("Website Cloner (Phishing)", value="clone"),
-                Choice("Hash Cracker", value="crack"),
-                Choice("Back", value="back")
-            ],
-            style=q_style
-        ).ask()
-
-        if choice == "wifi": run_wifi_suite()
-        elif choice == "clone": clone_site()
-        elif choice == "crack": 
-            h = console.input("[bold yellow]Hash to crack: [/bold yellow]")
-            if h: crack_hash(h)
+        elif choice == "c2": run_ghost_hub()
         elif choice == "back": break
 
 # --- 8. MASTER LOOP ---
@@ -319,43 +332,36 @@ def main():
             category = questionary.select(
                 "Mission Phase:",
                 choices=[
-                    questionary.Separator("--- PHASE 1: GATHER ---"),
-                    Choice("1. Reconnaissance", value="recon"),
+                    questionary.Separator("--- OPERATIONAL ---"),
+                    Choice("1. Reconnaissance & Intel", value="recon"),
+                    Choice("2. Assault & Exploitation", value="assault"),
+                    Choice("3. Infrastructure & C2", value="infra"),
                     
-                    questionary.Separator("--- PHASE 2: ENGAGE ---"),
-                    Choice("2. Interception", value="intercept"),
-                    Choice("3. Weaponization", value="weapon"),
-                    Choice("4. Assault", value="assault"),
-                    
-                    questionary.Separator("--- PHASE 3: CONTROL & ANALYZE ---"),
-                    Choice("5. Command & Control (C2)", value="c2"),
-                    Choice("6. AI Analysis & Reporting", value="ai"),
+                    questionary.Separator("--- INTELLIGENCE ---"),
+                    Choice("4. AI Cortex & Reporting", value="ai"),
                     
                     questionary.Separator("--- SYSTEM ---"),
-                    Choice("Settings", value="config"),
-                    Choice("Auditor", value="audit"),
-                    Choice("Update", value="update"),
-                    Choice("VANISH", value="exit")
+                    Choice("Settings & Audit", value="sys"),
+                    Choice("Update Framework", value="update"),
+                    Choice("VANISH (Exit)", value="exit")
                 ],
                 style=q_style,
                 use_indicator=True,
                 pointer=">"
             ).ask()
             
-            if category == "recon": menu_recon()
-            elif category == "intercept": menu_interception()
-            elif category == "weapon": menu_weaponization()
-            elif category == "assault": menu_assault()
-            elif category == "c2": run_ghost_hub()
+            if category == "recon": mission_recon()
+            elif category == "assault": mission_assault()
+            elif category == "infra": mission_infra()
             elif category == "ai":
-                sub = questionary.select("AI Operations:", choices=["Launch AI Cortex", "Generate Threat Map"], style=q_style).ask()
-                if "Cortex" in sub: run_ai_console()
+                sub = questionary.select("AI Operations:", choices=["Launch AI Assistant", "Generate Threat Map"], style=q_style).ask()
+                if "Assistant" in sub: run_ai_console()
                 else: generate_report()
-            elif category == "config": configure_context()
-            elif category == "audit":
-                if run_auditor: 
-                    run_auditor()
-                    console.input("\n[dim]Press Enter...[/dim]")
+            elif category == "sys":
+                sub = questionary.select("System Tools:", choices=["Configuration", "Security Audit"], style=q_style).ask()
+                if "Config" in sub: configure_context()
+                else: 
+                    if run_auditor: run_auditor(); console.input("\n[dim]Press Enter...[/dim]")
             elif category == "update": perform_update()
             elif category == "exit": 
                 if questionary.confirm("Execute Vanish Sequence?", default=True, style=q_style).ask():

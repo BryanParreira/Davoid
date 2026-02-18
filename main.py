@@ -60,6 +60,8 @@ try:
     from modules.crypt_keeper import encrypt_payload
     from modules.bruteforce import crack_hash
     from modules.persistence import PersistenceEngine
+    # NEW AUTOPILOT IMPORT
+    from modules.autopilot import run_autopilot
 except ImportError: pass
 
 try:
@@ -70,7 +72,6 @@ except ImportError: pass
 console = Console()
 
 # --- 5. NAVIGATION STYLE ---
-# Cyberpunk Theme
 q_style = Style([
     ('qmark', 'fg:#ff0000 bold'),
     ('question', 'fg:#ffffff bold'),
@@ -176,6 +177,9 @@ def menu_recon():
         choice = questionary.select(
             "Select Target Type:",
             choices=[
+                questionary.Separator("--- AUTOMATION ---"),
+                Choice("AUTO-PILOT (Hunter Killer Mode)", value="auto"),
+                
                 questionary.Separator("--- NETWORK & INFRASTRUCTURE ---"),
                 Choice("Network Mapper (Active Discovery)", value="net"),
                 Choice("Web Vulnerability Scanner", value="web"),
@@ -193,14 +197,13 @@ def menu_recon():
             style=q_style
         ).ask()
 
-        if choice == "net": network_discovery()
+        if choice == "auto": run_autopilot()
+        elif choice == "net": network_discovery()
         elif choice == "web": 
-            # Combined Web Recon flow
             sub = questionary.select("Web Module:", choices=["Vulnerability Scan", "Google Dorks"], style=q_style).ask()
             if sub == "Vulnerability Scan": web_ghost()
             else: dork_generator()
         elif choice == "dns":
-            # Combined DNS flow
             sub = questionary.select("DNS Mode:", choices=["Active Recon (Brute Force)", "Passive Intel (Logs)"], style=q_style).ask()
             if "Active" in sub: dns_recon()
             else: dns_intel()

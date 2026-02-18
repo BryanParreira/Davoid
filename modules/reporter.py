@@ -1,6 +1,5 @@
 import os
 import datetime
-import json
 from jinja2 import Template
 from rich.console import Console
 from rich.panel import Panel
@@ -79,6 +78,7 @@ TEMPLATE_HTML = """
             white-space: pre-wrap;
             font-size: 0.9em;
             background: #0d1117;
+            color: #e6edf3;
         }
         .footer {
             text-align: center;

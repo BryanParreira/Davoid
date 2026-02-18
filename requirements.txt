@@ -13,3 +13,4 @@ beautifulsoup4
 phonenumbers
 asyncio
 jinja2
+questionary

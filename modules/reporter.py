@@ -1,19 +1,21 @@
 import os
 import datetime
+import re
 from jinja2 import Template
 from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
 
-# Embedded HTML Template for single-file portability
+# HTML Template with Embedded Vis.js for Network Graphing
 TEMPLATE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Davoid Security Assessment Report</title>
+    <title>{{ title }}</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
         :root {
             --bg-color: #0d1117;
@@ -22,189 +24,228 @@ TEMPLATE_HTML = """
             --accent-color: #58a6ff;
             --border-color: #30363d;
             --alert-color: #ff7b72;
+            --success-color: #2ea043;
         }
         body {
             background-color: var(--bg-color);
             color: var(--text-color);
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-family: 'Consolas', 'Monaco', monospace;
             margin: 0;
             padding: 20px;
-            line-height: 1.6;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
+        .container { max-width: 1400px; margin: 0 auto; }
         .header {
             border-bottom: 2px solid var(--border-color);
             padding-bottom: 20px;
             margin-bottom: 30px;
             text-align: center;
         }
-        .header h1 { color: var(--alert-color); margin: 0; font-size: 2.5em; letter-spacing: 2px; }
-        .header p { color: var(--accent-color); margin-top: 5px; }
-        .summary {
+        .header h1 { color: var(--alert-color); margin: 0; letter-spacing: 2px; }
+        
+        /* Network Map Container */
+        #network-map {
+            width: 100%;
+            height: 500px;
+            border: 1px solid var(--border-color);
+            background: #000;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .summary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
             margin-bottom: 30px;
         }
         .metric-card {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
-            padding: 15px;
+            padding: 20px;
             border-radius: 6px;
             text-align: center;
         }
-        .metric-value { font-size: 1.5em; font-weight: bold; color: #fff; }
-        .metric-label { font-size: 0.9em; color: #8b949e; }
+        .metric-val { font-size: 2em; font-weight: bold; color: #fff; }
         
         .log-section {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 6px;
             margin-bottom: 20px;
-            overflow: hidden;
         }
         .log-header {
+            padding: 10px 20px;
             background: #21262d;
-            padding: 10px 15px;
             border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            font-weight: bold;
+            color: var(--accent-color);
         }
-        .log-title { font-weight: bold; color: var(--accent-color); }
         .log-content {
             padding: 15px;
             overflow-x: auto;
             white-space: pre-wrap;
             font-size: 0.9em;
-            background: #0d1117;
-            color: #e6edf3;
-        }
-        .footer {
-            text-align: center;
-            margin-top: 50px;
-            padding-top: 20px;
-            border-top: 1px solid var(--border-color);
-            color: #484f58;
-            font-size: 0.8em;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>DAVOID // MISSION REPORT</h1>
-            <p>CLASSIFIED SECURITY ASSESSMENT</p>
-            <p>Generated: {{ timestamp }}</p>
+            <h1>DAVOID // THREAT MAP</h1>
+            <p>INTELLIGENCE REPORT | {{ timestamp }}</p>
         </div>
 
-        <div class="summary">
+        <div id="network-map"></div>
+
+        <div class="summary-grid">
             <div class="metric-card">
-                <div class="metric-value">{{ logs|length }}</div>
-                <div class="metric-label">Files Analyzed</div>
+                <div class="metric-val">{{ unique_ips }}</div>
+                <div>Unique Targets Identified</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">{{ total_lines }}</div>
-                <div class="metric-label">Lines of Intel</div>
+                <div class="metric-val">{{ logs|length }}</div>
+                <div>Intelligence Files</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">{{ system_user }}</div>
-                <div class="metric-label">Operator</div>
+                <div class="metric-val">{{ total_lines }}</div>
+                <div>Data Points Extracted</div>
             </div>
         </div>
 
+        <h3>RAW INTELLIGENCE LOGS</h3>
         {% for log in logs %}
         <div class="log-section">
-            <div class="log-header">
-                <span class="log-title">📄 {{ log.filename }}</span>
-                <span style="font-size: 0.8em; color: #8b949e;">{{ log.size }} bytes</span>
-            </div>
+            <div class="log-header">FILE: {{ log.filename }}</div>
             <div class="log-content">{{ log.content }}</div>
         </div>
         {% endfor %}
-
-        <div class="footer">
-            <p>GENERATED BY DAVOID FRAMEWORK | CONFIDENTIAL</p>
-        </div>
     </div>
+
+    <script type="text/javascript">
+        // Data generated by Python Parser
+        var nodes = new vis.DataSet({{ nodes_json }});
+        var edges = new vis.DataSet({{ edges_json }});
+
+        var container = document.getElementById('network-map');
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            nodes: {
+                shape: 'dot',
+                size: 20,
+                font: { size: 14, color: '#ffffff' },
+                borderWidth: 2,
+                shadow: true
+            },
+            edges: {
+                width: 1,
+                color: { color: '#58a6ff', highlight: '#ff7b72' },
+                smooth: { type: 'continuous' }
+            },
+            physics: {
+                stabilization: false,
+                barnesHut: { gravitationalConstant: -3000 }
+            },
+            interaction: { hover: true }
+        };
+        var network = new vis.Network(container, data, options);
+    </script>
 </body>
 </html>
 """
 
 
+def extract_nodes_from_logs(logs):
+    """
+    Parses logs to find IP addresses and build a topology graph.
+    Returns JSON-serializable nodes and edges for Vis.js.
+    """
+    ips = set()
+    # Regex for IPv4
+    ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
+
+    # 1. Extract all unique IPs from all logs
+    for log in logs:
+        found = ip_pattern.findall(log['content'])
+        for ip in found:
+            if ip != "0.0.0.0" and ip != "127.0.0.1":
+                ips.add(ip)
+
+    # 2. Build Nodes
+    nodes = [{"id": 0, "label": "DAVOID-HQ", "color": "#ff7b72", "size": 30}]
+    edges = []
+
+    for idx, ip in enumerate(ips, 1):
+        nodes.append({
+            "id": idx,
+            "label": ip,
+            "color": "#2ea043",
+            "title": f"Target: {ip}"  # Tooltip
+        })
+        # Connect everything to HQ for a star topology visualization
+        edges.append({"from": 0, "to": idx})
+
+    return nodes, edges
+
+
 def generate_report():
-    console.print(Panel("Initiating Report Generation Sequence...",
+    console.print(Panel("Generating Visual Threat Map...",
                   title="Reporter", border_style="cyan"))
 
     log_dir = "logs"
     if not os.path.exists(log_dir):
-        console.print(
-            "[red][!] No 'logs' directory found. Run scans to generate data first.[/red]")
+        console.print("[red][!] No 'logs' directory found.[/red]")
         return
 
     gathered_logs = []
     total_lines = 0
 
-    # Iterate through all files in the logs directory
     for f in os.listdir(log_dir):
         path = os.path.join(log_dir, f)
         if os.path.isfile(path):
             try:
-                size = os.path.getsize(path)
                 with open(path, "r", encoding="utf-8", errors="ignore") as file_content:
                     content = file_content.read()
-                    line_count = len(content.splitlines())
-                    total_lines += line_count
-
-                    gathered_logs.append({
-                        "filename": f,
-                        "content": content,
-                        "size": size
-                    })
-            except Exception as e:
-                console.print(f"[yellow][!] Skipped {f}: {e}[/yellow]")
+                    total_lines += len(content.splitlines())
+                    gathered_logs.append({"filename": f, "content": content})
+            except:
+                pass
 
     if not gathered_logs:
-        console.print(
-            "[yellow][!] No valid log data found to report.[/yellow]")
-        return
+        return console.print("[yellow][!] No log data.[/yellow]")
+
+    # Extract Graph Data
+    nodes, edges = extract_nodes_from_logs(gathered_logs)
 
     try:
-        # Render the template
         t = Template(TEMPLATE_HTML)
         html_output = t.render(
+            title="Davoid Threat Map",
             timestamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             logs=gathered_logs,
             total_lines=total_lines,
-            system_user=os.getenv('USER', os.getenv('USERNAME', 'Unknown'))
+            unique_ips=len(nodes) - 1,  # Subtract HQ
+            nodes_json=nodes,
+            edges_json=edges
         )
 
-        # Save the report
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_filename = f"Davoid_Report_{timestamp}.html"
+        report_filename = f"ThreatMap_{timestamp}.html"
 
         with open(report_filename, "w", encoding="utf-8") as f:
             f.write(html_output)
 
-        console.print(Panel(
-            f"[bold green]Report Generated Successfully![/bold green]\n"
-            f"[white]Filename:[/white] {report_filename}\n"
-            f"[white]Logs Merged:[/white] {len(gathered_logs)}",
-            title="Success",
-            border_style="green"
-        ))
+        console.print(
+            f"[bold green][+] Visual Report Generated: {report_filename}[/bold green]")
 
-        # Attempt to open the report automatically
+        # Auto-open
         if os.name == 'posix':
-            # Linux/macOS
             os.system(
                 f"open {report_filename} 2>/dev/null || xdg-open {report_filename} 2>/dev/null")
         elif os.name == 'nt':
-            # Windows
             os.startfile(report_filename)
 
     except Exception as e:
-        console.print(f"[red][!] Reporting Critical Failure: {e}[/red]")
+        console.print(f"[red][!] Reporting Error: {e}[/red]")
 
 
 if __name__ == "__main__":

@@ -96,8 +96,14 @@ def perform_update():
     # 1. Create Backup Snapshot
     console.print("[*] Creating pre-update snapshot...")
     if not create_snapshot():
-        # Updated to use questionary for consistent UI
-        if not questionary.confirm("Snapshot failed. Continue without backup?", default=False, style=Q_STYLE).ask():
+        # UPDATED: Using Questionary for the unified interface style
+        should_continue = questionary.confirm(
+            "Backup failed. Continue anyway?",
+            default=False,
+            style=Q_STYLE
+        ).ask()
+
+        if not should_continue:
             return
 
     try:

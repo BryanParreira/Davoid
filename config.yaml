@@ -1,0 +1,26 @@
+# --- DAVOID GLOBAL CONFIGURATION ---
+
+system:
+  # Default network interface (leave auto to detect automatically)
+  default_interface: "auto"
+  # Default threads for scanners (higher = faster, more noise)
+  threads: 40
+  # Stealth mode delay in seconds
+  stealth_delay: 1.0
+
+ai:
+  # Ollama Model (llama3, mistral, etc.)
+  model: "llama3"
+  # Local API URL
+  host: "http://localhost:11434"
+
+reporting:
+  # Title for generated reports
+  report_title: "Davoid Intelligence Report"
+  # Auto-open reports in browser?
+  auto_open: true
+
+api_keys:
+  # Optional: For future Shodan/VirusTotal integration
+  shodan: ""
+  virustotal: ""

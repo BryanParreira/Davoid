@@ -14,3 +14,4 @@ phonenumbers
 asyncio
 jinja2
 questionary
+PyYAML

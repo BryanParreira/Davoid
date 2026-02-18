@@ -8,7 +8,7 @@ class Context:
             "LHOST": "127.0.0.1",
             "LPORT": "4444",
             "RHOST": "",
-            "INTERFACE": "wlan0",
+            "INTERFACE": "eth0",
             "DOMAIN": "",
             "STEALTH": "OFF",
             "THREADS": "40"
@@ -16,7 +16,7 @@ class Context:
         self.selected_module = None
 
     def set(self, key, value):
-        key = key.upper()
+        key = key.upper().strip()
         # Allows setting any variable, even if not in the default list
         self.vars[key] = value
         return True

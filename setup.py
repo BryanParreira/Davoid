@@ -5,8 +5,14 @@ import subprocess
 
 def install():
     print("[*] Davoid: Syncing root dependencies...")
-    subprocess.run([sys.executable, "-m", "pip",
-                   "install", "rich", "scapy", "requests"])
+    # Updated dependency list
+    packages = [
+        "rich", "scapy", "requests[socks]", "cryptography",
+        "jinja2", "questionary", "PyYAML", "beautifulsoup4",
+        "netaddr", "psutil"
+    ]
+
+    subprocess.run([sys.executable, "-m", "pip", "install"] + packages)
 
     python_exe = sys.executable
     script_path = os.path.abspath("main.py")
@@ -30,6 +36,7 @@ sudo {python_exe} {script_path} "$@"
             f.write(wrapper_content)
         os.system(f"chmod +x {bin_path}")
         os.system(f"chmod +x {script_path}")
+        print(f"[+] Installed successfully. Run 'davoid' to start.")
     except PermissionError:
         print("[-] Error: Run setup with sudo.")
 

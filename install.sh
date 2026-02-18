@@ -95,11 +95,13 @@ echo -e "\033[1;34m[*] Building isolated Python environment...\033[0m"
 python3 -m venv venv
 ./venv/bin/pip install --upgrade pip > /dev/null
 
+echo -e "\033[1;34m[*] Installing Next-Gen Framework Dependencies...\033[0m"
 if [ -f "requirements.txt" ]; then
     ./venv/bin/pip install -r requirements.txt
     ./venv/bin/pip install requests[socks] 
 else
-    ./venv/bin/pip install scapy rich requests[socks] cryptography
+    # Fallback installation if requirements.txt is missing
+    ./venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML
 fi
 
 # 5. Create the Global Launcher

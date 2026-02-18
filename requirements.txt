@@ -12,3 +12,4 @@ netaddr
 beautifulsoup4
 phonenumbers
 asyncio
+jinja2

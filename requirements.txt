@@ -16,3 +16,4 @@ jinja2
 questionary
 PyYAML
 sqlalchemy
+aiohttp

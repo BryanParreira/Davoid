@@ -196,6 +196,8 @@ def menu_recon():
                 dork_generator()
             else:
                 robots_scraper()
+        elif choice == "back":
+            break
         elif choice == "dns":
             sub = questionary.select(
                 "Mode:", choices=["Active Brute Force", "Passive Logs"], style=q_style).ask()
@@ -203,6 +205,8 @@ def menu_recon():
                 dns_recon()
             else:
                 dns_intel()
+        elif choice == "back":
+            break
         elif choice == "person":
             sub = questionary.select(
                 "Mode:", choices=["Username Tracker", "Phone Intel"], style=q_style).ask()

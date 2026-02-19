@@ -152,7 +152,7 @@ class HashEngine:
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
 
-def start_crack(target_hash=None):
+def crack_hash(target_hash=None):
     if not target_hash:
         target_hash = questionary.text(
             "Enter Target Hash:", style=Q_STYLE).ask()
@@ -163,4 +163,4 @@ def start_crack(target_hash=None):
 
 
 if __name__ == "__main__":
-    start_crack()
+    crack_hash()

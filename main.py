@@ -105,6 +105,10 @@ try:
     from modules.reporter import generate_report
 except:
     pass
+try:
+    from modules.msf_engine import run_msf
+except:
+    pass
 
 console = Console()
 q_style = Style([
@@ -237,6 +241,7 @@ def menu_assault():
             Choice("WiFi Suite", value="wifi"),
             Choice("Web Cloner & AitM Proxy", value="clone"),
             Choice("Hash Cracker", value="crack"),
+            Choice("Metasploit Framework", value="msf"),
             Choice("Back", value="back")
         ], style=q_style).ask()
 
@@ -256,6 +261,8 @@ def menu_assault():
                 "Hash (Leave blank to cancel):", style=q_style).ask()
             if hash_val:
                 crack_hash(hash_val)
+        elif choice == "msf":       # <-- ADD THIS BLOCK
+            run_msf()
 
 
 def menu_infra():

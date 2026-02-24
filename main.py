@@ -106,6 +106,10 @@ try:
 except:
     pass
 try:
+    from modules.ad_ops import run_ad_ops
+except ImportError:
+    pass
+try:
     from modules.msf_engine import run_msf
 except:
     pass
@@ -261,6 +265,7 @@ def menu_assault():
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Direct Action", context=ctx)
         choice = questionary.select("Select Vector:", choices=[
+            Choice("Active Directory Ops", value="ad"),
             Choice("MITM Attack", value="mitm"),
             Choice("DNS Hijack", value="dns"),
             Choice("WiFi Suite", value="wifi"),
@@ -273,7 +278,9 @@ def menu_assault():
         if not choice or choice == "back":
             break
 
-        if choice == "mitm":
+        if choice == "ad":
+            run_ad_ops()
+        elif choice == "mitm":
             MITMEngine().run()
         elif choice == "dns":
             start_dns_spoof()

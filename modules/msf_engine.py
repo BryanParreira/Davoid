@@ -24,19 +24,48 @@ class MetasploitRPCEngine:
     def __init__(self):
         self.client = None
         self.daemon_process = None
-        # Generate a random 16-character password on the fly for the local API
         self.password = ''.join(random.choices(
             string.ascii_letters + string.digits, k=16))
-        self.rpc_port = 55554  # Custom port to avoid conflicts with other MSF instances
+        self.rpc_port = 55554
+        self.msfrpcd_path = self.find_msfrpcd()
+
+    def find_msfrpcd(self):
+        """Locates the msfrpcd executable on the system, bypassing sudo PATH issues."""
+        common_paths = [
+            "/opt/metasploit-framework/bin/msfrpcd",  # Official installer
+            "/opt/homebrew/bin/msfrpcd",              # Apple Silicon Mac
+            "/usr/local/bin/msfrpcd",                 # Intel Mac
+            "/usr/bin/msfrpcd"                        # Kali Linux
+        ]
+
+        try:
+            path = subprocess.run(
+                ['which', 'msfrpcd'], capture_output=True, text=True).stdout.strip()
+            if os.path.exists(path):
+                return path
+        except:
+            pass
+
+        for p in common_paths:
+            if os.path.exists(p):
+                return p
+
+        return None
 
     def check_dependencies(self):
         try:
             import pymetasploit3
-            return True
         except ImportError:
             console.print(
                 "[bold red][!] Critical Dependency Missing: 'pymetasploit3'[/bold red]")
             return False
+
+        if not self.msfrpcd_path:
+            console.print(
+                "[bold red][!] Metasploit Framework ('msfrpcd') not found on this system![/bold red]")
+            return False
+
+        return True
 
     def is_port_open(self, port):
         """Checks if a local port is listening."""
@@ -46,21 +75,19 @@ class MetasploitRPCEngine:
     def start_daemon(self):
         """Silently boots the Metasploit RPC server in the background."""
         if self.is_port_open(self.rpc_port):
-            # Kill any ghost instances from a previous crash
             os.system(f"fuser -k {self.rpc_port}/tcp > /dev/null 2>&1")
             time.sleep(1)
 
-        with console.status("[bold cyan]Booting Headless Metasploit Engine (This takes ~10 seconds)...[/bold cyan]", spinner="bouncingBar"):
-            cmd = ["msfrpcd", "-P", self.password, "-n", "-f",
-                   "-a", "127.0.0.1", "-p", str(self.rpc_port)]
-            # Launch in background and hide output
+        with console.status("[bold cyan]Booting Headless Metasploit Engine (This takes ~10-15 seconds)...[/bold cyan]", spinner="bouncingBar"):
+            cmd = [self.msfrpcd_path, "-P", self.password, "-n",
+                   "-f", "-a", "127.0.0.1", "-p", str(self.rpc_port)]
             self.daemon_process = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # Wait for the daemon to finish initializing
             for _ in range(40):
                 if self.is_port_open(self.rpc_port):
-                    time.sleep(2)  # Give it an extra 2 seconds to load modules
+                    # Extra buffer for MSF to load modules into memory
+                    time.sleep(3)
                     return True
                 time.sleep(1)
 
@@ -73,7 +100,7 @@ class MetasploitRPCEngine:
 
         if not self.start_daemon():
             console.print(
-                "[bold red][!] Failed to boot Metasploit Daemon. Ensure Metasploit is installed.[/bold red]")
+                "[bold red][!] Failed to boot Metasploit Daemon. Ensure Metasploit is installed correctly.[/bold red]")
             return False
 
         console.print("[*] Negotiating API connection...")

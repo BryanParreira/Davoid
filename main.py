@@ -126,6 +126,8 @@ def auto_discovery():
         from scapy.all import conf, get_if_addr
         ctx.set("INTERFACE", str(conf.iface))
         ctx.set("LHOST", get_if_addr(str(conf.iface)))
+        gw = conf.route.route("0.0.0.0")[1]
+        ctx.set("GATEWAY", str(gw))
         return True
     except:
         return False

@@ -18,3 +18,4 @@ PyYAML
 sqlalchemy
 aiohttp
 ldap3
+pymetasploit3

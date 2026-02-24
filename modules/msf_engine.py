@@ -179,14 +179,21 @@ class MetasploitRPCEngine:
             payload_opts = {'LHOST': lhost, 'LPORT': 4444}
             job = exploit.execute(payload=custom_payload, **payload_opts)
 
-            if job['job_id'] is not None:
+            # SAFE TYPE CHECK ADDED HERE
+            if isinstance(job, dict) and job.get('job_id') is not None:
                 console.print(
                     f"[bold green][+] Exploit launched successfully (Job ID: {job['job_id']})[/bold green]")
                 db.log("MSF-Engine", target,
                        f"Launched {custom_mod} via RPC", "HIGH")
+            elif job is True:
+                console.print(
+                    f"[bold green][+] Exploit executed successfully (Foreground task).[/bold green]")
+                db.log("MSF-Engine", target,
+                       f"Launched {custom_mod} via RPC", "HIGH")
             else:
                 console.print(
-                    "[yellow][!] Exploit ran, but no background job was created.[/yellow]")
+                    f"[yellow][!] Exploit ran, but returned an unexpected response: {job}[/yellow]")
+
         except Exception as e:
             console.print(
                 f"[bold red][!] Exploit execution failed:[/bold red] {e}")
@@ -266,8 +273,14 @@ class MetasploitRPCEngine:
                             'exploit', 'multi/handler')
                         job = exploit.execute(
                             payload=payload, LHOST=lhost, LPORT=int(lport))
-                        console.print(
-                            f"[bold green][+] Listener started in background (Job ID: {job['job_id']})[/bold green]")
+
+                        # SAFE TYPE CHECK ADDED HERE TOO
+                        if isinstance(job, dict) and job.get('job_id') is not None:
+                            console.print(
+                                f"[bold green][+] Listener started in background (Job ID: {job['job_id']})[/bold green]")
+                        else:
+                            console.print(
+                                f"[yellow][+] Listener launched, response: {job}[/yellow]")
                     except Exception as e:
                         console.print(
                             f"[red][!] Failed to start listener: {e}[/red]")

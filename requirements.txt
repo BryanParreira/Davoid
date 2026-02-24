@@ -17,3 +17,4 @@ questionary
 PyYAML
 sqlalchemy
 aiohttp
+ldap3

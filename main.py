@@ -58,8 +58,8 @@ except:
     pass
 try:
     from modules.osint_pro import (username_tracker, phone_intel, geolocate,
-                                   dork_generator, robots_scraper, reputation_check, dns_intel)
-except:
+                                   dork_generator, wayback_intel, shodan_intel, dns_intel)
+except ImportError:
     pass
 try:
     from modules.spoof import MITMEngine
@@ -202,15 +202,19 @@ def configure_context():
 def menu_recon():
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Target Acquisition", context=ctx)
+        draw_header("Target Acquisition & Intelligence", context=ctx)
         choice = questionary.select("Select Objective:", choices=[
             questionary.Separator("--- INFRASTRUCTURE ---"),
-            Choice("Network Mapper (Active)", value="net"),
-            Choice("Web Scanner", value="web"),
-            Choice("DNS Intelligence", value="dns"),
-            questionary.Separator("--- IDENTITY ---"),
-            Choice("Profile Person (OSINT)", value="person"),
-            Choice("Profile Location (Geo)", value="geo"),
+            Choice("Network Mapper (Active Port Scan)", value="net"),
+            Choice("Web Scanner & Fuzzer", value="web"),
+            Choice("Passive Infrastructure Map (DNS & Certs)", value="dns"),
+            Choice("Shodan Attack Surface Mapping", value="shodan"),
+            questionary.Separator("--- DEEP WEB ---"),
+            Choice("Archive Mining (Wayback Machine)", value="wayback"),
+            Choice("Google Dork Generator", value="dork"),
+            questionary.Separator("--- IDENTITY / GEO ---"),
+            Choice("Profile Person (Social OSINT)", value="person"),
+            Choice("Profile Location (Geo-IP)", value="geo"),
             questionary.Separator("--- NAV ---"),
             Choice("Back", value="back")
         ], style=q_style).ask()
@@ -227,26 +231,22 @@ def menu_recon():
                 network_discovery()
             else:
                 SnifferEngine().start()
+
         elif choice == "web":
-            sub = questionary.select("Web Tool:", choices=[
-                                     "Vuln Scanner", "Dork Generator", "Robots.txt", "Back"], style=q_style).ask()
-            if not sub or sub == "Back":
-                continue
-            if "Scanner" in sub:
-                web_ghost()
-            elif "Dork" in sub:
-                dork_generator()
-            else:
-                robots_scraper()
+            web_ghost()
+
+        elif choice == "shodan":
+            shodan_intel()
+
+        elif choice == "wayback":
+            wayback_intel()
+
+        elif choice == "dork":
+            dork_generator()
+
         elif choice == "dns":
-            sub = questionary.select(
-                "Mode:", choices=["Active Brute Force", "Passive Logs", "Back"], style=q_style).ask()
-            if not sub or sub == "Back":
-                continue
-            if "Active" in sub:
-                dns_recon()
-            else:
-                dns_intel()
+            dns_intel()
+
         elif choice == "person":
             sub = questionary.select(
                 "Mode:", choices=["Username Tracker", "Phone Intel", "Back"], style=q_style).ask()
@@ -256,6 +256,7 @@ def menu_recon():
                 username_tracker()
             else:
                 phone_intel()
+
         elif choice == "geo":
             geolocate()
 

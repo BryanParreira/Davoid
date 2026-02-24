@@ -119,7 +119,7 @@ class ScannerEngine:
             subnet_hint = "192.168.1.0/24"
 
         target = questionary.text(
-            "Target Subnet:", default=subnet_hint, style=Q_STYLE).ask()
+            "Target (IP or Subnet):", default=subnet_hint, style=Q_STYLE).ask()
         port_mode = questionary.select("Scan Profile:", choices=[
                                        "Fast (Top 20)", "Full (1-1024)", "Custom"], style=Q_STYLE).ask()
 
@@ -158,7 +158,8 @@ class ScannerEngine:
                     progress.update(task2, advance=1)
                     if f.result() and not any(h["ip"] == ip for h in active_hosts):
                         active_hosts.append({"ip": ip, "mac": "Unknown"})
-
+            if len(ip_list) == 1 and not any(h["ip"] == ip_list[0] for h in active_hosts):
+                active_hosts.append({"ip": ip_list[0], "mac": "Unknown"})
             # 3. Analysis Phase
             table = Table(title=f"Results: {target}",
                           border_style="bold red", expand=True)

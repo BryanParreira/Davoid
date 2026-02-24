@@ -1,4 +1,7 @@
 import os
+import shutil
+import subprocess
+import json
 import questionary
 from rich.console import Console
 from rich.table import Table
@@ -17,12 +20,12 @@ console = Console()
 class NmapEngine:
     def __init__(self):
         self.nm = None
+        self.has_searchsploit = False
 
     def check_dependencies(self):
         try:
             import nmap
             self.nm = nmap.PortScanner()
-            return True
         except ImportError:
             console.print(
                 "[bold red][!] Critical Dependency Missing: 'python-nmap'[/bold red]")
@@ -35,6 +38,57 @@ class NmapEngine:
             console.print(
                 "[white]Please ensure Nmap is installed (e.g., 'brew install nmap' or 'apt install nmap').[/white]")
             return False
+
+        # Check for ExploitDB Integration
+        if shutil.which('searchsploit'):
+            self.has_searchsploit = True
+        else:
+            console.print(
+                "[dim][!] 'searchsploit' not found. Exploit mapping disabled. (Run 'brew install exploitdb' to enable)[/dim]")
+
+        return True
+
+    def query_searchsploit(self, product, version):
+        """Silently queries the Exploit Database for known vulnerabilities."""
+        if not product or not self.has_searchsploit:
+            return ""
+
+        # Clean the query to prevent overly complex Nmap strings from breaking the search
+        query = f"{product} {version}".strip()
+        # Keep it to the first two words (e.g., "Apache httpd")
+        query = " ".join(query.split()[:2])
+
+        try:
+            # Query SearchSploit and request JSON output
+            result = subprocess.run(
+                ['searchsploit', query, '--json'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout:
+                data = json.loads(result.stdout)
+                results = data.get('RESULTS_EXPLOIT', [])
+
+                if results:
+                    count = len(results)
+                    exploit_str = f"\n  └── [bold red][!] {count} Exploits Found in ExploitDB![/bold red]"
+
+                    # Show the top 2 exploits to keep the terminal UI clean
+                    for exp in results[:2]:
+                        title = exp.get('Title', 'Unknown')
+                        path = exp.get('Path', 'Unknown')
+
+                        # Highlight Metasploit modules
+                        if "metasploit" in path.lower() or "msf" in title.lower():
+                            exploit_str += f"\n      - [bold red]MSF Module:[/bold red] {title[:50]}..."
+                        else:
+                            exploit_str += f"\n      - {title[:60]}..."
+
+                    if count > 2:
+                        exploit_str += f"\n      - [dim]...and {count - 2} more (Run 'searchsploit {query}' to view all)[/dim]"
+
+                    return exploit_str
+        except Exception:
+            pass  # Fail silently if the query breaks so the scan doesn't crash
+
+        return ""
 
     def run_scan(self):
         target = questionary.text(
@@ -132,7 +186,13 @@ class NmapEngine:
                     if not info:
                         info = "N/A"
 
-                    # If the Nmap Scripting Engine (NSE) found vulnerabilities/scripts
+                    # 1. Check for ExploitDB Vulnerabilities natively!
+                    if product:
+                        exploit_data = self.query_searchsploit(
+                            product, version)
+                        info += exploit_data
+
+                    # 2. Append Nmap Scripting Engine (NSE) output if it ran
                     script_output = ""
                     if 'script' in port_data:
                         for script_name, script_res in port_data['script'].items():
@@ -148,8 +208,11 @@ class NmapEngine:
                 console.print(table)
                 # Log to the mission database
                 svc_log = "\n".join(db_services)
+                # Strip rich formatting tags before saving to DB
+                clean_log = svc_log.replace("[bold red]", "").replace(
+                    "[/bold red]", "").replace("[dim]", "").replace("[/dim]", "").replace("[!]", "")
                 db.log("Nmap-Engine", host,
-                       f"OS: {os_match}\nServices:\n{svc_log}", "HIGH")
+                       f"OS: {os_match}\nServices:\n{clean_log}", "HIGH")
             else:
                 console.print(
                     "[dim]No open ports discovered on this host.[/dim]")
@@ -159,7 +222,7 @@ class NmapEngine:
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
     def network_discovery(self):
-        draw_header("Nmap Tactical Orchestrator")
+        draw_header("Nmap Tactical Orchestrator & Exploit Mapper")
         if not self.check_dependencies():
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
             return

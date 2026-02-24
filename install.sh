@@ -64,7 +64,7 @@ elif [[ "$OS_TYPE" == "mac" ]]; then
     if command -v brew &> /dev/null; then
         echo "    -> Installing Tools via Homebrew..."
         # redirect stdin to /dev/null to prevent curl | bash interruption
-        brew install tor macchanger nmap tcpdump aircrack-ng git < /dev/null
+        brew install tor macchanger nmap tcpdump aircrack-ng git exploitdb < /dev/null
         
         echo "    -> Starting Tor Service..."
         brew services start tor < /dev/null

@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import subprocess
 import socket
@@ -35,7 +36,7 @@ class MetasploitRPCEngine:
             "/opt/metasploit-framework/bin/msfrpcd",  # Official installer
             "/opt/homebrew/bin/msfrpcd",              # Apple Silicon Mac
             "/usr/local/bin/msfrpcd",                 # Intel Mac
-            "/usr/bin/msfrpcd"                        # Kali Linux
+            "/usr/bin/msfrpcd"                        # Kali Linux default
         ]
 
         try:
@@ -63,6 +64,8 @@ class MetasploitRPCEngine:
         if not self.msfrpcd_path:
             console.print(
                 "[bold red][!] Metasploit Framework ('msfrpcd') not found on this system![/bold red]")
+            console.print(
+                "[yellow]Please ensure Metasploit is installed and accessible.[/yellow]")
             return False
 
         return True
@@ -72,10 +75,18 @@ class MetasploitRPCEngine:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex(('127.0.0.1', port)) == 0
 
+    def kill_stuck_daemon(self):
+        """Cross-platform method to forcefully free the RPC port."""
+        if sys.platform == "darwin":  # macOS
+            os.system(
+                f"lsof -ti:{self.rpc_port} | xargs kill -9 > /dev/null 2>&1")
+        else:  # Linux
+            os.system(f"fuser -k {self.rpc_port}/tcp > /dev/null 2>&1")
+
     def start_daemon(self):
         """Silently boots the Metasploit RPC server in the background."""
         if self.is_port_open(self.rpc_port):
-            os.system(f"fuser -k {self.rpc_port}/tcp > /dev/null 2>&1")
+            self.kill_stuck_daemon()
             time.sleep(1)
 
         with console.status("[bold cyan]Booting Headless Metasploit Engine (This takes ~10-15 seconds)...[/bold cyan]", spinner="bouncingBar"):
@@ -84,9 +95,10 @@ class MetasploitRPCEngine:
             self.daemon_process = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+            # Wait for the daemon to finish initializing and load its massive Ruby framework
             for _ in range(40):
                 if self.is_port_open(self.rpc_port):
-                    # Extra buffer for MSF to load modules into memory
+                    # Give it a 3-second buffer to finalize loading modules
                     time.sleep(3)
                     return True
                 time.sleep(1)
@@ -209,6 +221,7 @@ class MetasploitRPCEngine:
             console.print(
                 "[dim][*] Shutting down background Metasploit Daemon...[/dim]")
             self.daemon_process.terminate()
+            self.kill_stuck_daemon()  # Ensure it is completely dead
 
     def run(self):
         draw_header("Metasploit RPC Orchestrator")

@@ -126,7 +126,30 @@ def auto_discovery():
         from scapy.all import conf, get_if_addr
         ctx.set("INTERFACE", str(conf.iface))
         ctx.set("LHOST", get_if_addr(str(conf.iface)))
-        gw = conf.route.route("0.0.0.0")[1]
+
+        gw = "Unknown"
+        try:
+            # Ask the OS directly for the most accurate gateway
+            if sys.platform == "darwin":  # macOS
+                out = subprocess.check_output(
+                    ["route", "-n", "get", "default"]).decode()
+                for line in out.splitlines():
+                    if "gateway:" in line:
+                        gw = line.split(":")[1].strip()
+                        break
+            else:  # Linux
+                out = subprocess.check_output(["ip", "route"]).decode()
+                for line in out.splitlines():
+                    if line.startswith("default via"):
+                        gw = line.split(" ")[2].strip()
+                        break
+        except Exception:
+            pass
+
+        # Fallback to Scapy if the OS commands fail
+        if gw == "Unknown":
+            gw = conf.route.route("0.0.0.0")[1]
+
         ctx.set("GATEWAY", str(gw))
         return True
     except:

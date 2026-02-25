@@ -67,7 +67,7 @@ except ImportError: pass
 try: from modules.dns_spoofer import start_dns_spoof
 except ImportError: pass
 
-try: from modules.cloner import clone_site
+try: from modules.cloner import run_cloner
 except ImportError: pass
 
 try: from modules.ghost_hub import run_ghost_hub
@@ -266,7 +266,7 @@ def show_assault_menu():
         elif choice == "mitm": MITMEngine().run()
         elif choice == "dns": start_dns_spoof()
         elif choice == "wifi": run_wifi_suite()
-        elif choice == "clone": clone_site()
+        elif choice == "clone": run_cloner()
         elif choice == "crack":
             hash_val = questionary.text("Hash (Leave blank to cancel):", style=q_style).ask()
             if hash_val: crack_hash(hash_val)

@@ -99,9 +99,9 @@ def perform_update():
         console.print("[green][+] Snapshot secured at /tmp/davoid_backup[/green]\n")
 
     try:
-        # 3. Dynamic Progress Bars
+        # 3. Dynamic Progress Bars (FIXED SPINNER SYNTAX)
         with Progress(
-            SpinnerColumn(spinner="dots2", style="bold red"),
+            SpinnerColumn("dots2", style="bold red"),
             TextColumn("[bold white]{task.description}[/bold white]"),
             BarColumn(bar_width=45, style="dark_red", complete_style="bold red", finished_style="bold green"),
             TextColumn("[bold red]{task.percentage:>3.0f}%[/bold red]"),

@@ -201,24 +201,24 @@ def show_reconnaissance_menu():
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Target Acquisition & Intelligence", context=ctx)
         
-        choice = questionary.select("Select Objective:", choices=[
-            questionary.Separator("--- INFRASTRUCTURE ---"),
-            Choice("Network Mapper (Active Port Scan)", value="net"),
-            Choice("Web Scanner & Fuzzer", value="web"),
-            Choice("Passive Infrastructure Map (DNS & Certs)", value="dns"),
-            Choice("Shodan Attack Surface Mapping", value="shodan"),
-            questionary.Separator("--- DEEP WEB ---"),
-            Choice("Archive Mining (Wayback Machine)", value="wayback"),
-            Choice("Google Dork Generator", value="dork"),
-            questionary.Separator("--- IDENTITY / GEO ---"),
-            Choice("Profile Person (Social OSINT)", value="person"),
-            Choice("Profile Location (Geo-IP)", value="geo"),
-            questionary.Separator("--- NAV ---"),
-            Choice("Back", value="back")
+        choice = questionary.select("Select Reconnaissance Module:", choices=[
+            questionary.Separator("--- ACTIVE NETWORK SCANNING ---"),
+            Choice("Network Mapper (Nmap & ExploitDB)", value="net"),
+            Choice("Web Vulnerability Scanner & Fuzzer", value="web"),
+            questionary.Separator("--- PASSIVE INFRASTRUCTURE OSINT ---"),
+            Choice("Shodan API (Attack Surface Recon)", value="shodan"),
+            Choice("DNS & Subdomain Mapping (CRT.sh)", value="dns"),
+            questionary.Separator("--- DEEP WEB & ARCHIVE MINING ---"),
+            Choice("Wayback Machine (Hidden Endpoint Mining)", value="wayback"),
+            Choice("Google Dork Generator (Advanced Search)", value="dork"),
+            questionary.Separator("--- IDENTITY & GEO-TRACKING ---"),
+            Choice("Social OSINT (Identity Profiling)", value="person"),
+            Choice("Geo-IP Tracker (Location Profiling)", value="geo"),
+            questionary.Separator("--- NAVIGATION ---"),
+            Choice("Return to Main Menu", value="back")
         ], style=q_style).ask()
 
-        if not choice or choice == "back":
-            break
+        if not choice or choice == "back": break
 
         if choice == "net":
             sub = questionary.select("Tool:", choices=["Active Discovery", "Passive Sniffer", "Back"], style=q_style).ask()
@@ -242,28 +242,31 @@ def show_assault_menu():
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Direct Action", context=ctx)
         
-        choice = questionary.select("Select Vector:", choices=[
-            Choice("Active Directory Ops", value="ad"),
-            Choice("Post-Exploitation Looter (PrivEsc)", value="loot"),
-            Choice("MITM Attack", value="mitm"),
-            Choice("DNS Hijack", value="dns"),
-            Choice("WiFi Suite", value="wifi"),
-            Choice("Web Cloner & AitM Proxy", value="clone"),
-            Choice("Hash Cracker", value="crack"),
-            Choice("Metasploit Framework", value="msf"),
-            Choice("Back", value="back")
+        choice = questionary.select("Select Assault Vector:", choices=[
+            questionary.Separator("--- EXPLOITATION & POST-EXPLOITATION ---"),
+            Choice("Metasploit Framework (RPC Engine)", value="msf"),
+            Choice("Active Directory Exploitation", value="ad"),
+            Choice("Privilege Escalation & Looter", value="loot"),
+            questionary.Separator("--- NETWORK ATTACKS ---"),
+            Choice("Adversary-in-the-Middle (MITM) Intercept", value="mitm"),
+            Choice("DNS Spoofing & Traffic Hijacking", value="dns"),
+            Choice("Wireless (WiFi) Attack Suite", value="wifi"),
+            questionary.Separator("--- SOCIAL ENGINEERING & CRYPTO ---"),
+            Choice("Web Cloner & MFA Bypass Proxy", value="clone"),
+            Choice("Cryptographic Hash Cracker", value="crack"),
+            questionary.Separator("--- NAVIGATION ---"),
+            Choice("Return to Main Menu", value="back")
         ], style=q_style).ask()
 
-        if not choice or choice == "back":
-            break
+        if not choice or choice == "back": break
 
-        if choice == "ad": run_ad_ops()
+        if choice == "msf": run_msf()
+        elif choice == "ad": run_ad_ops()
         elif choice == "loot": run_looter()
         elif choice == "mitm": MITMEngine().run()
         elif choice == "dns": start_dns_spoof()
         elif choice == "wifi": run_wifi_suite()
         elif choice == "clone": clone_site()
-        elif choice == "msf": run_msf()
         elif choice == "crack":
             hash_val = questionary.text("Hash (Leave blank to cancel):", style=q_style).ask()
             if hash_val: crack_hash(hash_val)
@@ -273,25 +276,27 @@ def show_infrastructure_menu():
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Infrastructure & C2", context=ctx)
         
-        choice = questionary.select("Operation:", choices=[
-            Choice("Generate Payload (Beacons/Shells)", value="forge"),
-            Choice("Encrypt Payload", value="crypt"),
-            Choice("Install Persistence", value="persist"),
-            Choice("Launch Dual-Stack C2 Server", value="c2"),
-            Choice("Back", value="back")
+        choice = questionary.select("Select Infrastructure Operation:", choices=[
+            questionary.Separator("--- WEAPONIZATION ---"),
+            Choice("Payload Generator (C2 Beacons & Shells)", value="forge"),
+            Choice("Payload Obfuscator & Encryptor", value="crypt"),
+            questionary.Separator("--- PERSISTENCE & COMMAND ---"),
+            Choice("Persistence Installer (Target Auto-Run)", value="persist"),
+            Choice("Launch GhostHub (Dual-Stack C2 Server)", value="c2"),
+            questionary.Separator("--- NAVIGATION ---"),
+            Choice("Return to Main Menu", value="back")
         ], style=q_style).ask()
 
-        if not choice or choice == "back":
-            break
+        if not choice or choice == "back": break
 
         if choice == "forge": generate_shell()
+        elif choice == "crypt":
+            path = questionary.text("Path (Leave blank to cancel):", style=q_style).ask()
+            if path: encrypt_payload(path)
         elif choice == "persist":
             path = questionary.text("Path (Leave blank to cancel):", style=q_style).ask()
             if path: PersistenceEngine(path).run()
         elif choice == "c2": run_ghost_hub()
-        elif choice == "crypt":
-            path = questionary.text("Path (Leave blank to cancel):", style=q_style).ask()
-            if path: encrypt_payload(path)
 
 # ============================================================================
 # 6. MAIN EXECUTION LOOP
@@ -311,17 +316,17 @@ def main():
             draw_header("Master Command Hub", context=ctx)
             check_version()
 
-            phase = questionary.select("Mission Phase:", choices=[
-                questionary.Separator("--- OPS ---"),
-                Choice("1. Reconnaissance", value="recon"),
-                Choice("2. Assault", value="assault"),
-                Choice("3. Infrastructure", value="infra"),
-                questionary.Separator("--- INTEL ---"),
-                Choice("4. AI Cortex & Report", value="ai"),
-                questionary.Separator("--- SYS ---"),
-                Choice("Settings", value="sys"),
-                Choice("Update", value="update"),
-                Choice("VANISH", value="exit")
+            phase = questionary.select("Select Mission Phase:", choices=[
+                questionary.Separator("--- OFFENSIVE OPERATIONS ---"),
+                Choice("1. Reconnaissance & OSINT", value="recon"),
+                Choice("2. Assault & Exploitation", value="assault"),
+                Choice("3. C2 Infrastructure & Payloads", value="infra"),
+                questionary.Separator("--- INTELLIGENCE ---"),
+                Choice("4. AI Cortex & Mission Reporting", value="ai"),
+                questionary.Separator("--- SYSTEM ---"),
+                Choice("Configuration & Context", value="sys"),
+                Choice("Framework Update", value="update"),
+                Choice("Execute Vanish Protocol", value="exit")
             ], style=q_style, pointer=">").ask()
 
             if not phase:  # Handles Esc/Ctrl+C gracefully
@@ -330,13 +335,13 @@ def main():
             if phase == "recon": show_reconnaissance_menu()
             elif phase == "assault": show_assault_menu()
             elif phase == "infra": show_infrastructure_menu()
-            elif phase == "sys": configure_global_context()
-            elif phase == "update": perform_update()
             elif phase == "ai":
                 sub = questionary.select("AI Ops:", choices=["Launch Cortex", "Generate Report (DB)", "Back"], style=q_style).ask()
                 if not sub or sub == "Back": continue
                 if "Cortex" in sub: run_ai_console()
                 else: generate_report()
+            elif phase == "sys": configure_global_context()
+            elif phase == "update": perform_update()
             elif phase == "exit":
                 if questionary.confirm("Execute Vanish Protocol?", default=True, style=q_style).ask():
                     execute_vanish_protocol()

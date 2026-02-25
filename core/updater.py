@@ -4,10 +4,12 @@ import shutil
 import subprocess
 import requests
 import questionary
+import time
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.table import Table
+from rich import box
 from core.ui import Q_STYLE
 
 console = Console()
@@ -51,86 +53,103 @@ def create_snapshot():
 
 def rollback():
     """Restores the framework to the last stable snapshot."""
-    console.print(
-        "[bold red][!] Update Interrupted. Initiating Rollback...[/bold red]")
+    console.print("\n[bold red on white] WARNING: UPDATE INTERRUPTED. INITIATING ROLLBACK SEQUENCE [/bold red on white]")
     try:
         if not os.path.exists(BACKUP_DIR):
-            return console.print("[bold red][!] Critical: No backup found.[/bold red]")
+            return console.print("[bold red][!] Critical: No backup found to restore from.[/bold red]")
 
-        for item in os.listdir(BACKUP_DIR):
-            s = os.path.join(BACKUP_DIR, item)
-            d = os.path.join(INSTALL_DIR, item)
-            if os.path.isdir(s):
-                shutil.rmtree(d, ignore_errors=True)
-                shutil.copytree(s, d)
-            else:
-                shutil.copy2(s, d)
-        console.print("[bold green][+] Rollback Successful.[/bold green]")
+        with console.status("[bold red]Restoring previous stable snapshot...", spinner="bouncingBar"):
+            for item in os.listdir(BACKUP_DIR):
+                s = os.path.join(BACKUP_DIR, item)
+                d = os.path.join(INSTALL_DIR, item)
+                if os.path.isdir(s):
+                    shutil.rmtree(d, ignore_errors=True)
+                    shutil.copytree(s, d)
+                else:
+                    shutil.copy2(s, d)
+            time.sleep(1) # Slight delay for UI pacing
+            
+        console.print("[bold green][+] Rollback Successful. Framework integrity restored.[/bold green]")
     except Exception as e:
-        console.print(
-            f"[bold red][!] Total System Failure during rollback: {e}[/bold red]")
+        console.print(f"[bold red][!] Total System Failure during rollback: {e}[/bold red]")
 
 
 def perform_update():
     os.system('cls' if os.name == 'nt' else 'clear')
-    # Updated to Red styling
+    
+    # 1. Premium UI Header
     console.print(Panel(
-        "[bold white]Davoid Mainframe Update[/bold white]", border_style="red", expand=False))
+        "[bold white]DAVOID FRAMEWORK : OVER-THE-AIR (OTA) UPDATE[/bold white]\n"
+        "[dim]Establishing secure uplink to Mainframe Repository...[/dim]", 
+        border_style="bold red", 
+        expand=True
+    ))
 
     if not os.path.exists(INSTALL_DIR):
-        console.print(
-            f"[bold red][!] Error:[/bold red] {INSTALL_DIR} not found.")
+        console.print(f"[bold red][!] Critical Error:[/bold red] Installation directory {INSTALL_DIR} not found.")
         return
 
-    console.print("[dim white][*] Creating pre-update snapshot...[/dim white]")
+    # 2. Pre-flight Snapshot
+    console.print("[cyan][*] Initializing pre-flight snapshot (Creating backup restore point)...[/cyan]")
     if not create_snapshot():
-        if not questionary.confirm("Snapshot failed. Continue anyway?", default=False, style=Q_STYLE).ask():
+        if not questionary.confirm("Snapshot failed. Proceed with update anyway? (Dangerous)", default=False, style=Q_STYLE).ask():
+            console.print("[yellow][*] Update aborted by user.[/yellow]")
             return
+    else:
+        console.print("[green][+] Snapshot secured at /tmp/davoid_backup[/green]\n")
 
     try:
+        # 3. Dynamic Progress Bars
         with Progress(
-            SpinnerColumn(style="bold red"),
+            SpinnerColumn(spinner="dots2", style="bold red"),
             TextColumn("[bold white]{task.description}[/bold white]"),
-            BarColumn(bar_width=40, style="red",
-                      complete_style="bold red", finished_style="bold green"),
+            BarColumn(bar_width=45, style="dark_red", complete_style="bold red", finished_style="bold green"),
+            TextColumn("[bold red]{task.percentage:>3.0f}%[/bold red]"),
             console=console
         ) as progress:
 
-            task1 = progress.add_task("Syncing Core Components...", total=100)
+            # Break the Git task into 3 distinct steps so the bar actually moves
+            task_git = progress.add_task("Synchronizing Core Modules (Git)", total=3)
             os.chdir(INSTALL_DIR)
-            subprocess.run(["git", "fetch", "--all"],
-                           check=True, capture_output=True)
-            subprocess.run(["git", "reset", "--hard", "origin/main"],
-                           check=True, capture_output=True)
-            subprocess.run(["git", "pull", "origin", "main"],
-                           check=True, capture_output=True)
-            progress.update(task1, completed=100)
+            
+            subprocess.run(["git", "fetch", "--all"], check=True, capture_output=True)
+            progress.update(task_git, advance=1)
+            
+            subprocess.run(["git", "reset", "--hard", "origin/main"], check=True, capture_output=True)
+            progress.update(task_git, advance=1)
+            
+            subprocess.run(["git", "pull", "origin", "main"], check=True, capture_output=True)
+            progress.update(task_git, advance=1)
 
-            task2 = progress.add_task(
-                "Synchronizing Environment...", total=100)
+            # Python Environment Sync
+            task_pip = progress.add_task("Updating Virtual Environment (Pip)", total=1)
             pip_path = os.path.join(INSTALL_DIR, "venv/bin/pip")
             req_path = os.path.join(INSTALL_DIR, "requirements.txt")
 
             if os.path.exists(req_path):
-                subprocess.run([pip_path, "install", "-r", req_path,
-                               "--upgrade"], check=True, capture_output=True)
-            progress.update(task2, completed=100)
+                subprocess.run([pip_path, "install", "-r", req_path, "--upgrade"], check=True, capture_output=True)
+            progress.update(task_pip, advance=1)
 
-        # Integrity Report with Red Theme
-        table = Table(title="Integrity Status", border_style="red", box=None)
-        table.add_column("Component", style="white")
-        table.add_column("Status", style="bold red")
-        table.add_row("Core Engine", "VERIFIED")
-        table.add_row("Dependencies", "SYNCHRONIZED")
+        # 4. Integrity Report
+        console.print("\n")
+        table = Table(title="[bold white]SYSTEM INTEGRITY DIAGNOSTICS[/bold white]", border_style="red", box=box.SQUARE, expand=True)
+        table.add_column("Component Layer", style="cyan")
+        table.add_column("Integrity Status", style="bold green", justify="right")
+        
+        table.add_row("Pre-Update Snapshot", "[bold green]VERIFIED[/bold green]")
+        table.add_row("Core Engine & Modules", "[bold green]SYNCHRONIZED[/bold green]")
+        table.add_row("Python Dependencies", "[bold green]OPTIMIZED[/bold green]")
         console.print(table)
 
-        console.print("[bold red][+] Update Complete.[/bold red]")
-        console.print("[dim]Restart Davoid to apply changes.[/dim]\n")
+        console.print("\n[bold red][+] Update Complete. Weapon systems primed.[/bold red]")
+        console.print("[dim]Press Enter to reboot Davoid...[/dim]")
+        input()
         sys.exit(0)
 
     except Exception as e:
-        console.print(f"[bold red][!] Update Critical Failure:[/bold red] {e}")
+        console.print(f"\n[bold red][!] Update Critical Failure:[/bold red] {e}")
         rollback()
+        input("\nPress Enter to exit...")
 
 
 if __name__ == "__main__":

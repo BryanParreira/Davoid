@@ -40,6 +40,9 @@ try:
     from modules.auditor import run_auditor
 except:
     run_auditor = None
+try: 
+    from modules.looter import run_looter
+except: pass
 try:
     from modules.scanner import network_discovery
 except:
@@ -267,6 +270,7 @@ def menu_assault():
         draw_header("Direct Action", context=ctx)
         choice = questionary.select("Select Vector:", choices=[
             Choice("Active Directory Ops", value="ad"),
+            Choice("Post-Exploitation Looter (PrivEsc)", value="loot"),
             Choice("MITM Attack", value="mitm"),
             Choice("DNS Hijack", value="dns"),
             Choice("WiFi Suite", value="wifi"),
@@ -281,6 +285,8 @@ def menu_assault():
 
         if choice == "ad":
             run_ad_ops()
+        elif choice == "loot": 
+            run_looter()
         elif choice == "mitm":
             MITMEngine().run()
         elif choice == "dns":

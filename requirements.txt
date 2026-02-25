@@ -20,3 +20,4 @@ aiohttp
 ldap3
 pymetasploit3
 python-nmap
+paramiko

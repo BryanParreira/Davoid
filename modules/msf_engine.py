@@ -138,18 +138,24 @@ class MetasploitRPCEngine:
                 msf_console = self.client.consoles.console()
                 msf_console.write(f"search {keyword}\n")
 
-                time.sleep(3)
-                output = msf_console.read()
+                raw_data = ""
+                # Smart sync: Wait until the MSF console reports it is no longer busy
+                for _ in range(20):
+                    time.sleep(1)
+                    out = msf_console.read()
+                    if out and out.get('data'):
+                        raw_data += out['data']
+                    if out and out.get('busy') is False:
+                        break
 
-                if output and output.get('data'):
-                    data = output['data']
-                    lines = data.split('\n')
+                if raw_data:
+                    lines = raw_data.split('\n')
                     if len(lines) > 50:
-                        data = '\n'.join(
+                        raw_data = '\n'.join(
                             lines[:50]) + "\n\n... [Truncated for readability. Be more specific.]"
 
                     console.print(
-                        Panel(data, title=f"Search Results: {keyword}", border_style="cyan"))
+                        Panel(raw_data, title=f"Search Results: {keyword}", border_style="cyan"))
                 else:
                     console.print(
                         "[yellow][!] No modules found or search timed out.[/yellow]")
@@ -157,7 +163,7 @@ class MetasploitRPCEngine:
                 console.print(f"[red][!] Search failed: {e}[/red]")
 
     def auto_exploit(self):
-        """Pro Tier: Dynamically queries the MSF DB based on the port and auto-suggests the best exploits."""
+        """Pro Tier: Dynamically queries the MSF DB based on the port and auto-suggests the highest-ranked exploits."""
         default_rhost = ctx.get("RHOST") or "192.168.1.1"
         default_lhost = ctx.get("LHOST") or "127.0.0.1"
 
@@ -175,50 +181,54 @@ class MetasploitRPCEngine:
         lhost = questionary.text(
             "Your IP (LHOST):", default=default_lhost, style=Q_STYLE).ask()
 
-        # --- PRO FEATURE: Dynamic Intelligence Engine ---
-        suggested_modules = []
+        # --- PRO FEATURE: Dynamic Intelligence Engine & Ranking ---
+        parsed_modules = []
         raw_data = ""
+        rank_scores = {
+            "excellent": 7, "great": 6, "good": 5,
+            "normal": 4, "average": 3, "low": 2, "manual": 1
+        }
 
         try:
             msf_console = self.client.consoles.console()
             msf_console.write(f"search port:{rport} type:exploit\n")
 
-            with console.status(f"[bold cyan]Querying Metasploit DB for exploits on Port {rport}...[/bold cyan]", spinner="dots"):
-                # Poll the console to capture the search table
-                for _ in range(5):
+            with console.status(f"[bold cyan]Querying Database & Ranking Exploits for Port {rport}...[/bold cyan]", spinner="dots"):
+                # Smart Sync: Poll until MSF finishes the database query
+                for _ in range(20):
                     time.sleep(1)
                     out = msf_console.read()
                     if out and out.get('data'):
                         raw_data += out['data']
-                        if "Matching Modules" in raw_data or "No results" in raw_data:
-                            time.sleep(1)  # Let the table finish printing
-                            out = msf_console.read()
-                            if out and out.get('data'):
-                                raw_data += out['data']
-                            break
+                    if out and out.get('busy') is False:
+                        break
 
             if raw_data:
-                lines = raw_data.splitlines()
                 display_lines = []
-
-                # Parse the MSF output table
-                for line in lines:
-                    # Keep Headers and Separators
+                for line in raw_data.splitlines():
                     if "Name" in line and "Disclosure" in line:
                         display_lines.append(line)
                     elif "----" in line or "====" in line:
                         display_lines.append(line)
-                    # Extract exploit rows and grab their paths
                     elif "exploit/" in line:
                         display_lines.append(line)
-                        parts = line.split()
-                        for p in parts:
-                            if p.startswith("exploit/"):
-                                suggested_modules.append(p)
-                                break
 
-                if suggested_modules:
-                    # Print the nice table showing Ranks (Excellent, Good, etc)
+                        # Extract the exact path and its rank
+                        parts = line.split()
+                        mod_path = next(
+                            (p for p in parts if p.startswith("exploit/")), None)
+                        rank = next((r for r in rank_scores.keys()
+                                    if r in line.lower()), "normal")
+
+                        if mod_path:
+                            parsed_modules.append({
+                                'path': mod_path,
+                                'rank': rank,
+                                'score': rank_scores[rank]
+                            })
+
+                if parsed_modules:
+                    # Print the nice table so the user can see what was found
                     console.print(Panel("\n".join(
                         display_lines[:25]), title=f"Top Vulnerabilities for Port {rport}", border_style="green"))
                     if len(display_lines) > 25:
@@ -230,20 +240,30 @@ class MetasploitRPCEngine:
         except Exception as e:
             console.print(f"[dim red]Module search error: {e}[/dim red]")
 
-        # --- DYNAMIC DROPDOWN SELECTION ---
+        # --- SMART DROPDOWN SELECTION (Sorted by Reliability) ---
         custom_mod = ""
-        if suggested_modules:
-            choices = suggested_modules[:15] + \
-                [questionary.Separator(), "Manual Entry (Type it yourself)"]
-            custom_mod = questionary.select(
-                "Select Exploit Module from DB:",
+        if parsed_modules:
+            # Sort the discovered modules by their Rank Score (Highest to lowest)
+            parsed_modules.sort(key=lambda x: x['score'], reverse=True)
+
+            # Format them cleanly for the UI
+            choices = [
+                f"[{m['rank'].upper()}] {m['path']}" for m in parsed_modules[:15]]
+            choices.append(questionary.Separator())
+            choices.append("Manual Entry (Type it yourself)")
+
+            selected = questionary.select(
+                "Select Exploit Module (Sorted by Reliability):",
                 choices=choices,
                 style=Q_STYLE
             ).ask()
 
-            if custom_mod == "Manual Entry (Type it yourself)":
+            if selected == "Manual Entry (Type it yourself)":
                 custom_mod = questionary.text(
                     "Enter Exploit Module (e.g., exploit/windows/smb/ms17_010_eternalblue):", style=Q_STYLE).ask()
+            elif selected:
+                # Strip the "[EXCELLENT] " tag to get the pure module path
+                custom_mod = selected.split("] ")[1].strip()
         else:
             custom_mod = questionary.text(
                 "Enter Exploit Module manually:", style=Q_STYLE).ask()
@@ -314,13 +334,16 @@ class MetasploitRPCEngine:
 
             console_output = ""
             with console.status("[bold cyan]Executing and capturing MSF output...[/bold cyan]", spinner="dots"):
-                for _ in range(10):
+                # Use the busy flag here as well to wait for the exploit to finish launching
+                for _ in range(15):
                     time.sleep(1.5)
                     out = msf_console.read()
                     if out and out.get('data'):
                         console_output += out['data']
                         if any(x in out['data'] for x in ["Exploit completed", "session", "failed", "Command shell", "found"]):
                             break
+                    if out and out.get('busy') is False and "Exploit completed" in console_output:
+                        break
 
             if console_output.strip():
                 console.print(f"\n[dim]{console_output.strip()}[/dim]")

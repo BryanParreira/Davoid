@@ -72,7 +72,8 @@ class MetasploitRPCEngine:
 
     def is_port_open(self, port):
         """Checks if a local port is listening."""
-        with socket.socket(socket.AF_INET, socket.STREAM) as s:
+        # FIXED: Changed socket.STREAM to socket.SOCK_STREAM
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex(('127.0.0.1', port)) == 0
 
     def kill_stuck_daemon(self):

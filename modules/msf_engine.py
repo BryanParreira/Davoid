@@ -625,38 +625,51 @@ class MetasploitRPCEngine:
         except Exception as e:
             console.print(f"[dim red]Live query error: {e}[/dim red]")
 
-        # Merge dynamic + static, deduplicated
-        parsed_dyn.sort(key=lambda x: x['score'], reverse=True)
-        merged = [m['path'] for m in parsed_dyn]
-        for s in PORT_EXPLOIT_DB.get(rport, []):
-            if s not in merged:
-                merged.append(s)
+        # NEW LOGIC: Pin the curated default exploits to the top!
+        curated_exploits = PORT_EXPLOIT_DB.get(rport, [])
+        choices = []
+        added_paths = set()
 
-        # Module selection
-        if not merged:
+        if curated_exploits:
+            choices.append(questionary.Separator(
+                "─── ⭐ HIGH RELIABILITY (RECOMMENDED) ───"))
+            for path in curated_exploits:
+                choices.append(f"[DEFAULT] {path}")
+                added_paths.add(path)
+
+        if parsed_dyn:
+            choices.append(questionary.Separator(
+                "─── 📡 MSF DYNAMIC SEARCH RESULTS ───"))
+            parsed_dyn.sort(key=lambda x: x['score'], reverse=True)
+            for m in parsed_dyn:
+                if m['path'] not in added_paths:
+                    rank_label = m['rank'].upper()
+                    choices.append(f"[{rank_label}] {m['path']}")
+                    added_paths.add(m['path'])
+
+        if not added_paths:
             console.print(
                 f"[yellow][-] No modules found for port {rport}.[/yellow]")
             custom_mod = questionary.text(
                 "Enter module path manually:", style=Q_STYLE).ask()
         else:
-            choices = []
-            for path in merged[:20]:
-                rank_label = next(
-                    (m['rank'].upper() for m in parsed_dyn if m['path'] == path), "DB")
-                choices.append(f"[{rank_label}] {path}")
-            choices += [questionary.Separator(), "✎  Manual Entry"]
+            choices.append(questionary.Separator(
+                "─────────────────────────────────────────"))
+            choices.append("✎  Manual Entry")
 
             sel = questionary.select(
-                f"Select exploit for port {rport} (sorted by reliability):",
-                choices=choices, style=Q_STYLE).ask()
+                f"Select exploit for port {rport} (Recommended exploits are at the top):",
+                choices=choices[:35],  # Keep menu clean
+                style=Q_STYLE).ask()
 
             if not sel:
                 return
             if "Manual Entry" in sel:
-                fallback = PORT_EXPLOIT_DB.get(rport, [""])[0]
+                fallback = curated_exploits[0] if curated_exploits else ""
                 custom_mod = questionary.text(
                     "Exploit module path:", default=fallback, style=Q_STYLE).ask()
             else:
+                # Extract the path from the selected option label
                 custom_mod = sel.split("] ", 1)[1].strip()
 
         if not custom_mod:

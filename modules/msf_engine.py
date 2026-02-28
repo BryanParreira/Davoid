@@ -970,22 +970,19 @@ class MetasploitRPCEngine:
             title="[bold white]● LIVE SHELL[/bold white]"
         ))
 
-        # Prime raw shells with a newline to get an initial prompt
+        # Prime raw shells and silently clean the environment
         if stype != 'meterpreter':
             try:
+                # Set path silently
                 shell.write(
                     'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n')
                 time.sleep(0.5)
+                # Upgrade to PTY silently
                 shell.write(
                     'python -c \'import pty; pty.spawn("/bin/bash")\' || python3 -c \'import pty; pty.spawn("/bin/bash")\'\n')
                 time.sleep(1.0)
-                initial = self._drain_shell(shell, timeout=3.0, min_wait=0.5)
-                if initial.strip():
-                    clean = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', initial)
-                    sys.stdout.write(clean)
-                    if not clean.endswith('\n'):
-                        sys.stdout.write('\n')
-                    sys.stdout.flush()
+                # Drain the setup noise and THROW IT AWAY (keeps UI clean)
+                self._drain_shell(shell, timeout=3.0, min_wait=0.5)
             except Exception:
                 pass
 
@@ -1036,10 +1033,9 @@ class MetasploitRPCEngine:
             # ── Raw shell commands ─────────────────────────
             else:
                 try:
-                    if not cmd.endswith("2>&1"):
-                        shell.write(cmd + ' 2>&1\n')
-                    else:
-                        shell.write(cmd + '\n')
+                    actual_cmd = cmd + \
+                        ' 2>&1' if not cmd.endswith("2>&1") else cmd
+                    shell.write(actual_cmd + '\n')
 
                     # Adaptive timeout — slow commands get more time
                     first_word = cmd.strip().split()[
@@ -1052,14 +1048,34 @@ class MetasploitRPCEngine:
                     if output:
                         # Strip terminal escape codes so Rich doesn't get confused
                         clean = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', output)
-                        sys.stdout.write(clean)
-                        if not clean.endswith('\n'):
-                            sys.stdout.write('\n')
-                        sys.stdout.flush()
+
+                        # --- NEW FORMATTING FIXES ---
+                        # 1. Strip the echoed command (e.g., "ls 2>&1")
+                        if actual_cmd in clean:
+                            clean = clean.split(
+                                actual_cmd, 1)[-1].lstrip('\r\n')
+                        elif cmd in clean:
+                            clean = clean.split(cmd, 1)[-1].lstrip('\r\n')
+
+                        # 2. Strip the trailing remote prompt (e.g., "root@metasploitable:/# ")
+                        lines = clean.split('\n')
+                        if lines:
+                            last_line = lines[-1].strip()
+                            # Look for common prompt endings and ensure it's relatively short
+                            if len(last_line) < 60 and (last_line.endswith('#') or last_line.endswith('$') or last_line.endswith('>')):
+                                lines.pop()
+
+                        clean = '\n'.join(lines).strip()
+                        # -----------------------------
+
+                        if clean:
+                            sys.stdout.write(clean + '\n')
+                        # Note: If 'clean' is empty (e.g., after running 'cd'), we just print nothing,
+                        # returning naturally to our custom prompt.
                     else:
                         sys.stdout.write(
                             "[no output — command may have run silently]\n")
-                        sys.stdout.flush()
+                    sys.stdout.flush()
 
                 except KeyboardInterrupt:
                     # Forward interrupt to victim, keep our loop alive

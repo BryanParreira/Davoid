@@ -1,3 +1,9 @@
+"""
+main.py — Davoid Red Team Framework
+Master entry point. All module imports are individually guarded so a single
+missing pip dependency never crashes the entire hub.
+"""
+
 import sys
 import os
 import warnings
@@ -5,13 +11,13 @@ import subprocess
 import shutil
 import time
 import questionary
-from questionary import Choice, Style
+from questionary import Choice, Separator
 from rich.console import Console
 from rich.table import Table
 
-# ============================================================================
-# 1. SYSTEM CONFIGURATION & PATHS
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+#  PATH & WARNING SUPPRESSION
+# ─────────────────────────────────────────────────────────────────────────────
 warnings.filterwarnings("ignore", message=".*OpenSSL 1.1.1+.*")
 warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
 warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
@@ -23,9 +29,9 @@ BASE_DIR = "/opt/davoid"
 if os.path.exists(BASE_DIR) and BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
-# ============================================================================
-# 2. CORE IMPORTS & SAFE MODULE LOADING
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+#  CORE IMPORTS  (must always succeed)
+# ─────────────────────────────────────────────────────────────────────────────
 try:
     from core.ui import draw_header
     from core.updater import check_version, perform_update
@@ -36,239 +42,273 @@ try:
     except ImportError:
         def load_config(): return None
 except ImportError as e:
-    print(f"[!] Critical core components missing: {e}")
+    print(f"[!] Critical core component missing: {e}")
     sys.exit(1)
 
-# Safely wrap module imports so a single missing dependency doesn't crash the hub
-try:
-    from modules.auditor import run_auditor
-except ImportError:
-    run_auditor = None
+# ─────────────────────────────────────────────────────────────────────────────
+#  SAFE MODULE LOADER
+#  Returns None (never raises) so a missing dep silently disables that module.
+# ─────────────────────────────────────────────────────────────────────────────
 
-try:
-    from modules.looter import run_looter
-except ImportError:
-    run_looter = None
 
-try:
-    from modules.scanner import network_discovery
-except ImportError:
-    network_discovery = None
+def _try_import(module_path, attr):
+    try:
+        mod = __import__(module_path, fromlist=[attr])
+        return getattr(mod, attr)
+    except Exception:
+        return None
 
-try:
-    from modules.sniff import SnifferEngine
-except ImportError:
-    SnifferEngine = None
 
-try:
-    from modules.recon import dns_recon
-except ImportError:
-    dns_recon = None
+network_discovery = _try_import("modules.scanner",      "network_discovery")
+SnifferEngine = _try_import("modules.sniff",        "SnifferEngine")
+dns_recon = _try_import("modules.recon",        "dns_recon")
+web_ghost = _try_import("modules.web_recon",    "web_ghost")
+MITMEngine = _try_import("modules.spoof",        "MITMEngine")
+start_dns_spoof = _try_import("modules.dns_spoofer",  "start_dns_spoof")
+run_cloner = _try_import("modules.cloner",       "run_cloner")
+run_ghost_hub = _try_import("modules.ghost_hub",    "run_ghost_hub")
+run_wifi_suite = _try_import("modules.wifi_ops",     "run_wifi_suite")
+generate_shell = _try_import("modules.payloads",     "generate_shell")
+encrypt_payload = _try_import("modules.crypt_keeper", "encrypt_payload")
+crack_hash = _try_import("modules.bruteforce",   "crack_hash")
+PersistenceEngine = _try_import("modules.persistence",  "PersistenceEngine")
+run_ai_console = _try_import("modules.ai_assist",    "run_ai_console")
+generate_report = _try_import("modules.reporter",     "generate_report")
+run_ad_ops = _try_import("modules.ad_ops",       "run_ad_ops")
+run_msf = _try_import("modules.msf_engine",   "run_msf")
+run_looter = _try_import("modules.looter",       "run_looter")
+run_auditor = _try_import("modules.auditor",      "run_auditor")
 
-try:
-    from modules.web_recon import web_ghost
-except ImportError:
-    web_ghost = None
-
+# OSINT module (bundle of functions)
+username_tracker = phone_intel = geolocate = None
+dork_generator = wayback_intel = shodan_intel = dns_intel = None
 try:
     from modules.osint_pro import (
-        username_tracker, phone_intel, geolocate, dork_generator, wayback_intel, shodan_intel, dns_intel)
-except ImportError:
-    username_tracker = phone_intel = geolocate = dork_generator = wayback_intel = shodan_intel = dns_intel = None
+        username_tracker, phone_intel, geolocate,
+        dork_generator, wayback_intel, shodan_intel, dns_intel,
+    )
+except Exception:
+    pass
 
-try:
-    from modules.spoof import MITMEngine
-except ImportError:
-    MITMEngine = None
-
-try:
-    from modules.dns_spoofer import start_dns_spoof
-except ImportError:
-    start_dns_spoof = None
-
-try:
-    from modules.cloner import run_cloner
-except ImportError:
-    run_cloner = None
-
-try:
-    from modules.ghost_hub import run_ghost_hub
-except ImportError:
-    run_ghost_hub = None
-
-try:
-    from modules.wifi_ops import run_wifi_suite
-except ImportError:
-    run_wifi_suite = None
-
-try:
-    from modules.payloads import generate_shell
-except ImportError:
-    generate_shell = None
-
-try:
-    from modules.crypt_keeper import encrypt_payload
-except ImportError:
-    encrypt_payload = None
-
-try:
-    from modules.bruteforce import crack_hash
-except ImportError:
-    crack_hash = None
-
-try:
-    from modules.persistence import PersistenceEngine
-except ImportError:
-    PersistenceEngine = None
-
-try:
-    from modules.ai_assist import run_ai_console
-except ImportError:
-    run_ai_console = None
-
-try:
-    from modules.reporter import generate_report
-except ImportError:
-    generate_report = None
-
-try:
-    from modules.ad_ops import run_ad_ops
-except ImportError:
-    run_ad_ops = None
-
-try:
-    from modules.msf_engine import run_msf
-except ImportError:
-    run_msf = None
-
-# ============================================================================
-# 3. GLOBAL UI STYLING
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+#  UI GLOBALS
+# ─────────────────────────────────────────────────────────────────────────────
 console = Console()
-q_style = Style([
-    ('qmark', 'fg:#ff0000 bold'), ('question', 'fg:#ffffff bold'),
-    ('answer', 'fg:#ff0000 bold'), ('pointer', 'fg:#ff0000 bold'),
-    ('highlighted', 'fg:#ff0000 bold'), ('selected', 'fg:#cc5454'),
-    ('separator', 'fg:#666666'), ('instruction', 'fg:#666666 italic')
+
+Q_STYLE = questionary.Style([
+    ('qmark',       'fg:#ff0000 bold'),
+    ('question',    'fg:#ffffff bold'),
+    ('answer',      'fg:#ff0000 bold'),
+    ('pointer',     'fg:#ff0000 bold'),
+    ('highlighted', 'fg:#ff0000 bold'),
+    ('selected',    'fg:#cc5454'),
+    ('separator',   'fg:#666666'),
+    ('instruction', 'fg:#666666 italic'),
 ])
 
-# ============================================================================
-# 4. SYSTEM OPERATION FUNCTIONS
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+#  SYSTEM HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _is_root():
+    """Cross-platform root/admin check."""
+    if hasattr(os, 'getuid'):
+        return os.getuid() == 0
+    try:
+        import ctypes
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
 
 
 def detect_network_environment():
-    """Automatically fingerprints the host's networking context (IP, Gateway, IFace)."""
+    """
+    Auto-fingerprints IP, gateway, and interface.
+    Fully wrapped — never crashes startup if scapy is missing or broken.
+    """
     try:
         from scapy.all import conf, get_if_addr
-        ctx.set("INTERFACE", str(conf.iface))
-        ctx.set("LHOST", get_if_addr(str(conf.iface)))
+        iface = str(conf.iface)
+        ctx.set("INTERFACE", iface)
+
+        try:
+            local_ip = get_if_addr(iface)
+            if local_ip and local_ip != "0.0.0.0":
+                ctx.set("LHOST", local_ip)
+        except Exception:
+            pass
 
         gw = "Unknown"
         try:
-            if sys.platform == "darwin":  # macOS
+            if sys.platform == "darwin":
                 out = subprocess.check_output(
-                    ["route", "-n", "get", "default"]).decode()
+                    ["route", "-n", "get", "default"],
+                    stderr=subprocess.DEVNULL, timeout=5
+                ).decode()
                 for line in out.splitlines():
                     if "gateway:" in line:
                         gw = line.split(":")[1].strip()
                         break
-            else:  # Linux
-                out = subprocess.check_output(["ip", "route"]).decode()
+            else:
+                out = subprocess.check_output(
+                    ["ip", "route"],
+                    stderr=subprocess.DEVNULL, timeout=5
+                ).decode()
                 for line in out.splitlines():
                     if line.startswith("default via"):
-                        gw = line.split(" ")[2].strip()
+                        gw = line.split()[2].strip()
                         break
         except Exception:
             pass
 
         if gw == "Unknown":
-            gw = conf.route.route("0.0.0.0")[1]
+            try:
+                gw = str(conf.route.route("0.0.0.0")[1])
+            except Exception:
+                pass
 
-        ctx.set("GATEWAY", str(gw))
+        ctx.set("GATEWAY", gw)
         return True
-    except:
+    except Exception:
         return False
 
 
 def execute_vanish_protocol():
-    """Wipes generated artifacts and exits the framework cleanly."""
+    """
+    Wipes generated artifacts.
+    Deliberately keeps logs/ by default — it contains the mission DB and C2 AES key.
+    Asks before destroying logs.
+    """
     console.print("\n[bold red]INITIATING VANISH SEQUENCE...[/bold red]")
-    for target_dir in ["logs", "clones", "payloads", "__pycache__"]:
+
+    # Safe wipe targets
+    for target_dir in ["clones", "payloads", "__pycache__"]:
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir, ignore_errors=True)
+            console.print(f"[dim]  Wiped: {target_dir}/[/dim]")
+
+    # Wipe nested __pycache__ directories
+    for root, dirs, _ in os.walk("."):
+        for d in dirs:
+            if d == "__pycache__":
+                shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+
+    # logs/ contains mission DB + C2 key — confirm before wiping
+    if os.path.exists("logs"):
+        wipe_logs = questionary.confirm(
+            "Also wipe logs/ ? (Mission DB + C2 AES key will be lost)",
+            default=False, style=Q_STYLE
+        ).ask()
+        if wipe_logs:
+            shutil.rmtree("logs", ignore_errors=True)
+            console.print("[dim]  Wiped: logs/[/dim]")
+
     console.print("[bold green][*] Evidence cleared. Ghost out.[/bold green]")
     sys.exit(0)
 
 
 def configure_global_context():
-    """UI for viewing and overriding global variables."""
+    """View and override global mission variables."""
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Global Configuration", context=ctx)
 
         table = Table(title="Mission Context", border_style="bold magenta")
-        table.add_column("Variable")
-        table.add_column("Value")
+        table.add_column("Variable", style="cyan")
+        table.add_column("Value",    style="white")
         for k, v in ctx.vars.items():
             table.add_row(k, str(v))
         console.print(table)
-        console.print("\n")
+        console.print()
 
         action = questionary.select(
             "Options:",
             choices=[
-                Choice("Set Variable", value="set"),
-                Choice("Rotate Identity (Refresh Network Context)", value="rotate"),
-                Choice("Back", value="back")
+                Choice("Set Variable",                         value="set"),
+                Choice("Rotate Identity (Refresh Network)",    value="rotate"),
+                Choice("Back",                                 value="back"),
             ],
-            style=q_style
+            style=Q_STYLE
         ).ask()
 
-        if not action or action == 'back':
+        if not action or action == "back":
             break
-        elif action == 'set':
+        elif action == "set":
             key = questionary.text(
-                "Variable Name (Leave blank to cancel):", style=q_style).ask()
+                "Variable name (blank = cancel):", style=Q_STYLE).ask()
             if key:
                 val = questionary.text(
-                    f"Value for {key}:", style=q_style).ask()
+                    f"Value for {key}:", style=Q_STYLE).ask()
                 ctx.set(key, val)
-        elif action == 'rotate':
-            console.print("[dim]Refreshing Network Identity...[/dim]")
+        elif action == "rotate":
+            console.print("[dim]Refreshing network identity...[/dim]")
             time.sleep(1)
             detect_network_environment()
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  SAFE EXECUTE
+#  Wraps every module call. If the module failed to import (func is None),
+#  shows a clean error instead of crashing. Also catches runtime exceptions.
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 def safe_execute(func, *args, **kwargs):
-    """Gracefully handles execution of a module if it's missing dependencies."""
+    """
+    Call func(*args, **kwargs) safely.
+    - func=None  → "module offline" message
+    - runtime exception → print error, keep hub alive
+    """
     if func is None:
         console.print(
-            "\n[bold red][!] Module offline or missing dependencies.[/bold red]")
+            "\n[bold red][!] Module offline or missing dependencies.[/bold red]"
+            "\n[dim]Check requirements.txt and re-run: pip install -r requirements.txt[/dim]")
         time.sleep(1.5)
         return
-    func(*args, **kwargs)
+    try:
+        func(*args, **kwargs)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        console.print(f"\n[bold red][!] Module runtime error:[/bold red] {e}")
+        time.sleep(1.5)
 
-# ============================================================================
-# 5. ACTION ROUTERS & MENU HANDLERS
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+#  MODULE ROUTERS
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def run_net_scan():
-    sub = questionary.select("Tool:", choices=[
-                             "Active Discovery", "Passive Sniffer", "Back"], style=q_style).ask()
+    sub = questionary.select(
+        "Network Tool:",
+        choices=["Active Discovery (Nmap)", "Passive Sniffer", "Back"],
+        style=Q_STYLE
+    ).ask()
     if not sub or sub == "Back":
         return
     if "Active" in sub:
         safe_execute(network_discovery)
+    elif "Sniffer" in sub:
+        # Check None before constructing lambda — prevents silent None return
+        if SnifferEngine is None:
+            safe_execute(None)
+        else:
+            safe_execute(lambda: SnifferEngine().start())
+
+
+def run_mitm():
+    if MITMEngine is None:
+        safe_execute(None)
     else:
-        safe_execute(lambda: SnifferEngine().start()
-                     if SnifferEngine else None)
+        safe_execute(lambda: MITMEngine().run())
 
 
 def run_person_osint():
-    sub = questionary.select("Mode:", choices=[
-                             "Username Tracker", "Phone Intel", "Back"], style=q_style).ask()
+    sub = questionary.select(
+        "Mode:",
+        choices=["Username Tracker", "Phone Intel", "Back"],
+        style=Q_STYLE
+    ).ask()
     if not sub or sub == "Back":
         return
     if "Username" in sub:
@@ -278,8 +318,11 @@ def run_person_osint():
 
 
 def run_ai_ops():
-    sub = questionary.select("AI Ops:", choices=[
-                             "Launch Cortex", "Generate Report (DB)", "Back"], style=q_style).ask()
+    sub = questionary.select(
+        "AI Ops:",
+        choices=["Launch Cortex", "Generate Report (DB)", "Back"],
+        style=Q_STYLE
+    ).ask()
     if not sub or sub == "Back":
         return
     if "Cortex" in sub:
@@ -288,60 +331,68 @@ def run_ai_ops():
         safe_execute(generate_report)
 
 
-def run_mitm():
-    safe_execute(lambda: MITMEngine().run() if MITMEngine else None)
-
-
 def run_encrypt():
     if encrypt_payload is None:
-        return safe_execute(None)
+        safe_execute(None)
+        return
     path = questionary.text(
-        "Path (Leave blank to cancel):", style=q_style).ask()
+        "Payload path to encrypt (blank = cancel):", style=Q_STYLE).ask()
     if path:
-        encrypt_payload(path)
+        safe_execute(encrypt_payload, path)
 
 
 def run_persist():
     if PersistenceEngine is None:
-        return safe_execute(None)
+        safe_execute(None)
+        return
     path = questionary.text(
-        "Path (Leave blank to cancel):", style=q_style).ask()
+        "Payload path (blank = cancel):", style=Q_STYLE).ask()
     if path:
-        PersistenceEngine(path).run()
+        safe_execute(lambda: PersistenceEngine(path).run())
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MENU PANELS
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def show_reconnaissance_menu():
     actions = {
-        "net": run_net_scan,
+        "net":     run_net_scan,
         "web": lambda: safe_execute(web_ghost),
         "shodan": lambda: safe_execute(shodan_intel),
         "dns": lambda: safe_execute(dns_intel),
         "wayback": lambda: safe_execute(wayback_intel),
         "dork": lambda: safe_execute(dork_generator),
-        "person": run_person_osint,
-        "geo": lambda: safe_execute(geolocate)
+        "person":  run_person_osint,
+        "geo": lambda: safe_execute(geolocate),
+        "recon": lambda: safe_execute(dns_recon),
     }
 
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Target Acquisition & Intelligence", context=ctx)
 
-        choice = questionary.select("Select Recon Module:", choices=[
-            questionary.Separator("--- ACTIVE SCANNING ---"),
-            Choice("Network Scanner (Nmap)", value="net"),
-            Choice("Web Vulnerability Scanner", value="web"),
-            questionary.Separator("--- PASSIVE OSINT ---"),
-            Choice("Shodan API (Attack Surface)", value="shodan"),
-            Choice("DNS & Subdomain Mapping", value="dns"),
-            questionary.Separator("--- DEEP WEB ---"),
-            Choice("Wayback Machine (Archive Mining)", value="wayback"),
-            Choice("Google Dork Generator", value="dork"),
-            questionary.Separator("--- IDENTITY / GEO ---"),
-            Choice("Social OSINT (Identity)", value="person"),
-            Choice("Geo-IP Tracker", value="geo"),
-            questionary.Separator("--- NAVIGATION ---"),
-            Choice("Return to Main Menu", value="back")
-        ], style=q_style).ask()
+        choice = questionary.select(
+            "Select Recon Module:",
+            choices=[
+                Separator("─── ACTIVE SCANNING ───────────────────"),
+                Choice("Network Scanner (Nmap)",           value="net"),
+                Choice("Web Vulnerability Scanner",        value="web"),
+                Choice("DNS Infrastructure Recon",         value="recon"),
+                Separator("─── PASSIVE OSINT ──────────────────────"),
+                Choice("Shodan API (Attack Surface)",      value="shodan"),
+                Choice("DNS & Subdomain Mapping",          value="dns"),
+                Separator("─── DEEP ARCHIVE ───────────────────────"),
+                Choice("Wayback Machine (Archive Mining)", value="wayback"),
+                Choice("Google Dork Generator",            value="dork"),
+                Separator("─── IDENTITY / GEO ─────────────────────"),
+                Choice("Social OSINT (Identity Tracker)",  value="person"),
+                Choice("Geo-IP Tracker",                   value="geo"),
+                Separator("─── NAVIGATION ─────────────────────────"),
+                Choice("Return to Main Menu",              value="back"),
+            ],
+            style=Q_STYLE
+        ).ask()
 
         if not choice or choice == "back":
             break
@@ -354,32 +405,36 @@ def show_assault_menu():
         "msf": lambda: safe_execute(run_msf),
         "ad": lambda: safe_execute(run_ad_ops),
         "loot": lambda: safe_execute(run_looter),
-        "mitm": run_mitm,
+        "mitm":  run_mitm,
         "dns": lambda: safe_execute(start_dns_spoof),
         "wifi": lambda: safe_execute(run_wifi_suite),
         "clone": lambda: safe_execute(run_cloner),
-        "crack": lambda: safe_execute(crack_hash)
+        "crack": lambda: safe_execute(crack_hash),
     }
 
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Direct Action", context=ctx)
 
-        choice = questionary.select("Select Assault Vector:", choices=[
-            questionary.Separator("--- EXPLOITATION ---"),
-            Choice("Metasploit Framework", value="msf"),
-            Choice("Active Directory Ops", value="ad"),
-            Choice("PrivEsc Looter", value="loot"),
-            questionary.Separator("--- NETWORK ATTACKS ---"),
-            Choice("MITM Interceptor", value="mitm"),
-            Choice("DNS Spoofer", value="dns"),
-            Choice("WiFi Attack Suite", value="wifi"),
-            questionary.Separator("--- SOCIAL & CRYPTO ---"),
-            Choice("AitM Web Cloner", value="clone"),
-            Choice("Hash Cracker", value="crack"),
-            questionary.Separator("--- NAVIGATION ---"),
-            Choice("Return to Main Menu", value="back")
-        ], style=q_style).ask()
+        choice = questionary.select(
+            "Select Assault Vector:",
+            choices=[
+                Separator("─── EXPLOITATION ───────────────────────"),
+                Choice("Metasploit Framework (MSF-RPC)",   value="msf"),
+                Choice("Active Directory Ops",             value="ad"),
+                Choice("PrivEsc Looter (Post-Exploit)",    value="loot"),
+                Separator("─── NETWORK ATTACKS ────────────────────"),
+                Choice("MITM Interceptor (ARP Poison)",    value="mitm"),
+                Choice("DNS Spoofer",                      value="dns"),
+                Choice("WiFi Attack Suite",                value="wifi"),
+                Separator("─── SOCIAL & CREDENTIAL ─────────────────"),
+                Choice("AitM Web Cloner (Phishing Proxy)", value="clone"),
+                Choice("Hash Cracker",                     value="crack"),
+                Separator("─── NAVIGATION ─────────────────────────"),
+                Choice("Return to Main Menu",              value="back"),
+            ],
+            style=Q_STYLE
+        ).ask()
 
         if not choice or choice == "back":
             break
@@ -390,34 +445,41 @@ def show_assault_menu():
 def show_infrastructure_menu():
     actions = {
         "forge": lambda: safe_execute(generate_shell),
-        "crypt": run_encrypt,
+        "crypt":   run_encrypt,
         "persist": run_persist,
-        "c2": lambda: safe_execute(run_ghost_hub)
+        "c2": lambda: safe_execute(run_ghost_hub),
+        "audit": lambda: safe_execute(run_auditor),
     }
 
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Infrastructure & C2", context=ctx)
 
-        choice = questionary.select("Select C2 Operation:", choices=[
-            questionary.Separator("--- WEAPONIZATION ---"),
-            Choice("Payload Generator", value="forge"),
-            Choice("Payload Encryptor", value="crypt"),
-            questionary.Separator("--- PERSISTENCE & COMMAND ---"),
-            Choice("Persistence Installer", value="persist"),
-            Choice("GhostHub C2 Server", value="c2"),
-            questionary.Separator("--- NAVIGATION ---"),
-            Choice("Return to Main Menu", value="back")
-        ], style=q_style).ask()
+        choice = questionary.select(
+            "Select C2 Operation:",
+            choices=[
+                Separator("─── WEAPONIZATION ──────────────────────"),
+                Choice("Payload Generator (Forge)",        value="forge"),
+                Choice("Payload Encryptor (CryptKeeper)",  value="crypt"),
+                Separator("─── PERSISTENCE & C2 ───────────────────"),
+                Choice("Persistence Installer",            value="persist"),
+                Choice("GhostHub C2 Server",               value="c2"),
+                Separator("─── AUDIT ───────────────────────────────"),
+                Choice("System Posture Auditor",           value="audit"),
+                Separator("─── NAVIGATION ─────────────────────────"),
+                Choice("Return to Main Menu",              value="back"),
+            ],
+            style=Q_STYLE
+        ).ask()
 
         if not choice or choice == "back":
             break
         if choice in actions:
             actions[choice]()
 
-# ============================================================================
-# 6. MAIN EXECUTION LOOP
-# ============================================================================
+# ─────────────────────────────────────────────────────────────────────────────
+#  MAIN LOOP
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def main():
@@ -425,16 +487,21 @@ def main():
         perform_update()
         sys.exit(0)
 
+    # Boot tasks
     detect_network_environment()
-    config = load_config()
+    load_config()
+
+    # Ensure essential directories exist
+    os.makedirs("logs",    exist_ok=True)
+    os.makedirs("payloads", exist_ok=True)
 
     actions = {
-        "recon": show_reconnaissance_menu,
+        "recon":   show_reconnaissance_menu,
         "assault": show_assault_menu,
-        "infra": show_infrastructure_menu,
-        "ai": run_ai_ops,
-        "sys": configure_global_context,
-        "update": perform_update
+        "infra":   show_infrastructure_menu,
+        "ai":      run_ai_ops,
+        "sys":     configure_global_context,
+        "update":  perform_update,
     }
 
     while True:
@@ -443,24 +510,31 @@ def main():
             draw_header("Master Command Hub", context=ctx)
             check_version()
 
-            phase = questionary.select("Select Mission Phase:", choices=[
-                questionary.Separator("--- OFFENSIVE OPS ---"),
-                Choice("1. Recon & OSINT", value="recon"),
-                Choice("2. Assault & Exploitation", value="assault"),
-                Choice("3. C2 & Payloads", value="infra"),
-                questionary.Separator("--- INTELLIGENCE ---"),
-                Choice("4. AI Cortex & Reporting", value="ai"),
-                questionary.Separator("--- SYSTEM ---"),
-                Choice("Configuration & Context", value="sys"),
-                Choice("Framework Update", value="update"),
-                Choice("Execute Vanish Protocol", value="exit")
-            ], style=q_style, pointer=">").ask()
+            phase = questionary.select(
+                "Select Mission Phase:",
+                choices=[
+                    Separator("─── OFFENSIVE OPERATIONS ───────────────"),
+                    Choice("1.  Recon & OSINT",           value="recon"),
+                    Choice("2.  Assault & Exploitation",  value="assault"),
+                    Choice("3.  C2 & Payloads",           value="infra"),
+                    Separator("─── INTELLIGENCE ───────────────────────"),
+                    Choice("4.  AI Cortex & Reporting",   value="ai"),
+                    Separator("─── SYSTEM ─────────────────────────────"),
+                    Choice("    Configuration & Context", value="sys"),
+                    Choice("    Framework Update",        value="update"),
+                    Choice("    Execute Vanish Protocol", value="exit"),
+                ],
+                style=Q_STYLE,
+                pointer="▶"
+            ).ask()
 
-            if not phase:  # Handles Esc/Ctrl+C gracefully
+            if not phase:
                 continue
 
             if phase == "exit":
-                if questionary.confirm("Execute Vanish Protocol?", default=True, style=q_style).ask():
+                if questionary.confirm(
+                    "Execute Vanish Protocol?", default=True, style=Q_STYLE
+                ).ask():
                     execute_vanish_protocol()
             elif phase in actions:
                 actions[phase]()
@@ -469,7 +543,7 @@ def main():
             execute_vanish_protocol()
         except Exception as e:
             console.print(
-                f"[bold red]Critical Error in Main Loop:[/bold red] {e}")
+                f"\n[bold red]Critical error in main loop:[/bold red] {e}")
             input("Press Enter to continue...")
 
 

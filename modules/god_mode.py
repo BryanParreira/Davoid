@@ -6,6 +6,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from core.ui import draw_header, Q_STYLE
 from core.database import db
+from core.context import ctx
 
 # Import existing engines
 from modules.scanner import NmapEngine
@@ -32,17 +33,22 @@ class CampaignEngine:
         if not target:
             return
 
+        # Auto-set the global context so MSF knows the target in Phase 3
+        ctx.set("RHOST", target)
+
         # Phase 1: Reconnaissance
         console.print(
             Panel(f"PHASE 1: Target Acquisition ({target})", border_style="bold red"))
         if not self.scanner.check_dependencies():
             return
 
-        console.print("[*] Initiating Stealth SYN & Service Scan...")
+        console.print(
+            "[*] Initiating Full Audit Scan (OS, Services, Scripts)...")
         try:
-            # Force a stealth/service scan programmatically
-            with console.status("[bold cyan]Nmap Engine Active...[/bold cyan]", spinner="bouncingBar"):
-                self.scanner.nm.scan(hosts=target, arguments="-sS -sV -T4")
+            # Force a full audit scan for maximum OS and Service intel
+            with console.status("[bold cyan]Nmap Engine Active (Full Audit)...[/bold cyan]", spinner="bouncingBar"):
+                self.scanner.nm.scan(
+                    hosts=target, arguments="-sS -sV -O -sC -T4")
         except Exception as e:
             console.print(f"[bold red][!] Nmap Engine Failure:[/bold red] {e}")
             return
@@ -55,23 +61,43 @@ class CampaignEngine:
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
             return
 
-        # NEW: Capture the exact scan results cleanly for the AI
+        # Capture the exact scan results cleanly for the AI
         scan_context = ""
 
         for host in hosts:
             state = self.scanner.nm[host].state()
+
+            # Extract precise OS Information
+            os_match = "Unknown OS"
+            if self.scanner.nm[host].get('osmatch') and len(self.scanner.nm[host]['osmatch']) > 0:
+                os_match = self.scanner.nm[host]['osmatch'][0]['name']
+
             console.print(f"[+] Discovered active host: {host} ({state})")
-            scan_context += f"\nTarget Host: {host}\nOpen Ports & Services:\n"
+            console.print(
+                f"[*] Detected OS: [bold cyan]{os_match}[/bold cyan]")
+
+            scan_context += f"\nTarget Host: {host}\nDetected Operating System: {os_match}\nOpen Ports & Services:\n"
 
             for proto in self.scanner.nm[host].all_protocols():
                 for port in self.scanner.nm[host][proto].keys():
-                    name = self.scanner.nm[host][proto][port].get('name', '')
-                    version = self.scanner.nm[host][proto][port].get(
-                        'version', '')
-                    info = f"{port}/{proto} ({name} {version})"
+                    pd = self.scanner.nm[host][proto][port]
+
+                    # Get deep service details
+                    name = pd.get('name', '')
+                    product = pd.get('product', '')
+                    version = pd.get('version', '')
+                    extrainfo = pd.get('extrainfo', '')
+
+                    # Combine product, version, and extra info for rich context
+                    full_service_info = f"{product} {version} {extrainfo}".strip(
+                    )
+                    if not full_service_info:
+                        full_service_info = name  # Fallback
+
+                    info = f"Port {port}/{proto} - Service: {name} - Details: {full_service_info}"
 
                     db.log("Campaign-Scanner", host, info, "HIGH")
-                    scan_context += f"- Port {port}/{proto} running {name} {version}\n"
+                    scan_context += f"- {info}\n"
 
         # Phase 2: AI Cortex Analysis
         console.print()
@@ -82,7 +108,6 @@ class CampaignEngine:
             console.print(
                 "[yellow][!] Local AI Offline. Skipping cognitive analysis.[/yellow]")
         else:
-            # Dynamically fetch installed models from local Ollama instance
             models = self.ai.list_models()
 
             if not models:
@@ -102,18 +127,18 @@ class CampaignEngine:
                     console.print(
                         f"\n[*] Feeding specific target telemetry to [cyan]{self.ai.model}[/cyan]...")
 
-                    # NEW: Force the AI into an aggressive, technical mindset.
-                    # This override completely stops the AI from writing generic "how-to" paragraphs.
+                    # Strict system override enforcing OS-awareness
                     system_override = (
                         "You are an elite Red Team Exploit Mapper. Your ONLY job is to look at the provided Nmap scan results "
-                        "and list the exact Metasploit module paths (e.g., exploit/windows/smb/ms17_010_eternalblue) "
-                        "that correspond to the open ports and services. Do NOT give generic advice. Do NOT write paragraphs. "
-                        "Give me a bulleted list of the open ports and their most likely Metasploit modules."
+                        "and list the exact Metasploit module paths (e.g., exploit/windows/smb/ms17_010_eternalblue or exploit/linux/http/...) "
+                        "that correspond to the open ports, services, AND the exact Operating System detected. "
+                        "Do NOT give generic advice. Do NOT write paragraphs. "
+                        "Give me a strict bulleted list of the open ports and their most likely Metasploit modules. "
+                        "CRITICAL: If the OS is Linux, DO NOT suggest Windows exploits. If it is Windows, DO NOT suggest Linux exploits."
                     )
 
-                    user_prompt = f"Analyze these specific scan results for {target} and tell me exactly which Metasploit modules to run:\n{scan_context}"
+                    user_prompt = f"Analyze these specific scan results for {target} and tell me exactly which Metasploit modules to run based on the OS and versions:\n{scan_context}"
 
-                    # Bypass the generic DB analyzer and chat directly with our custom strict prompt
                     self.ai.chat(user_prompt, override_prompt=system_override)
 
         # Phase 3: Weaponization & Exploitation

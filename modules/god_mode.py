@@ -55,16 +55,23 @@ class CampaignEngine:
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
             return
 
+        # NEW: Capture the exact scan results cleanly for the AI
+        scan_context = ""
+
         for host in hosts:
             state = self.scanner.nm[host].state()
             console.print(f"[+] Discovered active host: {host} ({state})")
+            scan_context += f"\nTarget Host: {host}\nOpen Ports & Services:\n"
+
             for proto in self.scanner.nm[host].all_protocols():
                 for port in self.scanner.nm[host][proto].keys():
                     name = self.scanner.nm[host][proto][port].get('name', '')
                     version = self.scanner.nm[host][proto][port].get(
                         'version', '')
                     info = f"{port}/{proto} ({name} {version})"
+
                     db.log("Campaign-Scanner", host, info, "HIGH")
+                    scan_context += f"- Port {port}/{proto} running {name} {version}\n"
 
         # Phase 2: AI Cortex Analysis
         console.print()
@@ -84,7 +91,6 @@ class CampaignEngine:
                 console.print(
                     "[white]Please run: 'ollama pull llama3' or 'ollama pull mistral' in another terminal.[/white]")
             else:
-                # Let the user choose their preferred model
                 selected_model = questionary.select(
                     "Select AI Model for Threat Analysis:",
                     choices=models,
@@ -94,8 +100,21 @@ class CampaignEngine:
                 if selected_model:
                     self.ai.model = selected_model
                     console.print(
-                        f"\n[*] Feeding target telemetry to [cyan]{self.ai.model}[/cyan]...")
-                    self.ai.analyze_mission_database()
+                        f"\n[*] Feeding specific target telemetry to [cyan]{self.ai.model}[/cyan]...")
+
+                    # NEW: Force the AI into an aggressive, technical mindset.
+                    # This override completely stops the AI from writing generic "how-to" paragraphs.
+                    system_override = (
+                        "You are an elite Red Team Exploit Mapper. Your ONLY job is to look at the provided Nmap scan results "
+                        "and list the exact Metasploit module paths (e.g., exploit/windows/smb/ms17_010_eternalblue) "
+                        "that correspond to the open ports and services. Do NOT give generic advice. Do NOT write paragraphs. "
+                        "Give me a bulleted list of the open ports and their most likely Metasploit modules."
+                    )
+
+                    user_prompt = f"Analyze these specific scan results for {target} and tell me exactly which Metasploit modules to run:\n{scan_context}"
+
+                    # Bypass the generic DB analyzer and chat directly with our custom strict prompt
+                    self.ai.chat(user_prompt, override_prompt=system_override)
 
         # Phase 3: Weaponization & Exploitation
         console.print()

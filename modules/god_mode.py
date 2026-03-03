@@ -67,7 +67,7 @@ class CampaignEngine:
                     db.log("Campaign-Scanner", host, info, "HIGH")
 
         # Phase 2: AI Cortex Analysis
-        console.print()  # Fixed: Print newline separately
+        console.print()
         console.print(Panel("PHASE 2: Cortex Threat Analysis",
                       border_style="bold magenta"))
 
@@ -75,12 +75,30 @@ class CampaignEngine:
             console.print(
                 "[yellow][!] Local AI Offline. Skipping cognitive analysis.[/yellow]")
         else:
-            prompt = f"I just scanned the target {target}. Here is the raw data from the database. Identify the single most likely path to a remote shell and give me the exact Metasploit module path."
-            console.print("[*] Feeding target telemetry to local LLM...")
-            self.ai.analyze_mission_database()
+            # Dynamically fetch installed models from local Ollama instance
+            models = self.ai.list_models()
+
+            if not models:
+                console.print(
+                    "[red][!] Ollama is online, but no models are installed locally.[/red]")
+                console.print(
+                    "[white]Please run: 'ollama pull llama3' or 'ollama pull mistral' in another terminal.[/white]")
+            else:
+                # Let the user choose their preferred model
+                selected_model = questionary.select(
+                    "Select AI Model for Threat Analysis:",
+                    choices=models,
+                    style=Q_STYLE
+                ).ask()
+
+                if selected_model:
+                    self.ai.model = selected_model
+                    console.print(
+                        f"\n[*] Feeding target telemetry to [cyan]{self.ai.model}[/cyan]...")
+                    self.ai.analyze_mission_database()
 
         # Phase 3: Weaponization & Exploitation
-        console.print()  # Fixed: Print newline separately
+        console.print()
         console.print(Panel("PHASE 3: Exploitation Engine",
                       border_style="bold green"))
 

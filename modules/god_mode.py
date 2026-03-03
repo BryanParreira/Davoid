@@ -127,18 +127,18 @@ class CampaignEngine:
                     console.print(
                         f"\n[*] Feeding specific target telemetry to [cyan]{self.ai.model}[/cyan]...")
 
-                    # UPGRADED SYSTEM OVERRIDE: Forcing exact formatting
+                    # FEW-SHOT OVERRIDE: Giving the AI a perfect example to copy so it doesn't break
                     system_override = (
-                        "You are an elite Red Team Exploit Mapper. Your ONLY job is to look at the provided Nmap scan results "
-                        "and list the exact Metasploit module paths that correspond to the open ports, services, AND the exact Operating System detected.\n\n"
-                        "CRITICAL RULES:\n"
-                        "1. You MUST format every single output line EXACTLY like this:\n"
-                        "   - Port [Number]: [Metasploit Module Path] (Reason)\n"
-                        "2. Do NOT give generic advice. Do NOT write paragraphs.\n"
-                        "3. If the OS is Linux, DO NOT suggest Windows exploits. If it is Windows, DO NOT suggest Linux exploits."
+                        "You are a Red Team Metasploit expert. Map the provided Nmap scan results to exact Metasploit module paths.\n"
+                        "CRITICAL: Match the exact Operating System. Never suggest Windows exploits for Linux, or vice versa.\n\n"
+                        "Use this EXACT format for your response, one line per port:\n"
+                        "- Port 21 (FTP): exploit/unix/ftp/vsftpd_234_backdoor\n"
+                        "- Port 80 (HTTP): exploit/multi/http/tomcat_mgr_upload\n"
+                        "- Port 445 (SMB): exploit/windows/smb/ms17_010_eternalblue\n\n"
+                        "Do not write introductions or paragraphs. Output ONLY the bulleted list of ports and modules."
                     )
 
-                    user_prompt = f"Analyze these specific scan results for {target} and output the mapped Metasploit modules in the exact required format:\n{scan_context}"
+                    user_prompt = f"Analyze these scan results for {target} and map the exploits:\n{scan_context}"
 
                     self.ai.chat(user_prompt, override_prompt=system_override)
 

@@ -75,6 +75,7 @@ run_cloner = _try_import("modules.cloner",       "run_cloner")
 run_ghost_hub = _try_import("modules.ghost_hub",    "run_ghost_hub")
 run_wifi_suite = _try_import("modules.wifi_ops",     "run_wifi_suite")
 generate_shell = _try_import("modules.payloads",     "generate_shell")
+encrypt_payload = _try_import("modules.crypt_keeper", "encrypt_payload")
 crack_hash = _try_import("modules.bruteforce",   "crack_hash")
 PersistenceEngine = _try_import("modules.persistence",  "PersistenceEngine")
 run_ai_console = _try_import("modules.ai_assist",    "run_ai_console")
@@ -82,6 +83,7 @@ generate_report = _try_import("modules.reporter",     "generate_report")
 run_ad_ops = _try_import("modules.ad_ops",       "run_ad_ops")
 run_msf = _try_import("modules.msf_engine",   "run_msf")
 run_looter = _try_import("modules.looter",       "run_looter")
+run_auditor = _try_import("modules.auditor",      "run_auditor")
 run_cloud_ops = _try_import("modules.cloud_ops",    "run_cloud_ops")
 run_god_mode = _try_import("modules.god_mode",     "run_god_mode")
 run_purple_team = _try_import("modules.purple_team",  "run_purple_team")
@@ -105,7 +107,7 @@ Q_STYLE = questionary.Style([
     ('pointer',     'fg:#ff0000 bold'),
     ('highlighted', 'fg:#ff0000 bold'),
     ('selected',    'fg:#cc5454'),
-    ('separator',   'fg:#444444'),
+    ('separator',   'fg:#666666'),
     ('instruction', 'fg:#666666 italic'),
 ])
 
@@ -155,6 +157,27 @@ def detect_network_environment():
                 ctx.set("LHOST", local_ip)
         except Exception:
             pass
+
+        gw = "Unknown"
+        try:
+            if sys.platform == "darwin":
+                out = subprocess.check_output(
+                    ["route", "-n", "get", "default"], stderr=subprocess.DEVNULL, timeout=5).decode()
+                for line in out.splitlines():
+                    if "gateway:" in line:
+                        gw = line.split(":")[1].strip()
+                        break
+            else:
+                out = subprocess.check_output(
+                    ["ip", "route"], stderr=subprocess.DEVNULL, timeout=5).decode()
+                for line in out.splitlines():
+                    if line.startswith("default via"):
+                        gw = line.split()[2].strip()
+                        break
+        except Exception:
+            pass
+
+        ctx.set("GATEWAY", gw)
         return True
     except Exception:
         return False
@@ -192,20 +215,118 @@ def safe_execute(func, *args, **kwargs):
         console.print(f"\n[bold red][!] Module runtime error:[/bold red] {e}")
         time.sleep(1.5)
 
+
+def configure_global_context():
+    while True:
+        os.system('cls' if os.name == 'nt' else 'clear')
+        draw_header("Global Configuration", context=ctx)
+        table = Table(title="Mission Context", border_style="bold magenta")
+        table.add_column("Variable", style="cyan")
+        table.add_column("Value",    style="white")
+        for k, v in ctx.vars.items():
+            table.add_row(k, str(v))
+        console.print(table)
+        console.print()
+
+        action = questionary.select(
+            "Options:",
+            choices=[Choice("Set Variable", value="set"), Choice(
+                "Rotate Identity (Refresh Network)", value="rotate"), Choice("Back", value="back")],
+            style=Q_STYLE
+        ).ask()
+
+        if not action or action == "back":
+            break
+        elif action == "set":
+            key = questionary.text(
+                "Variable name (blank = cancel):", style=Q_STYLE).ask()
+            if key:
+                val = questionary.text(
+                    f"Value for {key}:", style=Q_STYLE).ask()
+                ctx.set(key, val)
+        elif action == "rotate":
+            console.print("[dim]Refreshing network identity...[/dim]")
+            time.sleep(1)
+            detect_network_environment()
+
 # ─────────────────────────────────────────────────────────────────────────────
-#  MENU ROUTERS
+#  WRAPPER ROUTERS (Restoring sub-menus)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def run_net_scan():
+    sub = questionary.select("Network Tool:", choices=[
+                             "Active Discovery (Nmap)", "Passive Sniffer", "Back"], style=Q_STYLE).ask()
+    if not sub or sub == "Back":
+        return
+    if "Active" in sub:
+        safe_execute(network_discovery)
+    elif "Sniffer" in sub:
+        if SnifferEngine is None:
+            safe_execute(None)
+        else:
+            safe_execute(lambda: SnifferEngine().start())
+
+
+def run_person_osint():
+    sub = questionary.select("Mode:", choices=[
+                             "Username Tracker", "Phone Intel", "Back"], style=Q_STYLE).ask()
+    if not sub or sub == "Back":
+        return
+    if "Username" in sub:
+        safe_execute(username_tracker)
+    else:
+        safe_execute(phone_intel)
+
+
+def run_ai_ops():
+    sub = questionary.select("AI Ops:", choices=[
+                             "Launch Cortex", "Generate Report (DB)", "Back"], style=Q_STYLE).ask()
+    if not sub or sub == "Back":
+        return
+    if "Cortex" in sub:
+        safe_execute(run_ai_console)
+    else:
+        safe_execute(generate_report)
+
+
+def run_encrypt():
+    if encrypt_payload is None:
+        safe_execute(None)
+        return
+    path = questionary.text(
+        "Payload path to encrypt (blank = cancel):", style=Q_STYLE).ask()
+    if path:
+        safe_execute(encrypt_payload, path)
+
+
+def run_persist():
+    if PersistenceEngine is None:
+        safe_execute(None)
+        return
+    path = questionary.text(
+        "Payload path (blank = cancel):", style=Q_STYLE).ask()
+    if path:
+        safe_execute(lambda: PersistenceEngine(path).run())
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MENU PANELS
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def show_reconnaissance_menu():
     actions = {
-        "net": lambda: safe_execute(network_discovery),
+        "net":     run_net_scan,
         "web": lambda: safe_execute(web_ghost),
         "shodan": lambda: safe_execute(shodan_intel),
         "dns": lambda: safe_execute(dns_intel),
-        "person": lambda: safe_execute(username_tracker),
+        "wayback": lambda: safe_execute(wayback_intel),
+        "dork": lambda: safe_execute(dork_generator),
+        "person":  run_person_osint,
+        "geo": lambda: safe_execute(geolocate),
         "recon": lambda: safe_execute(dns_recon),
     }
+
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Target Acquisition & Intelligence", context=ctx)
@@ -213,16 +334,22 @@ def show_reconnaissance_menu():
             "Select Recon Module:",
             choices=[
                 Separator("─── ACTIVE SCANNING ───────────────────"),
-                Choice("Network Scanner (Nmap)",           value="net"),
+                Choice("Network Scanner (Nmap) & Sniffer", value="net"),
                 Choice("Web Vulnerability Scanner",        value="web"),
                 Choice("DNS Infrastructure Recon",         value="recon"),
                 Separator("─── PASSIVE OSINT ──────────────────────"),
                 Choice("Shodan API (Attack Surface)",      value="shodan"),
                 Choice("DNS & Subdomain Mapping",          value="dns"),
+                Separator("─── DEEP ARCHIVE ───────────────────────"),
+                Choice("Wayback Machine (Archive Mining)", value="wayback"),
+                Choice("Google Dork Generator",            value="dork"),
+                Separator("─── IDENTITY / GEO ─────────────────────"),
                 Choice("Social OSINT (Identity Tracker)",  value="person"),
+                Choice("Geo-IP Tracker",                   value="geo"),
                 Separator("─── NAVIGATION ─────────────────────────"),
                 Choice("Return to Main Menu",              value="back"),
-            ], style=Q_STYLE
+            ],
+            style=Q_STYLE
         ).ask()
         if not choice or choice == "back":
             break
@@ -240,7 +367,9 @@ def show_assault_menu():
         "dns": lambda: safe_execute(start_dns_spoof),
         "wifi": lambda: safe_execute(run_wifi_suite),
         "clone": lambda: safe_execute(run_cloner),
+        "crack": lambda: safe_execute(crack_hash),
     }
+
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Direct Action & Exploitation", context=ctx)
@@ -258,9 +387,11 @@ def show_assault_menu():
                 Choice("WiFi Attack Suite",                value="wifi"),
                 Separator("─── SOCIAL & CREDENTIAL ─────────────────"),
                 Choice("AitM Web Cloner (Phishing Proxy)", value="clone"),
+                Choice("Hash Cracker",                     value="crack"),
                 Separator("─── NAVIGATION ─────────────────────────"),
                 Choice("Return to Main Menu",              value="back"),
-            ], style=Q_STYLE
+            ],
+            style=Q_STYLE
         ).ask()
         if not choice or choice == "back":
             break
@@ -271,9 +402,12 @@ def show_assault_menu():
 def show_infrastructure_menu():
     actions = {
         "forge": lambda: safe_execute(generate_shell),
-        "persist": lambda: safe_execute(lambda: PersistenceEngine(questionary.text("Path:", style=Q_STYLE).ask()).run()) if PersistenceEngine else safe_execute(None),
+        "crypt":   run_encrypt,
+        "persist": run_persist,
         "c2": lambda: safe_execute(run_ghost_hub),
+        "audit": lambda: safe_execute(run_auditor),
     }
+
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Infrastructure, C2 & Evasion", context=ctx)
@@ -282,12 +416,16 @@ def show_infrastructure_menu():
             choices=[
                 Separator("─── WEAPONIZATION ──────────────────────"),
                 Choice("AI Polymorphic Payload Forge",     value="forge"),
+                Choice("Payload Encryptor (CryptKeeper)",  value="crypt"),
                 Separator("─── PERSISTENCE & C2 ───────────────────"),
                 Choice("Persistence Installer",            value="persist"),
                 Choice("GhostHub C2 Server",               value="c2"),
+                Separator("─── AUDIT ───────────────────────────────"),
+                Choice("System Posture Auditor",           value="audit"),
                 Separator("─── NAVIGATION ─────────────────────────"),
                 Choice("Return to Main Menu",              value="back"),
-            ], style=Q_STYLE
+            ],
+            style=Q_STYLE
         ).ask()
         if not choice or choice == "back":
             break
@@ -351,7 +489,8 @@ def main():
         "infra":   show_infrastructure_menu,
         "god": lambda: safe_execute(run_god_mode),
         "purple": lambda: safe_execute(run_purple_team),
-        "ai": lambda: safe_execute(run_ai_console),
+        "ai":      run_ai_ops,
+        "sys":     configure_global_context,
         "plugins": show_plugins_menu,
         "update":  perform_update,
     }
@@ -366,18 +505,20 @@ def main():
                 "Select Mission Phase:",
                 choices=[
                     Separator("─── OFFENSIVE OPERATIONS ───────────────"),
-                    Choice("1.  Recon & OSINT",           value="recon"),
-                    Choice("2.  Assault & Exploitation",  value="assault"),
-                    Choice("3.  C2 & Polymorphic Forge",  value="infra"),
+                    Choice("1.  Recon & OSINT",             value="recon"),
+                    Choice("2.  Assault & Exploitation",    value="assault"),
+                    Choice("3.  C2 & Polymorphic Forge",    value="infra"),
                     Separator("─── INTELLIGENCE & AUTOMATION ────────"),
-                    Choice("4.  AI Cortex Console",       value="ai"),
-                    Choice("5.  GOD MODE (Auto-Campaign)", value="god"),
-                    Choice("6.  Purple Team Emulation",   value="purple"),
+                    Choice("4.  AI Cortex & Reporting",     value="ai"),
+                    Choice("5.  GOD MODE (Auto-Campaign)",  value="god"),
+                    Choice("6.  Purple Team Emulation",     value="purple"),
                     Separator("─── ECOSYSTEM ──────────────────────────"),
                     Choice(
                         f"    Community Plugins ({len(LOADED_PLUGINS)})", value="plugins"),
                     Separator("─── SYSTEM ─────────────────────────────"),
-                    Choice("    Execute Vanish Protocol", value="exit"),
+                    Choice("    Configuration & Context",   value="sys"),
+                    Choice("    Framework Update",          value="update"),
+                    Choice("    Execute Vanish Protocol",   value="exit"),
                 ],
                 style=Q_STYLE,
                 pointer="▶"

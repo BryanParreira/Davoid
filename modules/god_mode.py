@@ -127,17 +127,18 @@ class CampaignEngine:
                     console.print(
                         f"\n[*] Feeding specific target telemetry to [cyan]{self.ai.model}[/cyan]...")
 
-                    # Strict system override enforcing OS-awareness
+                    # UPGRADED SYSTEM OVERRIDE: Forcing exact formatting
                     system_override = (
                         "You are an elite Red Team Exploit Mapper. Your ONLY job is to look at the provided Nmap scan results "
-                        "and list the exact Metasploit module paths (e.g., exploit/windows/smb/ms17_010_eternalblue or exploit/linux/http/...) "
-                        "that correspond to the open ports, services, AND the exact Operating System detected. "
-                        "Do NOT give generic advice. Do NOT write paragraphs. "
-                        "Give me a strict bulleted list of the open ports and their most likely Metasploit modules. "
-                        "CRITICAL: If the OS is Linux, DO NOT suggest Windows exploits. If it is Windows, DO NOT suggest Linux exploits."
+                        "and list the exact Metasploit module paths that correspond to the open ports, services, AND the exact Operating System detected.\n\n"
+                        "CRITICAL RULES:\n"
+                        "1. You MUST format every single output line EXACTLY like this:\n"
+                        "   - Port [Number]: [Metasploit Module Path] (Reason)\n"
+                        "2. Do NOT give generic advice. Do NOT write paragraphs.\n"
+                        "3. If the OS is Linux, DO NOT suggest Windows exploits. If it is Windows, DO NOT suggest Linux exploits."
                     )
 
-                    user_prompt = f"Analyze these specific scan results for {target} and tell me exactly which Metasploit modules to run based on the OS and versions:\n{scan_context}"
+                    user_prompt = f"Analyze these specific scan results for {target} and output the mapped Metasploit modules in the exact required format:\n{scan_context}"
 
                     self.ai.chat(user_prompt, override_prompt=system_override)
 

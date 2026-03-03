@@ -250,7 +250,7 @@ def configure_global_context():
             detect_network_environment()
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  WRAPPER ROUTERS & MENUS (REORGANIZED)
+#  WRAPPER ROUTERS (Restoring sub-menus)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -270,15 +270,13 @@ def run_net_scan():
 
 def run_person_osint():
     sub = questionary.select("Mode:", choices=[
-                             "Username Tracker", "Phone Intel", "Geo-IP Tracker", "Back"], style=Q_STYLE).ask()
+                             "Username Tracker", "Phone Intel", "Back"], style=Q_STYLE).ask()
     if not sub or sub == "Back":
         return
     if "Username" in sub:
         safe_execute(username_tracker)
-    elif "Phone" in sub:
+    else:
         safe_execute(phone_intel)
-    elif "Geo-IP" in sub:
-        safe_execute(geolocate)
 
 
 def run_ai_ops():
@@ -311,151 +309,94 @@ def run_persist():
     if path:
         safe_execute(lambda: PersistenceEngine(path).run())
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  MENU PANELS
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 def show_reconnaissance_menu():
+    actions = {
+        "net":     run_net_scan,
+        "web": lambda: safe_execute(web_ghost),
+        "shodan": lambda: safe_execute(shodan_intel),
+        "dns": lambda: safe_execute(dns_intel),
+        "wayback": lambda: safe_execute(wayback_intel),
+        "dork": lambda: safe_execute(dork_generator),
+        "person":  run_person_osint,
+        "geo": lambda: safe_execute(geolocate),
+        "recon": lambda: safe_execute(dns_recon),
+    }
+
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Intelligence & Reconnaissance", context=ctx)
-        cat = questionary.select(
-            "Select Recon Category:",
+        draw_header("Target Acquisition & Intelligence", context=ctx)
+        choice = questionary.select(
+            "Select Recon Module:",
             choices=[
-                Choice("1. Active Scanning & Probing", value="active"),
-                Choice("2. Passive OSINT & Archives", value="passive"),
-                Choice("3. Target Identity & Geo-Tracking", value="identity"),
-                Separator("────────────────────────────────────────"),
-                Choice("Back to Main Menu", value="back"),
-            ], style=Q_STYLE
+                Separator("─── ACTIVE SCANNING ───────────────────"),
+                Choice("Network Scanner (Nmap) & Sniffer", value="net"),
+                Choice("Web Vulnerability Scanner",        value="web"),
+                Choice("DNS Infrastructure Recon",         value="recon"),
+                Separator("─── PASSIVE OSINT ──────────────────────"),
+                Choice("Shodan API (Attack Surface)",      value="shodan"),
+                Choice("DNS & Subdomain Mapping",          value="dns"),
+                Separator("─── DEEP ARCHIVE ───────────────────────"),
+                Choice("Wayback Machine (Archive Mining)", value="wayback"),
+                Choice("Google Dork Generator",            value="dork"),
+                Separator("─── IDENTITY / GEO ─────────────────────"),
+                Choice("Social OSINT (Identity Tracker)",  value="person"),
+                Choice("Geo-IP Tracker",                   value="geo"),
+                Separator("─── NAVIGATION ─────────────────────────"),
+                Choice("Return to Main Menu",              value="back"),
+            ],
+            style=Q_STYLE
         ).ask()
-
-        if not cat or cat == "back":
+        if not choice or choice == "back":
             break
-
-        if cat == "active":
-            while True:
-                os.system('cls' if os.name == 'nt' else 'clear')
-                draw_header("Active Scanning & Probing", context=ctx)
-                sub = questionary.select("Select Module:", choices=[
-                    Choice("Network Scanner (Nmap) & Sniffer", value="net"),
-                    Choice("Web Vulnerability Scanner",        value="web"),
-                    Choice("DNS Infrastructure Recon",         value="recon"),
-                    Separator("────────────────────────────────────────"),
-                    Choice("Back to Recon Menu", value="back"),
-                ], style=Q_STYLE).ask()
-                if not sub or sub == "back":
-                    break
-                if sub == "net":
-                    run_net_scan()
-                elif sub == "web":
-                    safe_execute(web_ghost)
-                elif sub == "recon":
-                    safe_execute(dns_recon)
-
-        elif cat == "passive":
-            while True:
-                os.system('cls' if os.name == 'nt' else 'clear')
-                draw_header("Passive OSINT & Archives", context=ctx)
-                sub = questionary.select("Select Module:", choices=[
-                    Choice("Shodan API (Attack Surface)",      value="shodan"),
-                    Choice("DNS & Subdomain Mapping",          value="dns"),
-                    Choice("Wayback Machine (Archive Mining)", value="wayback"),
-                    Choice("Google Dork Generator",            value="dork"),
-                    Separator("────────────────────────────────────────"),
-                    Choice("Back to Recon Menu", value="back"),
-                ], style=Q_STYLE).ask()
-                if not sub or sub == "back":
-                    break
-                if sub == "shodan":
-                    safe_execute(shodan_intel)
-                elif sub == "dns":
-                    safe_execute(dns_intel)
-                elif sub == "wayback":
-                    safe_execute(wayback_intel)
-                elif sub == "dork":
-                    safe_execute(dork_generator)
-
-        elif cat == "identity":
-            run_person_osint()
+        if choice in actions:
+            actions[choice]()
 
 
 def show_assault_menu():
+    actions = {
+        "msf": lambda: safe_execute(run_msf),
+        "ad": lambda: safe_execute(run_ad_ops),
+        "cloud": lambda: safe_execute(run_cloud_ops),
+        "loot": lambda: safe_execute(run_looter),
+        "mitm": lambda: safe_execute(lambda: MITMEngine().run()) if MITMEngine else safe_execute(None),
+        "dns": lambda: safe_execute(start_dns_spoof),
+        "wifi": lambda: safe_execute(run_wifi_suite),
+        "clone": lambda: safe_execute(run_cloner),
+        "crack": lambda: safe_execute(crack_hash),
+    }
+
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Exploitation & Assault", context=ctx)
-        cat = questionary.select(
-            "Select Assault Category:",
+        draw_header("Direct Action & Exploitation", context=ctx)
+        choice = questionary.select(
+            "Select Assault Vector:",
             choices=[
-                Choice("1. Enterprise Exploitation & Post-Exploit",
-                       value="enterprise"),
-                Choice("2. Network & MITM Attacks", value="network"),
-                Choice("3. Social Engineering & Credentials", value="social"),
-                Separator("────────────────────────────────────────"),
-                Choice("Back to Main Menu", value="back"),
-            ], style=Q_STYLE
+                Separator("─── ENTERPRISE EXPLOITATION ────────────"),
+                Choice("Metasploit Framework (MSF-RPC)",   value="msf"),
+                Choice("Active Directory Ops",             value="ad"),
+                Choice("Cloud & Container Warfare",        value="cloud"),
+                Choice("PrivEsc Looter (Post-Exploit)",    value="loot"),
+                Separator("─── NETWORK ATTACKS ────────────────────"),
+                Choice("MITM Interceptor (ARP Poison)",    value="mitm"),
+                Choice("DNS Spoofer",                      value="dns"),
+                Choice("WiFi Attack Suite",                value="wifi"),
+                Separator("─── SOCIAL & CREDENTIAL ─────────────────"),
+                Choice("AitM Web Cloner (Phishing Proxy)", value="clone"),
+                Choice("Hash Cracker",                     value="crack"),
+                Separator("─── NAVIGATION ─────────────────────────"),
+                Choice("Return to Main Menu",              value="back"),
+            ],
+            style=Q_STYLE
         ).ask()
-
-        if not cat or cat == "back":
+        if not choice or choice == "back":
             break
-
-        if cat == "enterprise":
-            while True:
-                os.system('cls' if os.name == 'nt' else 'clear')
-                draw_header("Enterprise Exploitation", context=ctx)
-                sub = questionary.select("Select Module:", choices=[
-                    Choice("Metasploit Framework (MSF-RPC)",   value="msf"),
-                    Choice("Active Directory Ops",             value="ad"),
-                    Choice("Cloud & Container Warfare",        value="cloud"),
-                    Choice("PrivEsc Looter (Post-Exploit)",    value="loot"),
-                    Separator("────────────────────────────────────────"),
-                    Choice("Back to Assault Menu", value="back"),
-                ], style=Q_STYLE).ask()
-                if not sub or sub == "back":
-                    break
-                if sub == "msf":
-                    safe_execute(run_msf)
-                elif sub == "ad":
-                    safe_execute(run_ad_ops)
-                elif sub == "cloud":
-                    safe_execute(run_cloud_ops)
-                elif sub == "loot":
-                    safe_execute(run_looter)
-
-        elif cat == "network":
-            while True:
-                os.system('cls' if os.name == 'nt' else 'clear')
-                draw_header("Network & MITM Attacks", context=ctx)
-                sub = questionary.select("Select Module:", choices=[
-                    Choice("MITM Interceptor (ARP Poison)",    value="mitm"),
-                    Choice("DNS Spoofer",                      value="dns"),
-                    Choice("WiFi Attack Suite",                value="wifi"),
-                    Separator("────────────────────────────────────────"),
-                    Choice("Back to Assault Menu", value="back"),
-                ], style=Q_STYLE).ask()
-                if not sub or sub == "back":
-                    break
-                if sub == "mitm":
-                    safe_execute(lambda: MITMEngine().run()
-                                 ) if MITMEngine else safe_execute(None)
-                elif sub == "dns":
-                    safe_execute(start_dns_spoof)
-                elif sub == "wifi":
-                    safe_execute(run_wifi_suite)
-
-        elif cat == "social":
-            while True:
-                os.system('cls' if os.name == 'nt' else 'clear')
-                draw_header("Social & Credential", context=ctx)
-                sub = questionary.select("Select Module:", choices=[
-                    Choice("AitM Web Cloner (Phishing Proxy)", value="clone"),
-                    Choice("Hash Cracker",                     value="crack"),
-                    Separator("────────────────────────────────────────"),
-                    Choice("Back to Assault Menu", value="back"),
-                ], style=Q_STYLE).ask()
-                if not sub or sub == "back":
-                    break
-                if sub == "clone":
-                    safe_execute(run_cloner)
-                elif sub == "crack":
-                    safe_execute(crack_hash)
+        if choice in actions:
+            actions[choice]()
 
 
 def show_infrastructure_menu():
@@ -471,15 +412,18 @@ def show_infrastructure_menu():
         os.system('cls' if os.name == 'nt' else 'clear')
         draw_header("Infrastructure, C2 & Evasion", context=ctx)
         choice = questionary.select(
-            "Select Infra Operation:",
+            "Select C2 Operation:",
             choices=[
-                Choice("1. AI Polymorphic Payload Forge",     value="forge"),
-                Choice("2. Payload Encryptor (CryptKeeper)",  value="crypt"),
-                Choice("3. Persistence Installer",            value="persist"),
-                Choice("4. GhostHub C2 Server",               value="c2"),
-                Choice("5. System Posture Auditor",           value="audit"),
-                Separator("────────────────────────────────────────"),
-                Choice("Back to Main Menu",              value="back"),
+                Separator("─── WEAPONIZATION ──────────────────────"),
+                Choice("AI Polymorphic Payload Forge",     value="forge"),
+                Choice("Payload Encryptor (CryptKeeper)",  value="crypt"),
+                Separator("─── PERSISTENCE & C2 ───────────────────"),
+                Choice("Persistence Installer",            value="persist"),
+                Choice("GhostHub C2 Server",               value="c2"),
+                Separator("─── AUDIT ───────────────────────────────"),
+                Choice("System Posture Auditor",           value="audit"),
+                Separator("─── NAVIGATION ─────────────────────────"),
+                Choice("Return to Main Menu",              value="back"),
             ],
             style=Q_STYLE
         ).ask()
@@ -487,59 +431,6 @@ def show_infrastructure_menu():
             break
         if choice in actions:
             actions[choice]()
-
-
-def show_autonomous_menu():
-    while True:
-        os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("AI & Autonomous Operations", context=ctx)
-        choice = questionary.select(
-            "Select Autonomous Module:",
-            choices=[
-                Choice("1. AI Cortex & Reporting", value="ai"),
-                Choice("2. GOD MODE (Auto-Campaign)", value="god"),
-                Choice("3. Purple Team Emulation", value="purple"),
-                Separator("────────────────────────────────────────"),
-                Choice("Back to Main Menu", value="back")
-            ],
-            style=Q_STYLE
-        ).ask()
-
-        if not choice or choice == "back":
-            break
-        elif choice == "ai":
-            run_ai_ops()
-        elif choice == "god":
-            safe_execute(run_god_mode)
-        elif choice == "purple":
-            safe_execute(run_purple_team)
-
-
-def show_system_menu():
-    while True:
-        os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Framework Configuration", context=ctx)
-        choice = questionary.select(
-            "Select System Option:",
-            choices=[
-                Choice("1. Configuration & Context", value="sys"),
-                Choice(
-                    f"2. Community Plugins ({len(LOADED_PLUGINS)})", value="plugins"),
-                Choice("3. Framework Update", value="update"),
-                Separator("────────────────────────────────────────"),
-                Choice("Back to Main Menu", value="back")
-            ],
-            style=Q_STYLE
-        ).ask()
-
-        if not choice or choice == "back":
-            break
-        elif choice == "sys":
-            configure_global_context()
-        elif choice == "plugins":
-            show_plugins_menu()
-        elif choice == "update":
-            perform_update()
 
 
 def show_plugins_menu():
@@ -596,8 +487,12 @@ def main():
         "recon":   show_reconnaissance_menu,
         "assault": show_assault_menu,
         "infra":   show_infrastructure_menu,
-        "auto":    show_autonomous_menu,
-        "system":  show_system_menu,
+        "god": lambda: safe_execute(run_god_mode),
+        "purple": lambda: safe_execute(run_purple_team),
+        "ai":      run_ai_ops,
+        "sys":     configure_global_context,
+        "plugins": show_plugins_menu,
+        "update":  perform_update,
     }
 
     while True:
@@ -609,14 +504,21 @@ def main():
             phase = questionary.select(
                 "Select Mission Phase:",
                 choices=[
-                    Choice("1. Intelligence & Reconnaissance", value="recon"),
-                    Choice("2. Exploitation & Assault",
-                           value="assault"),
-                    Choice("3. Infrastructure, C2 & Evasion",  value="infra"),
-                    Choice("4. AI & Autonomous Operations",    value="auto"),
-                    Choice("5. Framework Settings & Plugins",  value="system"),
-                    Separator("────────────────────────────────────────"),
-                    Choice("6. Execute Vanish Protocol (Exit)", value="exit"),
+                    Separator("─── OFFENSIVE OPERATIONS ───────────────"),
+                    Choice("1.  Recon & OSINT",             value="recon"),
+                    Choice("2.  Assault & Exploitation",    value="assault"),
+                    Choice("3.  C2 & Polymorphic Forge",    value="infra"),
+                    Separator("─── INTELLIGENCE & AUTOMATION ────────"),
+                    Choice("4.  AI Cortex & Reporting",     value="ai"),
+                    Choice("5.  GOD MODE (Auto-Campaign)",  value="god"),
+                    Choice("6.  Purple Team Emulation",     value="purple"),
+                    Separator("─── ECOSYSTEM ──────────────────────────"),
+                    Choice(
+                        f"    Community Plugins ({len(LOADED_PLUGINS)})", value="plugins"),
+                    Separator("─── SYSTEM ─────────────────────────────"),
+                    Choice("    Configuration & Context",   value="sys"),
+                    Choice("    Framework Update",          value="update"),
+                    Choice("    Execute Vanish Protocol",   value="exit"),
                 ],
                 style=Q_STYLE,
                 pointer="▶"

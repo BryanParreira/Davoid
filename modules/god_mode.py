@@ -67,8 +67,10 @@ class CampaignEngine:
                     db.log("Campaign-Scanner", host, info, "HIGH")
 
         # Phase 2: AI Cortex Analysis
-        console.print(
-            "\n" + Panel("PHASE 2: Cortex Threat Analysis", border_style="bold magenta"))
+        console.print()  # Fixed: Print newline separately
+        console.print(Panel("PHASE 2: Cortex Threat Analysis",
+                      border_style="bold magenta"))
+
         if not self.ai.check_connection():
             console.print(
                 "[yellow][!] Local AI Offline. Skipping cognitive analysis.[/yellow]")
@@ -78,8 +80,10 @@ class CampaignEngine:
             self.ai.analyze_mission_database()
 
         # Phase 3: Weaponization & Exploitation
-        console.print("\n" + Panel("PHASE 3: Exploitation Engine",
+        console.print()  # Fixed: Print newline separately
+        console.print(Panel("PHASE 3: Exploitation Engine",
                       border_style="bold green"))
+
         execute = questionary.confirm(
             "Do you want to hand off to the MSF-RPC engine for auto-exploitation?", default=True, style=Q_STYLE).ask()
 

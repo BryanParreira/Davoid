@@ -140,19 +140,11 @@ def geolocate():
 
 
 def shodan_intel():
-    """Next-Gen Upgrade: Queries Shodan REST API for Attack Surface Data."""
-    draw_header("Holmes Intel: Shodan Attack Surface")
+    """Next-Gen Upgrade: Queries the Free InternetDB API (No Key Required)."""
+    draw_header("Holmes Intel: InternetDB Attack Surface")
 
-    config = load_config()
-    api_key = config.get("api_keys", {}).get("shodan", "") if config else ""
-
-    if not api_key:
-        console.print(
-            "[yellow][!] No Shodan API key found in config.yaml.[/yellow]")
-        api_key = questionary.text(
-            "Enter your Shodan API Key (Or press Enter to cancel):", style=Q_STYLE).ask()
-        if not api_key:
-            return
+    console.print(
+        "[dim]Powered by InternetDB (Free tier of Shodan - No API Key Required)[/dim]\n")
 
     target = questionary.text("Target IP Address:", style=Q_STYLE).ask()
     if not target:
@@ -163,39 +155,69 @@ def shodan_intel():
     except Exception:
         return console.print(f"[red][!] Failed to resolve IP for {target}[/red]")
 
-    console.print(f"[*] Querying Shodan global databases for {ip}...")
+    console.print(f"[*] Querying global InternetDB index for {ip}...")
     try:
-        url = f"https://api.shodan.io/shodan/host/{ip}?key={api_key}"
+        # Using the completely free, keyless InternetDB API
+        url = f"https://internetdb.shodan.io/{ip}"
         res = requests.get(url, timeout=15)
 
         if res.status_code == 200:
             data = res.json()
             table = Table(
-                title=f"Shodan Node Report: {ip}", border_style="bold red", expand=True)
+                title=f"Attack Surface Report: {ip}", border_style="bold red", expand=True)
             table.add_column("Property", style="cyan")
             table.add_column("Details", style="white")
 
-            table.add_row("Organization / ISP", data.get("org", "N/A"))
-            table.add_row("Operating System", data.get("os", "N/A"))
+            # Hostnames
+            hostnames = data.get("hostnames", [])
+            table.add_row("Associated Hostnames", ", ".join(
+                hostnames) if hostnames else "None")
 
+            # Open Ports
             ports = [str(p) for p in data.get("ports", [])]
-            table.add_row("Open Ports", ", ".join(ports))
+            table.add_row("Open Ports", ", ".join(ports)
+                          if ports else "None Detected")
 
+            # Tags
+            tags = data.get("tags", [])
+            table.add_row("Infrastructure Tags",
+                          ", ".join(tags) if tags else "None")
+
+            # Software (CPEs)
+            cpes = data.get("cpes", [])
+            if cpes:
+                # Limit to 10 to keep the table clean
+                cpe_str = "\n".join(cpes[:10])
+                if len(cpes) > 10:
+                    cpe_str += f"\n[dim]...and {len(cpes)-10} more[/dim]"
+                table.add_row("Detected Software (CPEs)", cpe_str)
+            else:
+                table.add_row("Detected Software", "Unknown")
+
+            # Vulnerabilities (CVEs)
             vulns = data.get("vulns", [])
-            table.add_row("Vulnerabilities (CVEs)", "\n".join(
-                vulns) if vulns else "[green]None Detected[/green]")
+            if vulns:
+                # Format CVEs nicely
+                vuln_str = "\n".join(vulns[:15])
+                if len(vulns) > 15:
+                    vuln_str += f"\n[dim]...and {len(vulns)-15} more CVEs[/dim]"
+                table.add_row("Vulnerabilities (CVEs)",
+                              f"[bold red]{vuln_str}[/bold red]")
+            else:
+                table.add_row("Vulnerabilities (CVEs)",
+                              "[bold green]None Detected[/bold green]")
 
             console.print(table)
-        elif res.status_code == 401:
-            console.print("[bold red][!] Invalid Shodan API Key.[/bold red]")
+
         elif res.status_code == 404:
             console.print(
-                "[yellow][+] No vulnerabilities or open ports indexed by Shodan for this IP.[/yellow]")
+                "[yellow][+] No information indexed for this IP address in the global database.[/yellow]")
         else:
             console.print(
                 f"[red][!] API Error: Status {res.status_code}[/red]")
+
     except Exception as e:
-        console.print(f"[red][!] Error reaching Shodan: {e}[/red]")
+        console.print(f"[red][!] Error reaching InternetDB: {e}[/red]")
 
     questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 

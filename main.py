@@ -87,6 +87,7 @@ run_auditor = _try_import("modules.auditor",      "run_auditor")
 run_cloud_ops = _try_import("modules.cloud_ops",    "run_cloud_ops")
 run_god_mode = _try_import("modules.god_mode",     "run_god_mode")
 run_purple_team = _try_import("modules.purple_team",  "run_purple_team")
+run_stego = _try_import("modules.stego", "run_stego")
 
 username_tracker = phone_intel = geolocate = None
 dork_generator = wayback_intel = shodan_intel = dns_intel = None
@@ -406,6 +407,7 @@ def show_infrastructure_menu():
         "persist": run_persist,
         "c2": lambda: safe_execute(run_ghost_hub),
         "audit": lambda: safe_execute(run_auditor),
+        "stego": lambda: safe_execute(run_stego),
     }
 
     while True:
@@ -417,6 +419,7 @@ def show_infrastructure_menu():
                 Separator("─── WEAPONIZATION ──────────────────────"),
                 Choice("AI Polymorphic Payload Forge",     value="forge"),
                 Choice("Payload Encryptor (CryptKeeper)",  value="crypt"),
+                Choice("Steganography (Hide Data in Image)", value="stego"),
                 Separator("─── PERSISTENCE & C2 ───────────────────"),
                 Choice("Persistence Installer",            value="persist"),
                 Choice("GhostHub C2 Server",               value="c2"),

@@ -1,12 +1,17 @@
-from core.database import db
-from mitmproxy import http
-import urllib.parse
 import json
+import urllib.parse
+from mitmproxy import http
+from core.database import db
 import sys
 import os
 
-# FIX: Tell mitmproxy where to find Davoid's core files so it doesn't crash on boot
-sys.path.append("/opt/davoid")
+# FIX: Inject Davoid's install path BEFORE any local imports.
+# mitmproxy loads this file as an isolated script with no knowledge of
+# Davoid's package structure, so we must set sys.path first.
+_DAVOID_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _p in (_DAVOID_DIR, "/opt/davoid"):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 
 class DavoidInterceptor:

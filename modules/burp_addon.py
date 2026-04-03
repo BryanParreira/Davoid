@@ -1,21 +1,41 @@
 import json
 import urllib.parse
 from mitmproxy import http
-from core.database import db
 import sys
 import os
 
-# BULLETPROOF PATH FIX: Must be the very first things in the file!
-# This dynamically finds the Davoid root directory and adds it to Python's path
-# so mitmproxy knows where to find the 'core' database module.
-sys.path.insert(0, "/opt/davoid")
+# ==============================================================================
+# 1. BULLETPROOF PATH FIX
+# We must inject the paths BEFORE any local imports occur.
+# ==============================================================================
+DAVOID_OPT_PATH = "/opt/davoid"
+if DAVOID_OPT_PATH not in sys.path:
+    sys.path.insert(0, DAVOID_OPT_PATH)
+
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
-# NOW we can safely import from core and mitmproxy
+# ==============================================================================
+# 2. SAFE IMPORTS
+# ==============================================================================
+try:
+    from core.database import db
+except ImportError as e:
+    print(f"\n[!] WARNING: Could not import Davoid Mission Database: {e}")
+    print("[!] Proxy will continue running, but credentials will only print to console, not save to DB.\n")
 
+    # Create a dummy DB object to prevent crashes if the import fails
+    class DummyDB:
+        def log(self, module, target, data, severity):
+            pass
+    db = DummyDB()
+
+
+# ==============================================================================
+# 3. INTERCEPTOR ENGINE
+# ==============================================================================
 
 class DavoidInterceptor:
     def __init__(self):

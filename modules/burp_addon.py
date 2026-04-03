@@ -1,7 +1,12 @@
-import json
-import urllib.parse
-from mitmproxy import http
 from core.database import db
+from mitmproxy import http
+import urllib.parse
+import json
+import sys
+import os
+
+# FIX: Tell mitmproxy where to find Davoid's core files so it doesn't crash on boot
+sys.path.append("/opt/davoid")
 
 
 class DavoidInterceptor:

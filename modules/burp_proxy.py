@@ -35,7 +35,7 @@ def run_burp_proxy():
 
     if is_port_in_use(port):
         console.print(
-            f"[bold red][!] Error: Port {port} is already in use. Please select a different port or kill the blocking process.[/bold red]")
+            f"[bold red][!] Error: Port {port} is already in use. Please select a different port.[/bold red]")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
@@ -46,10 +46,20 @@ def run_burp_proxy():
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
+    # FIX: Point directly to the exact binary inside Davoid's isolated environment
+    mitm_bin = "/opt/davoid/venv/bin/mitmproxy"
+    if not os.path.exists(mitm_bin):
+        console.print(
+            f"[bold red][!] Error: mitmproxy binary not found at {mitm_bin}.[/bold red]")
+        console.print(
+            "[white]Try running: sudo /opt/davoid/venv/bin/pip install mitmproxy[/white]")
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+        return
+
     console.print(Panel(
         f"[bold green]Proxy Engine Primed for 127.0.0.1:{port}[/bold green]\n\n"
         "[white]Operator Instructions:[/white]\n"
-        "1. Route your target browser/device through [bold cyan]127.0.0.1:{port}[/bold cyan].\n"
+        f"1. Route your target browser/device through [bold cyan]127.0.0.1:{port}[/bold cyan].\n"
         "2. Navigate to [bold cyan]http://mitm.it[/bold cyan] on the target to install the Davoid SSL Certificate.\n"
         "3. Inside the TUI, press [bold yellow]'i'[/bold yellow] to set intercept filters, or [bold yellow]'?'[/bold yellow] for help.",
         border_style="green"
@@ -59,16 +69,24 @@ def run_burp_proxy():
         "Press Enter to launch proxy interface...", style=Q_STYLE).ask()
 
     try:
-        # Production Fix: Run via sys.executable to ensure virtual environment persistence
-        subprocess.run([
-            sys.executable, "-m", "mitmproxy",
+        # Launching the executable directly
+        result = subprocess.run([
+            mitm_bin,
             "-p", str(port),
             "-s", addon_path,
             "--set", "console_palette=dark",
-            "--set", "block_global=false"  # Prevents mitmproxy from blocking external requests
+            "--set", "block_global=false"
         ])
+
+        # If it crashes instantly, freeze the screen so the user can read the error
+        if result.returncode != 0:
+            console.print(
+                f"\n[bold red][!] Proxy engine crashed with exit code {result.returncode}. Check above for errors.[/bold red]")
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+
     except Exception as e:
         console.print(f"\n[bold red][!] Proxy Engine Failure: {e}[/bold red]")
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
     console.print(
         "\n[yellow][*] Proxy shutdown complete. Returning to Mainframe...[/yellow]")

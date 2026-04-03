@@ -88,6 +88,7 @@ run_cloud_ops = _try_import("modules.cloud_ops",    "run_cloud_ops")
 run_god_mode = _try_import("modules.god_mode",     "run_god_mode")
 run_purple_team = _try_import("modules.purple_team",  "run_purple_team")
 run_stego = _try_import("modules.stego", "run_stego")
+run_burp_proxy = _try_import("modules.burp_proxy", "run_burp_proxy")
 
 username_tracker = phone_intel = geolocate = None
 dork_generator = wayback_intel = shodan_intel = dns_intel = None
@@ -319,6 +320,7 @@ def show_reconnaissance_menu():
     actions = {
         "net":     run_net_scan,
         "web": lambda: safe_execute(web_ghost),
+        "burp": lambda: safe_execute(run_burp_proxy),
         "shodan": lambda: safe_execute(shodan_intel),
         "dns": lambda: safe_execute(dns_intel),
         "wayback": lambda: safe_execute(wayback_intel),
@@ -337,6 +339,7 @@ def show_reconnaissance_menu():
                 Separator("─── ACTIVE SCANNING ───────────────────"),
                 Choice("Network Scanner (Nmap) & Sniffer", value="net"),
                 Choice("Web Vulnerability Scanner",        value="web"),
+                Choice("Web Interception Proxy (Burp)",    value="burp"),
                 Choice("DNS Infrastructure Recon",         value="recon"),
                 Separator("─── PASSIVE OSINT ──────────────────────"),
                 Choice("Shodan API (Attack Surface)",      value="shodan"),

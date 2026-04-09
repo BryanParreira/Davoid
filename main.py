@@ -185,21 +185,49 @@ def detect_network_environment():
         return False
 
 
+def secure_wipe(filepath, passes=3):
+    """Overwrites file with random bytes before deletion to prevent recovery."""
+    if not os.path.exists(filepath):
+        return
+    length = os.path.getsize(filepath)
+    try:
+        with open(filepath, "ba+", buffering=0) as f:
+            for _ in range(passes):
+                f.seek(0)
+                f.write(os.urandom(length))
+        os.remove(filepath)
+    except Exception:
+        pass
+
+
 def execute_vanish_protocol():
-    console.print("\n[bold red]INITIATING VANISH SEQUENCE...[/bold red]")
-    for target_dir in ["clones", "payloads", "__pycache__"]:
+    console.print(
+        "\n[bold red]INITIATING FORENSIC VANISH SEQUENCE...[/bold red]")
+
+    # 1. Securely wipe critical files first
+    critical_files = ["davoid_mission.db",
+                      "logs/c2_aes.key", "/opt/davoid/.db_key"]
+    for f in critical_files:
+        if os.path.exists(f):
+            secure_wipe(f)
+            console.print(f"[dim]  Shredded: {f}[/dim]")
+
+    # 2. Standard directory cleanup with secure file shredding
+    for target_dir in ["clones", "payloads", "__pycache__", "logs"]:
         if os.path.exists(target_dir):
+            for root, dirs, files in os.walk(target_dir):
+                for file in files:
+                    secure_wipe(os.path.join(root, file), passes=1)
             shutil.rmtree(target_dir, ignore_errors=True)
-            console.print(f"[dim]  Wiped: {target_dir}/[/dim]")
+            console.print(f"[dim]  Wiped & Removed: {target_dir}/[/dim]")
+
     for root, dirs, _ in os.walk("."):
         for d in dirs:
             if d == "__pycache__":
                 shutil.rmtree(os.path.join(root, d), ignore_errors=True)
-    if os.path.exists("logs"):
-        if questionary.confirm("Also wipe logs/ ? (Mission DB + C2 AES key will be lost)", default=False, style=Q_STYLE).ask():
-            shutil.rmtree("logs", ignore_errors=True)
-            console.print("[dim]  Wiped: logs/[/dim]")
-    console.print("[bold green][*] Evidence cleared. Ghost out.[/bold green]")
+
+    console.print(
+        "[bold green][*] Forensic evidence cleared. Ghost out.[/bold green]")
     sys.exit(0)
 
 

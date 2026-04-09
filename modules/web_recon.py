@@ -13,7 +13,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.ui import draw_header, Q_STYLE
 
-# Disable SSL warnings for testing environments
+# Only disable warnings if verify_ssl is intentionally turned off
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 console = Console()
 
@@ -42,10 +42,10 @@ USER_AGENTS = [
 
 
 class WebGhost:
-    def __init__(self, target, use_tor=True):
+    def __init__(self, target, use_tor=True, verify_ssl=True):
         self.target = target.rstrip("/")
         self.session = requests.Session()
-        self.session.verify = False
+        self.session.verify = verify_ssl
         self.proxies_enabled = False
 
         # [STEALTH] PROXY SUPPORT: Route traffic through Tor (default port 9050)
@@ -128,6 +128,12 @@ class WebGhost:
 
         try:
             r = self.session.get(self.target, timeout=10)
+        except requests.exceptions.SSLError:
+            console.print(
+                "\n[bold red][!] ERROR: SSL Certificate Verification Failed.[/bold red]")
+            console.print(
+                "[yellow]The target is using an invalid or self-signed certificate. If you trust this target, restart Web Ghost and select 'No' when asked to Verify SSL.[/yellow]")
+            return
         except requests.exceptions.ConnectionError as e:
             if "SOCKS" in str(e) or "Connection refused" in str(e):
                 console.print(
@@ -209,7 +215,9 @@ def web_ghost():
     target = questionary.text(
         "Target URL (e.g., https://example.com):", style=Q_STYLE).ask()
     if target and target.startswith("http"):
-        scanner = WebGhost(target, use_tor=True)
+        verify_cert = questionary.confirm(
+            "Verify SSL Certificates? (Select 'No' ONLY for self-signed targets)", default=True, style=Q_STYLE).ask()
+        scanner = WebGhost(target, use_tor=True, verify_ssl=verify_cert)
         scanner.run()
     else:
         console.print("[red][!] Invalid URL format.[/red]")

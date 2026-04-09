@@ -109,10 +109,10 @@ echo -e "\033[1;34m[*] Creating global 'davoid' command...\033[0m"
 sudo bash -c "cat << 'EOF' > $BINARY_PATH
 #!/bin/bash
 # Davoid Entry Point
-# Auto-escalate to sudo if not already root (Required for Scapy/WiFi)
+# Check for root, but abort instead of auto-escalating to prevent silent privilege execution
 if [ \"\$EUID\" -ne 0 ]; then
-  exec sudo \"\$0\" \"\$@\"
-  exit
+  echo -e \"\\033[1;31m[!] Davoid requires root privileges for packet manipulation. Please run: sudo davoid\\033[0m\"
+  exit 1
 fi
 
 # Ensure Tor is running for Stealth Mode
@@ -127,4 +127,4 @@ EOF"
 
 sudo chmod +x $BINARY_PATH
 
-echo -e "\033[1;32m[+] DEPLOYMENT COMPLETE: Type 'davoid' to enter the mainframe.\033[0m"
+echo -e "\033[1;32m[+] DEPLOYMENT COMPLETE: Type 'sudo davoid' to enter the mainframe.\033[0m"

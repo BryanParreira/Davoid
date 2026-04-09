@@ -35,7 +35,14 @@ class WiFiSuite:
             for channel in channels:
                 if self.stop_hopping.is_set():
                     break
-                os.system(f"iwconfig {iface} channel {channel}")
+                try:
+                    # SECURE FIX: Using subprocess list to prevent command injection
+                    subprocess.run(["iwconfig", str(iface), "channel", str(channel)],
+                                   check=True,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+                except subprocess.CalledProcessError:
+                    pass
                 time.sleep(0.5)
 
     def deauth_attack(self, target_mac, bssid, iface):

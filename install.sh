@@ -101,38 +101,61 @@ fi
 # 4. Setup Virtual Environment
 echo -e "\033[1;34m[*] Building isolated Python environment...\033[0m"
 
-PYTHON_EXE="python3"
-if [[ "$OS_TYPE" == "mac" && -x "/usr/bin/python3" ]]; then
-    PYTHON_EXE="/usr/bin/python3"
-    echo "    -> Using stable Apple system Python to bypass Homebrew SIP bugs..."
-fi
-
-# FIX: Combine BOTH the Apple System Python AND the ensurepip fallback logic!
-if ! sudo -u $SUDO_USER $PYTHON_EXE -m venv venv; then
-    echo -e "\033[1;33m[*] Standard venv creation failed (ensurepip bug). Attempting fallback method...\033[0m"
-    
-    if ! sudo -u $SUDO_USER $PYTHON_EXE -m venv --without-pip venv; then
-        echo -e "\033[1;31m[!] CRITICAL ERROR: Fallback virtual environment creation failed.\033[0m"
-        exit 1
+# FIX: Force Apple system Python3 from /usr/bin — never use Homebrew's broken Python 3.14
+# Homebrew Python 3.14 has a pyexpat/libexpat symbol mismatch that breaks pip installation.
+PYTHON_EXE=""
+for candidate in /usr/bin/python3 /usr/bin/python3.11 /usr/bin/python3.10 /usr/bin/python3.9; do
+    if [ -x "$candidate" ]; then
+        PYTHON_EXE="$candidate"
+        echo "    -> Using Apple system Python: $PYTHON_EXE"
+        break
     fi
-    
-    echo "    -> Downloading and installing pip manually..."
-    curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-    sudo -u $SUDO_USER ./venv/bin/python get-pip.py > /dev/null
-    rm get-pip.py
+done
+
+if [[ "$OS_TYPE" == "linux" ]]; then
+    # On Linux just use whatever python3 is available
+    PYTHON_EXE="python3"
+    echo "    -> Using system Python3 on Linux..."
 fi
 
-sudo -u $SUDO_USER ./venv/bin/pip install --upgrade pip > /dev/null
+if [ -z "$PYTHON_EXE" ]; then
+    echo -e "\033[1;31m[!] CRITICAL ERROR: No suitable Python3 found. Please install Python 3.9–3.12.\033[0m"
+    exit 1
+fi
+
+# Remove any broken venv from previous failed attempts
+echo "    -> Cleaning up any previous broken venv..."
+rm -rf $INSTALL_DIR/venv
+
+# Create venv with --without-pip to completely bypass the ensurepip/pyexpat crash
+echo "    -> Creating clean virtual environment (skipping ensurepip)..."
+if ! sudo -u $SUDO_USER $PYTHON_EXE -m venv --without-pip venv; then
+    echo -e "\033[1;31m[!] CRITICAL ERROR: Virtual environment creation failed.\033[0m"
+    exit 1
+fi
+
+# Download and install pip directly into the isolated venv
+# This avoids ANY Homebrew Python contamination
+echo "    -> Downloading pip into isolated venv..."
+curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+if ! sudo -u $SUDO_USER $INSTALL_DIR/venv/bin/python3 /tmp/get-pip.py; then
+    echo -e "\033[1;31m[!] CRITICAL ERROR: pip installation into venv failed.\033[0m"
+    rm -f /tmp/get-pip.py
+    exit 1
+fi
+rm -f /tmp/get-pip.py
+
+sudo -u $SUDO_USER $INSTALL_DIR/venv/bin/pip install --upgrade pip > /dev/null
 
 echo -e "\033[1;34m[*] Installing Next-Gen Framework Dependencies...\033[0m"
 if [ -f "requirements.txt" ]; then
-    if ! sudo -u $SUDO_USER ./venv/bin/pip install -r requirements.txt; then
+    if ! sudo -u $SUDO_USER $INSTALL_DIR/venv/bin/pip install -r requirements.txt; then
         echo -e "\033[1;31m[!] CRITICAL ERROR: Python dependencies failed to install.\033[0m"
         exit 1
     fi
-    sudo -u $SUDO_USER ./venv/bin/pip install requests[socks] 
+    sudo -u $SUDO_USER $INSTALL_DIR/venv/bin/pip install requests[socks]
 else
-    if ! sudo -u $SUDO_USER ./venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML; then
+    if ! sudo -u $SUDO_USER $INSTALL_DIR/venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML; then
         echo -e "\033[1;31m[!] CRITICAL ERROR: Fallback dependencies failed to install.\033[0m"
         exit 1
     fi

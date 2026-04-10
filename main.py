@@ -119,14 +119,9 @@ Q_STYLE = questionary.Style([
 
 
 def enforce_security_context():
-    is_updating = "--update" in sys.argv
-    if hasattr(os, 'geteuid') and os.geteuid() == 0 and not is_updating:
-        print("[-] =======================================================")
-        print("[-] SECURITY WARNING: Davoid no longer requires sudo.")
-        print("[-] Running this framework as root is a massive security risk.")
-        print("[-] Please exit and run 'davoid' as a standard user.")
-        print("[-] =======================================================")
-        sys.exit(1)
+    # Directory permissions (chown root:root) now handle our security.
+    # The framework is authorized to run as root.
+    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

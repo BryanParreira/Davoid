@@ -84,8 +84,7 @@ fi
 # 3. Clone or Update Repository
 echo -e "\033[1;34m[*] Syncing Davoid source code...\033[0m"
 
-# FIX: Temporarily grant the standard user ownership of the directory 
-# so macOS SIP doesn't destroy the Python environment during the build phase.
+# Temporarily grant standard user ownership to bypass macOS SIP restrictions
 chown -R $SUDO_USER:$ROOT_GROUP $INSTALL_DIR
 cd $INSTALL_DIR
 
@@ -94,7 +93,6 @@ if [ -d ".git" ]; then
     sudo -u $SUDO_USER git reset --hard origin/main < /dev/null
     sudo -u $SUDO_USER git pull origin main < /dev/null
 else
-    # Remove everything in the dir and clone fresh
     rm -rf ./*
     rm -rf ./.git
     sudo -u $SUDO_USER git clone $REPO_URL . < /dev/null
@@ -103,10 +101,19 @@ fi
 # 4. Setup Virtual Environment
 echo -e "\033[1;34m[*] Building isolated Python environment...\033[0m"
 
-# FIX: Build the environment as the standard user to prevent macOS XML crashes
+# FIX: Try standard venv. If Python 3.14 ensurepip crashes, bypass it.
 if ! sudo -u $SUDO_USER python3 -m venv venv; then
-    echo -e "\033[1;31m[!] CRITICAL ERROR: Failed to create virtual environment.\033[0m"
-    exit 1
+    echo -e "\033[1;33m[*] Standard venv creation failed (ensurepip bug). Attempting fallback method...\033[0m"
+    
+    if ! sudo -u $SUDO_USER python3 -m venv --without-pip venv; then
+        echo -e "\033[1;31m[!] CRITICAL ERROR: Fallback virtual environment creation failed.\033[0m"
+        exit 1
+    fi
+    
+    echo "    -> Downloading and installing pip manually..."
+    curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+    sudo -u $SUDO_USER ./venv/bin/python get-pip.py > /dev/null
+    rm get-pip.py
 fi
 
 sudo -u $SUDO_USER ./venv/bin/pip install --upgrade pip > /dev/null
@@ -127,7 +134,6 @@ fi
 
 # 5. Lock Down Permissions and Apply Capabilities (Rootless Execution)
 echo -e "\033[1;34m[*] Securing directory permissions and applying Network Capabilities...\033[0m"
-# The environment is built perfectly. Now we lock the vault back down to root.
 chown -R root:$ROOT_GROUP $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
 

@@ -12,6 +12,12 @@ echo "      ╚═════╝ ╚═╝  ╚═╝  ╚═══╝   ╚═
 echo "             [ D A V O I D : I N S T A L L E R ]"
 echo -e "\033[0m"
 
+# Ensure script is run as root for initial installation
+if [ "$EUID" -ne 0 ]; then
+  echo -e "\033[1;31m[-] Please run the installer with sudo: sudo bash install.sh\033[0m"
+  exit 1
+fi
+
 # 1. Configuration
 INSTALL_DIR="/opt/davoid"
 REPO_URL="https://github.com/BryanParreira/Davoid.git"
@@ -28,42 +34,37 @@ else
     echo -e "\033[1;34m[*] Detected Linux Environment...\033[0m"
 fi
 
-echo -e "\033[1;34m[*] Requesting sudo for system directory setup...\033[0m"
-
 # 2. Setup Directory with proper permissions
-sudo mkdir -p $INSTALL_DIR
-sudo chown $USER:$OWNER_GROUP $INSTALL_DIR
+mkdir -p $INSTALL_DIR
 
 # ------------------------------------------------------------------
-# [NEW] 2.5. Install Critical Security Dependencies
+# 2.5. Install Critical Security Dependencies
 # ------------------------------------------------------------------
-echo -e "\033[1;34m[*] Installing operational dependencies (Nmap, Tor, WiFi Tools)...\033[0m"
+echo -e "\033[1;34m[*] Installing operational dependencies (Nmap, Tor, WiFi Tools, libcap2-bin)...\033[0m"
 
 if [[ "$OS_TYPE" == "linux" ]]; then
     # Debian/Ubuntu/Kali Logic
     if command -v apt-get &> /dev/null; then
         echo "    -> Updating package lists..."
-        # redirect stdin to /dev/null to prevent curl | bash interruption
-        sudo apt-get update -qq < /dev/null
+        apt-get update -qq < /dev/null
         
         echo "    -> Installing Tools via apt..."
-        sudo apt-get install -y tor macchanger python3-venv libpcap-dev \
+        apt-get install -y tor macchanger python3-venv libpcap-dev libcap2-bin \
                                 nmap tcpdump aircrack-ng net-tools wireless-tools git < /dev/null
         
         if ! systemctl is-active --quiet tor; then
             echo "    -> Starting Tor Service..."
-            sudo systemctl enable tor < /dev/null
-            sudo systemctl start tor < /dev/null
+            systemctl enable tor < /dev/null
+            systemctl start tor < /dev/null
         fi
     else
-        echo -e "\033[1;33m[!] Warning: 'apt-get' not found. Manually install: tor, nmap, macchanger, aircrack-ng\033[0m"
+        echo -e "\033[1;33m[!] Warning: 'apt-get' not found. Manually install: tor, nmap, macchanger, aircrack-ng, libcap2-bin\033[0m"
     fi
 
 elif [[ "$OS_TYPE" == "mac" ]]; then
     # macOS Logic (Homebrew)
     if command -v brew &> /dev/null; then
         echo "    -> Installing Tools via Homebrew..."
-        # redirect stdin to /dev/null to prevent curl | bash interruption
         brew install tor macchanger nmap tcpdump aircrack-ng git exploitdb < /dev/null
         
         echo "    -> Starting Tor Service..."
@@ -80,12 +81,10 @@ fi
 echo -e "\033[1;34m[*] Syncing Davoid source code...\033[0m"
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd $INSTALL_DIR
-    sudo git pull origin main < /dev/null
-    sudo chown -R $USER:$OWNER_GROUP $INSTALL_DIR
+    git pull origin main < /dev/null
 else
-    sudo rm -rf $INSTALL_DIR
-    sudo git clone $REPO_URL $INSTALL_DIR < /dev/null
-    sudo chown -R $USER:$OWNER_GROUP $INSTALL_DIR
+    rm -rf $INSTALL_DIR
+    git clone $REPO_URL $INSTALL_DIR < /dev/null
 fi
 
 # 4. Setup Virtual Environment
@@ -104,27 +103,33 @@ else
     ./venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML
 fi
 
-# 5. Create the Global Launcher
+# 5. Lock Down Permissions and Apply Capabilities (Rootless Execution)
+echo -e "\033[1;34m[*] Securing directory permissions and applying Network Capabilities...\033[0m"
+chown -R root:root $INSTALL_DIR
+chmod -R 755 $INSTALL_DIR
+
+if [[ "$OS_TYPE" == "linux" ]]; then
+    setcap cap_net_raw,cap_net_admin=eip $INSTALL_DIR/venv/bin/python3
+fi
+
+# 6. Create the Global Launcher
 echo -e "\033[1;34m[*] Creating global 'davoid' command...\033[0m"
-sudo bash -c "cat << 'EOF' > $BINARY_PATH
+bash -c "cat << 'EOF' > $BINARY_PATH
 #!/bin/bash
 # Davoid Entry Point
-# Check for root, but abort instead of auto-escalating to prevent silent privilege execution
-if [ \"\$EUID\" -ne 0 ]; then
-  echo -e \"\\033[1;31m[!] Davoid requires root privileges for packet manipulation. Please run: sudo davoid\\033[0m\"
-  exit 1
-fi
 
 # Ensure Tor is running for Stealth Mode
 if ! pgrep -x \"tor\" > /dev/null; then
     echo \"[*] Starting background Tor service...\"
-    service tor start 2>/dev/null || systemctl start tor 2>/dev/null || tor &
+    sudo service tor start 2>/dev/null || sudo systemctl start tor 2>/dev/null || tor &
 fi
 
-# Absolute path to the venv python and main script
+# Absolute path to the venv python and main script (No sudo required)
 /opt/davoid/venv/bin/python3 /opt/davoid/main.py \"\$@\"
 EOF"
 
-sudo chmod +x $BINARY_PATH
+chmod +x $BINARY_PATH
 
-echo -e "\033[1;32m[+] DEPLOYMENT COMPLETE: Type 'sudo davoid' to enter the mainframe.\033[0m"
+echo -e "\033[1;32m[+] DEPLOYMENT COMPLETE!\033[0m"
+echo -e "\033[1;33m[!] SECURITY NOTICE: You no longer need 'sudo' to run Davoid.\033[0m"
+echo -e "\033[1;32m[+] Type 'davoid' to enter the mainframe as a standard user.\033[0m"

@@ -5,9 +5,19 @@ from cryptography.fernet import Fernet
 import os
 
 Base = declarative_base()
-DB_PATH = "davoid_mission.db"
-# Store the key in the root of the davoid install directory
-KEY_PATH = "/opt/davoid/.db_key"
+
+# ---------------------------------------------------------
+# SECURITY FIX: Store databases and keys in the user's home folder
+# so it doesn't violate /opt/davoid root permissions.
+# ---------------------------------------------------------
+USER_HOME = os.path.expanduser("~")
+STATE_DIR = os.path.join(USER_HOME, ".davoid")
+
+# Ensure the state directory exists
+os.makedirs(STATE_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(STATE_DIR, "davoid_mission.db")
+KEY_PATH = os.path.join(STATE_DIR, ".db_key")
 
 
 class ScanResult(Base):

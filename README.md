@@ -10,7 +10,7 @@ Davoid is a modular security engine built for speed, clarity, and deep-level net
 
 ---
 
-## 🚀 One-Liner Installation
+## 🚀 Installation
 
 Deploy Davoid globally on your Mac or Linux system. This command clones the repository to `/opt/davoid`, configures an isolated Python virtual environment, and links the global `davoid` command to your PATH.
 

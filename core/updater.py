@@ -42,7 +42,7 @@ def create_snapshot():
     """Creates a fail-safe backup before updating."""
     try:
         if os.path.exists(BACKUP_DIR):
-            shutil.rmtree(BACKUP_DIR)
+            shutil.rmtree(BACKUP_DIR, ignore_errors=True)
         shutil.copytree(INSTALL_DIR, BACKUP_DIR, ignore=shutil.ignore_patterns(
             'venv', '.git', '__pycache__'))
         return True
@@ -65,10 +65,11 @@ def rollback():
                 d = os.path.join(INSTALL_DIR, item)
                 if os.path.isdir(s):
                     shutil.rmtree(d, ignore_errors=True)
-                    shutil.copytree(s, d)
+                    # FIX: dirs_exist_ok=True prevents the "File exists" crash during rollback
+                    shutil.copytree(s, d, dirs_exist_ok=True)
                 else:
                     shutil.copy2(s, d)
-            time.sleep(1)  # Slight delay for UI pacing
+            time.sleep(1)
 
         console.print(
             "[bold green][+] Rollback Successful. Framework integrity restored.[/bold green]")
@@ -80,7 +81,6 @@ def rollback():
 def perform_update():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-    # 1. Premium UI Header
     console.print(Panel(
         "[bold white]DAVOID FRAMEWORK : OVER-THE-AIR (OTA) UPDATE[/bold white]\n"
         "[dim]Establishing secure uplink to Mainframe Repository...[/dim]",
@@ -93,7 +93,6 @@ def perform_update():
             f"[bold red][!] Critical Error:[/bold red] Installation directory {INSTALL_DIR} not found.")
         return
 
-    # 2. Pre-flight Snapshot
     console.print(
         "[cyan][*] Initializing pre-flight snapshot (Creating backup restore point)...[/cyan]")
     if not create_snapshot():
@@ -105,7 +104,6 @@ def perform_update():
             "[green][+] Snapshot secured at /tmp/davoid_backup[/green]\n")
 
     try:
-        # 3. Dynamic Progress Bars
         with Progress(
             SpinnerColumn("dots2", style="bold red"),
             TextColumn("[bold white]{task.description}[/bold white]"),
@@ -115,10 +113,13 @@ def perform_update():
             console=console
         ) as progress:
 
-            # Break the Git task into 3 distinct steps so the bar actually moves
             task_git = progress.add_task(
                 "Synchronizing Core Modules (Git)", total=3)
             os.chdir(INSTALL_DIR)
+
+            # FIX: Explicitly tell Git this directory is safe before fetching to avoid exit status 255
+            subprocess.run(["git", "config", "--global", "--add",
+                           "safe.directory", INSTALL_DIR], check=False, capture_output=True)
 
             subprocess.run(["git", "fetch", "--all"],
                            check=True, capture_output=True)
@@ -132,21 +133,16 @@ def perform_update():
                            check=True, capture_output=True)
             progress.update(task_git, advance=1)
 
-            # Python Environment Sync
             task_pip = progress.add_task(
                 "Updating Virtual Environment (Pip)", total=1)
             pip_path = os.path.join(INSTALL_DIR, "venv/bin/pip")
             req_path = os.path.join(INSTALL_DIR, "requirements.txt")
 
             if os.path.exists(req_path):
-                # NOTE: --upgrade removed for security/dependency pinning
                 subprocess.run([pip_path, "install", "-r", req_path],
                                check=True, capture_output=True)
             progress.update(task_pip, advance=1)
 
-            # ---------------------------------------------------------
-            # MIGRATION LOGIC FOR EXISTING USERS TO ROOTLESS ARCHITECTURE
-            # ---------------------------------------------------------
             task_mig = progress.add_task(
                 "Applying Secure Rootless Capabilities", total=1)
             if hasattr(os, 'geteuid') and os.geteuid() == 0:
@@ -155,14 +151,12 @@ def perform_update():
                 subprocess.run(
                     ["chmod", "-R", "755", INSTALL_DIR], check=False)
 
-                # Apply network capabilities to the virtual environment python so Scapy works
                 venv_python = os.path.join(INSTALL_DIR, "venv/bin/python3")
                 if os.path.exists(venv_python):
                     subprocess.run(
                         ["setcap", "cap_net_raw,cap_net_admin=eip", venv_python], check=False)
             progress.update(task_mig, advance=1)
 
-        # 4. Integrity Report
         console.print("\n")
         table = Table(title="[bold white]SYSTEM INTEGRITY DIAGNOSTICS[/bold white]",
                       border_style="red", box=box.SQUARE, expand=True)
@@ -188,7 +182,7 @@ def perform_update():
 
         if hasattr(os, 'geteuid') and os.geteuid() == 0:
             console.print(
-                "[bold yellow][!] SECURITY MIGRATION COMPLETE: You no longer need 'sudo' to run Davoid.[/bold yellow]")
+                "[bold yellow][!] SECURITY MIGRATION COMPLETE: You no longer need 'sudo' to run Davoid (on Linux).[/bold yellow]")
             console.print(
                 "[dim]Please exit and run 'davoid' as a standard user from now on.[/dim]")
 
@@ -196,6 +190,14 @@ def perform_update():
         input()
         sys.exit(0)
 
+    except subprocess.CalledProcessError as e:
+        console.print(
+            f"\n[bold red][!] Update Critical Failure: Command '{e.cmd}' returned non-zero exit status {e.returncode}.[/bold red]")
+        if e.stderr:
+            console.print(
+                f"[dim]Git output: {e.stderr.decode('utf-8', errors='ignore')}[/dim]")
+        rollback()
+        input("\nPress Enter to exit...")
     except Exception as e:
         console.print(
             f"\n[bold red][!] Update Critical Failure:[/bold red] {e}")

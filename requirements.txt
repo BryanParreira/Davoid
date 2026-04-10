@@ -23,4 +23,4 @@ python-nmap
 paramiko
 stegano
 Pillow
-mitmproxy
+mitmproxy==10.1.6

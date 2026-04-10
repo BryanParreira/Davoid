@@ -101,19 +101,18 @@ fi
 # 4. Setup Virtual Environment
 echo -e "\033[1;34m[*] Building isolated Python environment...\033[0m"
 
-# FIX: Try standard venv. If Python 3.14 ensurepip crashes, bypass it.
-if ! sudo -u $SUDO_USER python3 -m venv venv; then
-    echo -e "\033[1;33m[*] Standard venv creation failed (ensurepip bug). Attempting fallback method...\033[0m"
-    
-    if ! sudo -u $SUDO_USER python3 -m venv --without-pip venv; then
-        echo -e "\033[1;31m[!] CRITICAL ERROR: Fallback virtual environment creation failed.\033[0m"
-        exit 1
-    fi
-    
-    echo "    -> Downloading and installing pip manually..."
-    curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-    sudo -u $SUDO_USER ./venv/bin/python get-pip.py > /dev/null
-    rm get-pip.py
+# FIX: macOS Homebrew Python 3.14 has a fatal SIP bug with libexpat. 
+# We use Apple's built-in Command Line Tools Python to bypass this completely.
+PYTHON_EXE="python3"
+if [[ "$OS_TYPE" == "mac" && -x "/usr/bin/python3" ]]; then
+    PYTHON_EXE="/usr/bin/python3"
+    echo "    -> Using stable Apple system Python to bypass Homebrew SIP bugs..."
+fi
+
+if ! sudo -u $SUDO_USER $PYTHON_EXE -m venv venv; then
+    echo -e "\033[1;31m[!] CRITICAL ERROR: Failed to create virtual environment.\033[0m"
+    echo -e "\033[1;33m[!] Ensure macOS Xcode tools are installed: xcode-select --install\033[0m"
+    exit 1
 fi
 
 sudo -u $SUDO_USER ./venv/bin/pip install --upgrade pip > /dev/null

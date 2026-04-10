@@ -23,12 +23,14 @@ INSTALL_DIR="/opt/davoid"
 REPO_URL="https://github.com/BryanParreira/Davoid.git"
 BINARY_PATH="/usr/local/bin/davoid"
 
-# Detect OS
+# Detect OS and assign correct root group
 if [[ "$OSTYPE" == "darwin"* ]]; then
     OS_TYPE="mac"
+    ROOT_GROUP="wheel"
     echo -e "\033[1;34m[*] Detected macOS Environment...\033[0m"
 else
     OS_TYPE="linux"
+    ROOT_GROUP="root"
     echo -e "\033[1;34m[*] Detected Linux Environment...\033[0m"
 fi
 
@@ -101,21 +103,34 @@ fi
 cd $INSTALL_DIR
 echo -e "\033[1;34m[*] Building isolated Python environment...\033[0m"
 
-python3 -m venv venv
+# FIX: macOS Python 3.14 `ensurepip` bug workaround
+if ! python3 -m venv venv; then
+    echo -e "\033[1;33m[*] Standard venv creation failed. Attempting fallback method...\033[0m"
+    python3 -m venv --without-pip venv
+    curl -sS https://bootstrap.pypa.io/get-pip.py | ./venv/bin/python
+fi
+
 ./venv/bin/pip install --upgrade pip > /dev/null
 
 echo -e "\033[1;34m[*] Installing Next-Gen Framework Dependencies...\033[0m"
 if [ -f "requirements.txt" ]; then
-    ./venv/bin/pip install -r requirements.txt
+    if ! ./venv/bin/pip install -r requirements.txt; then
+        echo -e "\033[1;31m[!] CRITICAL ERROR: Python dependencies failed to install.\033[0m"
+        exit 1
+    fi
     ./venv/bin/pip install requests[socks] 
 else
     # Fallback installation if requirements.txt is missing
-    ./venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML
+    if ! ./venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML; then
+        echo -e "\033[1;31m[!] CRITICAL ERROR: Fallback dependencies failed to install.\033[0m"
+        exit 1
+    fi
 fi
 
 # 5. Lock Down Permissions and Apply Capabilities (Rootless Execution)
 echo -e "\033[1;34m[*] Securing directory permissions and applying Network Capabilities...\033[0m"
-chown -R root:root $INSTALL_DIR
+# FIX: Using dynamic group (root on Linux, wheel on Mac)
+chown -R root:$ROOT_GROUP $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
 
 if [[ "$OS_TYPE" == "linux" ]]; then

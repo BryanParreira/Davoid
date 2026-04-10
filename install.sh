@@ -23,18 +23,16 @@ INSTALL_DIR="/opt/davoid"
 REPO_URL="https://github.com/BryanParreira/Davoid.git"
 BINARY_PATH="/usr/local/bin/davoid"
 
-# Detect OS and set correct ownership group
+# Detect OS
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    OWNER_GROUP="staff"
     OS_TYPE="mac"
     echo -e "\033[1;34m[*] Detected macOS Environment...\033[0m"
 else
-    OWNER_GROUP=$(id -gn)
     OS_TYPE="linux"
     echo -e "\033[1;34m[*] Detected Linux Environment...\033[0m"
 fi
 
-# 2. Setup Directory with proper permissions
+# 2. Setup Directory
 mkdir -p $INSTALL_DIR
 
 # ------------------------------------------------------------------
@@ -63,12 +61,23 @@ if [[ "$OS_TYPE" == "linux" ]]; then
 
 elif [[ "$OS_TYPE" == "mac" ]]; then
     # macOS Logic (Homebrew)
-    if command -v brew &> /dev/null; then
+    
+    # Determine the correct brew path for Apple Silicon vs Intel
+    if [ -x "/opt/homebrew/bin/brew" ]; then
+        BREW_BIN="/opt/homebrew/bin/brew"
+    elif [ -x "/usr/local/bin/brew" ]; then
+        BREW_BIN="/usr/local/bin/brew"
+    else
+        BREW_BIN="brew"
+    fi
+
+    if sudo -u $SUDO_USER command -v $BREW_BIN &> /dev/null; then
         echo "    -> Installing Tools via Homebrew..."
-        brew install tor macchanger nmap tcpdump aircrack-ng git exploitdb < /dev/null
+        # Drop root privileges just for Homebrew to prevent the fatal error
+        sudo -u $SUDO_USER $BREW_BIN install tor macchanger nmap tcpdump aircrack-ng git exploitdb < /dev/null
         
         echo "    -> Starting Tor Service..."
-        brew services start tor < /dev/null
+        sudo -u $SUDO_USER $BREW_BIN services start tor < /dev/null
     else
         echo -e "\033[1;31m[!] Error: Homebrew not found. Dependencies cannot be installed automatically.\033[0m"
         echo -e "\033[1;33m[!] Please install Homebrew or manually install: tor nmap aircrack-ng\033[0m"
@@ -76,11 +85,12 @@ elif [[ "$OS_TYPE" == "mac" ]]; then
 fi
 # ------------------------------------------------------------------
 
-
 # 3. Clone or Update Repository
 echo -e "\033[1;34m[*] Syncing Davoid source code...\033[0m"
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd $INSTALL_DIR
+    git fetch --all < /dev/null
+    git reset --hard origin/main < /dev/null
     git pull origin main < /dev/null
 else
     rm -rf $INSTALL_DIR
@@ -124,12 +134,20 @@ if ! pgrep -x \"tor\" > /dev/null; then
     sudo service tor start 2>/dev/null || sudo systemctl start tor 2>/dev/null || tor &
 fi
 
-# Absolute path to the venv python and main script (No sudo required)
+# Absolute path to the venv python and main script
 /opt/davoid/venv/bin/python3 /opt/davoid/main.py \"\$@\"
 EOF"
 
 chmod +x $BINARY_PATH
 
+echo ""
+echo -e "\033[1;32m[+] ========================================================\033[0m"
 echo -e "\033[1;32m[+] DEPLOYMENT COMPLETE!\033[0m"
-echo -e "\033[1;33m[!] SECURITY NOTICE: You no longer need 'sudo' to run Davoid.\033[0m"
-echo -e "\033[1;32m[+] Type 'davoid' to enter the mainframe as a standard user.\033[0m"
+if [[ "$OS_TYPE" == "linux" ]]; then
+    echo -e "\033[1;33m[!] SECURITY NOTICE: You no longer need 'sudo' to run Davoid on Linux.\033[0m"
+    echo -e "\033[1;32m[+] Type 'davoid' to enter the mainframe as a standard user.\033[0m"
+else
+    echo -e "\033[1;33m[!] SECURITY NOTICE: macOS requires 'sudo' for packet manipulation.\033[0m"
+    echo -e "\033[1;32m[+] Type 'sudo davoid' to enter the mainframe.\033[0m"
+fi
+echo -e "\033[1;32m[+] ========================================================\033[0m"

@@ -65,7 +65,6 @@ def rollback():
                 d = os.path.join(INSTALL_DIR, item)
                 if os.path.isdir(s):
                     shutil.rmtree(d, ignore_errors=True)
-                    # FIX: dirs_exist_ok=True prevents the "File exists" crash during rollback
                     shutil.copytree(s, d, dirs_exist_ok=True)
                 else:
                     shutil.copy2(s, d)
@@ -88,8 +87,6 @@ def perform_update():
         time.sleep(1)
 
         try:
-            # This seamlessly replaces the current rootless process with a sudo process
-            # It will prompt for the password right inside the terminal TUI!
             os.execvp("sudo", ["sudo", sys.executable,
                       sys.argv[0], "--update"])
         except Exception as e:
@@ -136,10 +133,8 @@ def perform_update():
                 "Synchronizing Core Modules (Git)", total=3)
             os.chdir(INSTALL_DIR)
 
-            # FIX: Explicitly tell Git this directory is safe before fetching to avoid exit status 255
             subprocess.run(["git", "config", "--global", "--add",
                            "safe.directory", INSTALL_DIR], check=False, capture_output=True)
-
             subprocess.run(["git", "fetch", "--all"],
                            check=True, capture_output=True)
             progress.update(task_git, advance=1)
@@ -171,7 +166,8 @@ def perform_update():
                     ["chmod", "-R", "755", INSTALL_DIR], check=False)
 
                 venv_python = os.path.join(INSTALL_DIR, "venv/bin/python3")
-                if os.path.exists(venv_python):
+                # FIX: Only apply setcap if on Linux. macOS doesn't support it.
+                if os.path.exists(venv_python) and sys.platform != "darwin":
                     subprocess.run(
                         ["setcap", "cap_net_raw,cap_net_admin=eip", venv_python], check=False)
             progress.update(task_mig, advance=1)
@@ -199,7 +195,7 @@ def perform_update():
         console.print(
             "\n[bold red][+] Update Complete. Weapon systems primed.[/bold red]")
 
-        if hasattr(os, 'geteuid') and os.geteuid() == 0:
+        if hasattr(os, 'geteuid') and os.geteuid() == 0 and sys.platform != "darwin":
             console.print(
                 "[bold yellow][!] SECURITY MIGRATION COMPLETE: You no longer need 'sudo' to run Davoid (on Linux).[/bold yellow]")
             console.print(

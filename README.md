@@ -8,7 +8,9 @@
 
 git clone https://github.com/BryanParreira/Davoid.git cd Davoid sudo bash install.sh 
 ## Note: The installer configures an isolated Python virtual environment, installs system dependencies (Tor, Nmap, Aircrack-ng), and links the global davoid command to your PATH.
+
 #🚦 Execution & Privilege Requirements
+
 ### To launch the framework, simply type:
 
 sudo davoid 

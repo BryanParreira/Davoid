@@ -79,6 +79,25 @@ def rollback():
 
 
 def perform_update():
+    # --- SEAMLESS IN-APP SUDO ESCALATION ---
+    if hasattr(os, 'geteuid') and os.geteuid() != 0:
+        console.print(
+            "\n[bold yellow][*] Framework updates require system permissions.[/bold yellow]")
+        console.print(
+            "[dim]You will now be prompted for your local password to authorize the update...[/dim]\n")
+        time.sleep(1)
+
+        try:
+            # This seamlessly replaces the current rootless process with a sudo process
+            # It will prompt for the password right inside the terminal TUI!
+            os.execvp("sudo", ["sudo", sys.executable,
+                      sys.argv[0], "--update"])
+        except Exception as e:
+            console.print(
+                f"[red][!] Failed to seamlessly escalate privileges: {e}[/red]")
+            sys.exit(1)
+    # ---------------------------------------
+
     os.system('cls' if os.name == 'nt' else 'clear')
 
     console.print(Panel(

@@ -43,7 +43,6 @@ mkdir -p $INSTALL_DIR
 echo -e "\033[1;34m[*] Installing operational dependencies (Nmap, Tor, WiFi Tools, libcap2-bin)...\033[0m"
 
 if [[ "$OS_TYPE" == "linux" ]]; then
-    # Debian/Ubuntu/Kali Logic
     if command -v apt-get &> /dev/null; then
         echo "    -> Updating package lists..."
         apt-get update -qq < /dev/null
@@ -62,9 +61,6 @@ if [[ "$OS_TYPE" == "linux" ]]; then
     fi
 
 elif [[ "$OS_TYPE" == "mac" ]]; then
-    # macOS Logic (Homebrew)
-    
-    # Determine the correct brew path for Apple Silicon vs Intel
     if [ -x "/opt/homebrew/bin/brew" ]; then
         BREW_BIN="/opt/homebrew/bin/brew"
     elif [ -x "/usr/local/bin/brew" ]; then
@@ -75,53 +71,55 @@ elif [[ "$OS_TYPE" == "mac" ]]; then
 
     if sudo -u $SUDO_USER command -v $BREW_BIN &> /dev/null; then
         echo "    -> Installing Tools via Homebrew..."
-        # Drop root privileges just for Homebrew to prevent the fatal error
         sudo -u $SUDO_USER $BREW_BIN install tor macchanger nmap tcpdump aircrack-ng git exploitdb < /dev/null
         
         echo "    -> Starting Tor Service..."
         sudo -u $SUDO_USER $BREW_BIN services start tor < /dev/null
     else
         echo -e "\033[1;31m[!] Error: Homebrew not found. Dependencies cannot be installed automatically.\033[0m"
-        echo -e "\033[1;33m[!] Please install Homebrew or manually install: tor nmap aircrack-ng\033[0m"
     fi
 fi
 # ------------------------------------------------------------------
 
 # 3. Clone or Update Repository
 echo -e "\033[1;34m[*] Syncing Davoid source code...\033[0m"
-if [ -d "$INSTALL_DIR/.git" ]; then
-    cd $INSTALL_DIR
-    git fetch --all < /dev/null
-    git reset --hard origin/main < /dev/null
-    git pull origin main < /dev/null
+
+# FIX: Temporarily grant the standard user ownership of the directory 
+# so macOS SIP doesn't destroy the Python environment during the build phase.
+chown -R $SUDO_USER:$ROOT_GROUP $INSTALL_DIR
+cd $INSTALL_DIR
+
+if [ -d ".git" ]; then
+    sudo -u $SUDO_USER git fetch --all < /dev/null
+    sudo -u $SUDO_USER git reset --hard origin/main < /dev/null
+    sudo -u $SUDO_USER git pull origin main < /dev/null
 else
-    rm -rf $INSTALL_DIR
-    git clone $REPO_URL $INSTALL_DIR < /dev/null
+    # Remove everything in the dir and clone fresh
+    rm -rf ./*
+    rm -rf ./.git
+    sudo -u $SUDO_USER git clone $REPO_URL . < /dev/null
 fi
 
 # 4. Setup Virtual Environment
-cd $INSTALL_DIR
 echo -e "\033[1;34m[*] Building isolated Python environment...\033[0m"
 
-# FIX: macOS Python 3.14 `ensurepip` bug workaround
-if ! python3 -m venv venv; then
-    echo -e "\033[1;33m[*] Standard venv creation failed. Attempting fallback method...\033[0m"
-    python3 -m venv --without-pip venv
-    curl -sS https://bootstrap.pypa.io/get-pip.py | ./venv/bin/python
+# FIX: Build the environment as the standard user to prevent macOS XML crashes
+if ! sudo -u $SUDO_USER python3 -m venv venv; then
+    echo -e "\033[1;31m[!] CRITICAL ERROR: Failed to create virtual environment.\033[0m"
+    exit 1
 fi
 
-./venv/bin/pip install --upgrade pip > /dev/null
+sudo -u $SUDO_USER ./venv/bin/pip install --upgrade pip > /dev/null
 
 echo -e "\033[1;34m[*] Installing Next-Gen Framework Dependencies...\033[0m"
 if [ -f "requirements.txt" ]; then
-    if ! ./venv/bin/pip install -r requirements.txt; then
+    if ! sudo -u $SUDO_USER ./venv/bin/pip install -r requirements.txt; then
         echo -e "\033[1;31m[!] CRITICAL ERROR: Python dependencies failed to install.\033[0m"
         exit 1
     fi
-    ./venv/bin/pip install requests[socks] 
+    sudo -u $SUDO_USER ./venv/bin/pip install requests[socks] 
 else
-    # Fallback installation if requirements.txt is missing
-    if ! ./venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML; then
+    if ! sudo -u $SUDO_USER ./venv/bin/pip install scapy rich requests[socks] cryptography jinja2 questionary PyYAML; then
         echo -e "\033[1;31m[!] CRITICAL ERROR: Fallback dependencies failed to install.\033[0m"
         exit 1
     fi
@@ -129,7 +127,7 @@ fi
 
 # 5. Lock Down Permissions and Apply Capabilities (Rootless Execution)
 echo -e "\033[1;34m[*] Securing directory permissions and applying Network Capabilities...\033[0m"
-# FIX: Using dynamic group (root on Linux, wheel on Mac)
+# The environment is built perfectly. Now we lock the vault back down to root.
 chown -R root:$ROOT_GROUP $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
 

@@ -31,15 +31,15 @@ if os.path.exists(BASE_DIR) and BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
 # Ensure essential directories exist
-os.makedirs("logs", exist_ok=True)
+os.makedirs("logs",    exist_ok=True)
 os.makedirs("payloads", exist_ok=True)
-os.makedirs("plugins", exist_ok=True)
+os.makedirs("plugins",  exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CORE IMPORTS
 # ─────────────────────────────────────────────────────────────────────────────
 try:
-    from core.ui import draw_header
+    from core.ui import draw_header, Q_STYLE          # ← single source of truth
     from core.updater import check_version, perform_update
     from core.context import ctx
     from core.database import db
@@ -65,33 +65,33 @@ def _try_import(module_path, attr):
         return None
 
 
-network_discovery = _try_import("modules.scanner",      "network_discovery")
-SnifferEngine = _try_import("modules.sniff",        "SnifferEngine")
-dns_recon = _try_import("modules.recon",        "dns_recon")
-web_ghost = _try_import("modules.web_recon",    "web_ghost")
-MITMEngine = _try_import("modules.spoof",        "MITMEngine")
-start_dns_spoof = _try_import("modules.dns_spoofer",  "start_dns_spoof")
-run_cloner = _try_import("modules.cloner",       "run_cloner")
-run_ghost_hub = _try_import("modules.ghost_hub",    "run_ghost_hub")
-run_wifi_suite = _try_import("modules.wifi_ops",     "run_wifi_suite")
-generate_shell = _try_import("modules.payloads",     "generate_shell")
-encrypt_payload = _try_import("modules.crypt_keeper", "encrypt_payload")
-crack_hash = _try_import("modules.bruteforce",   "crack_hash")
-PersistenceEngine = _try_import("modules.persistence",  "PersistenceEngine")
-run_ai_console = _try_import("modules.ai_assist",    "run_ai_console")
-generate_report = _try_import("modules.reporter",     "generate_report")
-run_ad_ops = _try_import("modules.ad_ops",       "run_ad_ops")
-run_msf = _try_import("modules.msf_engine",   "run_msf")
-run_looter = _try_import("modules.looter",       "run_looter")
-run_auditor = _try_import("modules.auditor",      "run_auditor")
-run_cloud_ops = _try_import("modules.cloud_ops",    "run_cloud_ops")
-run_god_mode = _try_import("modules.god_mode",     "run_god_mode")
-run_purple_team = _try_import("modules.purple_team",  "run_purple_team")
-run_stego = _try_import("modules.stego", "run_stego")
-run_burp_proxy = _try_import("modules.burp_proxy", "run_burp_proxy")
+network_discovery  = _try_import("modules.scanner",      "network_discovery")
+SnifferEngine      = _try_import("modules.sniff",         "SnifferEngine")
+dns_recon          = _try_import("modules.recon",         "dns_recon")
+web_ghost          = _try_import("modules.web_recon",     "web_ghost")
+MITMEngine         = _try_import("modules.spoof",         "MITMEngine")
+start_dns_spoof    = _try_import("modules.dns_spoofer",   "start_dns_spoof")
+run_cloner         = _try_import("modules.cloner",        "run_cloner")
+run_ghost_hub      = _try_import("modules.ghost_hub",     "run_ghost_hub")
+run_wifi_suite     = _try_import("modules.wifi_ops",      "run_wifi_suite")
+generate_shell     = _try_import("modules.payloads",      "generate_shell")
+encrypt_payload    = _try_import("modules.crypt_keeper",  "encrypt_payload")
+crack_hash         = _try_import("modules.bruteforce",    "crack_hash")
+PersistenceEngine  = _try_import("modules.persistence",   "PersistenceEngine")
+run_ai_console     = _try_import("modules.ai_assist",     "run_ai_console")
+generate_report    = _try_import("modules.reporter",      "generate_report")
+run_ad_ops         = _try_import("modules.ad_ops",        "run_ad_ops")
+run_msf            = _try_import("modules.msf_engine",    "run_msf")
+run_looter         = _try_import("modules.looter",        "run_looter")
+run_auditor        = _try_import("modules.auditor",       "run_auditor")
+run_cloud_ops      = _try_import("modules.cloud_ops",     "run_cloud_ops")
+run_god_mode       = _try_import("modules.god_mode",      "run_god_mode")
+run_purple_team    = _try_import("modules.purple_team",   "run_purple_team")
+run_stego          = _try_import("modules.stego",         "run_stego")
+run_burp_proxy     = _try_import("modules.burp_proxy",    "run_burp_proxy")
 
 username_tracker = phone_intel = geolocate = None
-dork_generator = wayback_intel = shodan_intel = dns_intel = None
+dork_generator   = wayback_intel = shodan_intel = dns_intel = None
 try:
     from modules.osint_pro import (
         username_tracker, phone_intel, geolocate,
@@ -102,16 +102,10 @@ except Exception:
 
 console = Console()
 
-Q_STYLE = questionary.Style([
-    ('qmark',       'fg:#ff0000 bold'),
-    ('question',    'fg:#ffffff bold'),
-    ('answer',      'fg:#ff0000 bold'),
-    ('pointer',     'fg:#ff0000 bold'),
-    ('highlighted', 'fg:#ff0000 bold'),
-    ('selected',    'fg:#cc5454'),
-    ('separator',   'fg:#666666'),
-    ('instruction', 'fg:#666666 italic'),
-])
+# ─────────────────────────────────────────────────────────────────────────────
+#  NOTE: Q_STYLE is imported from core.ui above — do NOT redefine it here.
+#        The old duplicate definition caused the core.ui version to be shadowed.
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  SECURITY ENFORCEMENT
@@ -139,11 +133,10 @@ def load_plugins():
 
     for filename in os.listdir(plugins_dir):
         if filename.endswith(".py") and not filename.startswith("__"):
-            file_path = os.path.join(plugins_dir, filename)
+            file_path   = os.path.join(plugins_dir, filename)
             module_name = f"plugins.{filename[:-3]}"
             try:
-                spec = importlib.util.spec_from_file_location(
-                    module_name, file_path)
+                spec   = importlib.util.spec_from_file_location(module_name, file_path)
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
@@ -151,8 +144,8 @@ def load_plugins():
                     if issubclass(obj, DavoidPlugin) and obj is not DavoidPlugin:
                         LOADED_PLUGINS.append(obj())
             except Exception as e:
-                console.print(
-                    f"[dim red]Failed to load plugin {filename}: {e}[/dim red]")
+                console.print(f"[dim red]Failed to load plugin {filename}: {e}[/dim red]")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  SYSTEM HELPERS
@@ -175,14 +168,16 @@ def detect_network_environment():
         try:
             if sys.platform == "darwin":
                 out = subprocess.check_output(
-                    ["route", "-n", "get", "default"], stderr=subprocess.DEVNULL, timeout=5).decode()
+                    ["route", "-n", "get", "default"],
+                    stderr=subprocess.DEVNULL, timeout=5).decode()
                 for line in out.splitlines():
                     if "gateway:" in line:
                         gw = line.split(":")[1].strip()
                         break
             else:
                 out = subprocess.check_output(
-                    ["ip", "route"], stderr=subprocess.DEVNULL, timeout=5).decode()
+                    ["ip", "route"],
+                    stderr=subprocess.DEVNULL, timeout=5).decode()
                 for line in out.splitlines():
                     if line.startswith("default via"):
                         gw = line.split()[2].strip()
@@ -212,18 +207,28 @@ def secure_wipe(filepath, passes=3):
 
 
 def execute_vanish_protocol():
-    console.print(
-        "\n[bold red]INITIATING FORENSIC VANISH SEQUENCE...[/bold red]")
+    console.print("\n[bold red]INITIATING FORENSIC VANISH SEQUENCE...[/bold red]")
 
-    # 1. Securely wipe critical files first
-    critical_files = ["davoid_mission.db",
-                      "logs/c2_aes.key", "/opt/davoid/.db_key"]
+    # 0. Wipe DB records first via the ORM so the cipher cleans up properly
+    try:
+        db.delete_all()
+        console.print("[dim]  Mission DB records wiped.[/dim]")
+    except Exception:
+        pass
+
+    # 1. Securely wipe critical files
+    critical_files = [
+        os.path.join(os.path.expanduser("~"), ".davoid", "davoid_mission.db"),
+        os.path.join(os.path.expanduser("~"), ".davoid", ".db_key"),
+        "logs/c2_aes.key",
+        "/opt/davoid/.db_key",
+    ]
     for f in critical_files:
         if os.path.exists(f):
             secure_wipe(f)
             console.print(f"[dim]  Shredded: {f}[/dim]")
 
-    # 2. Standard directory cleanup with secure file shredding
+    # 2. Standard directory cleanup
     for target_dir in ["clones", "payloads", "__pycache__", "logs"]:
         if os.path.exists(target_dir):
             for root, dirs, files in os.walk(target_dir):
@@ -237,15 +242,13 @@ def execute_vanish_protocol():
             if d == "__pycache__":
                 shutil.rmtree(os.path.join(root, d), ignore_errors=True)
 
-    console.print(
-        "[bold green][*] Forensic evidence cleared. Ghost out.[/bold green]")
+    console.print("[bold green][*] Forensic evidence cleared. Ghost out.[/bold green]")
     sys.exit(0)
 
 
 def safe_execute(func, *args, **kwargs):
     if func is None:
-        console.print(
-            "\n[bold red][!] Module offline or missing dependencies.[/bold red]")
+        console.print("\n[bold red][!] Module offline or missing dependencies.[/bold red]")
         time.sleep(1.5)
         return
     try:
@@ -271,33 +274,38 @@ def configure_global_context():
 
         action = questionary.select(
             "Options:",
-            choices=[Choice("Set Variable", value="set"), Choice(
-                "Rotate Identity (Refresh Network)", value="rotate"), Choice("Back", value="back")],
+            choices=[
+                Choice("Set Variable",                      value="set"),
+                Choice("Rotate Identity (Refresh Network)", value="rotate"),
+                Choice("Back",                              value="back"),
+            ],
             style=Q_STYLE
         ).ask()
 
         if not action or action == "back":
             break
         elif action == "set":
-            key = questionary.text(
-                "Variable name (blank = cancel):", style=Q_STYLE).ask()
+            key = questionary.text("Variable name (blank = cancel):", style=Q_STYLE).ask()
             if key:
-                val = questionary.text(
-                    f"Value for {key}:", style=Q_STYLE).ask()
+                val = questionary.text(f"Value for {key}:", style=Q_STYLE).ask()
                 ctx.set(key, val)
         elif action == "rotate":
             console.print("[dim]Refreshing network identity...[/dim]")
             time.sleep(1)
             detect_network_environment()
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-#  WRAPPER ROUTERS (Restoring sub-menus)
+#  WRAPPER ROUTERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def run_net_scan():
-    sub = questionary.select("Network Tool:", choices=[
-                             "Active Discovery (Nmap)", "Passive Sniffer", "Back"], style=Q_STYLE).ask()
+    sub = questionary.select(
+        "Network Tool:",
+        choices=["Active Discovery (Nmap)", "Passive Sniffer", "Back"],
+        style=Q_STYLE
+    ).ask()
     if not sub or sub == "Back":
         return
     if "Active" in sub:
@@ -310,8 +318,11 @@ def run_net_scan():
 
 
 def run_person_osint():
-    sub = questionary.select("Mode:", choices=[
-                             "Username Tracker", "Phone Intel", "Back"], style=Q_STYLE).ask()
+    sub = questionary.select(
+        "Mode:",
+        choices=["Username Tracker", "Phone Intel", "Back"],
+        style=Q_STYLE
+    ).ask()
     if not sub or sub == "Back":
         return
     if "Username" in sub:
@@ -321,8 +332,11 @@ def run_person_osint():
 
 
 def run_ai_ops():
-    sub = questionary.select("AI Ops:", choices=[
-                             "Launch Cortex", "Generate Report (DB)", "Back"], style=Q_STYLE).ask()
+    sub = questionary.select(
+        "AI Ops:",
+        choices=["Launch Cortex", "Generate Report (DB)", "Back"],
+        style=Q_STYLE
+    ).ask()
     if not sub or sub == "Back":
         return
     if "Cortex" in sub:
@@ -345,10 +359,10 @@ def run_persist():
     if PersistenceEngine is None:
         safe_execute(None)
         return
-    path = questionary.text(
-        "Payload path (blank = cancel):", style=Q_STYLE).ask()
+    path = questionary.text("Payload path (blank = cancel):", style=Q_STYLE).ask()
     if path:
         safe_execute(lambda: PersistenceEngine(path).run())
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  MENU PANELS
@@ -358,15 +372,15 @@ def run_persist():
 def show_reconnaissance_menu():
     actions = {
         "net":     run_net_scan,
-        "web": lambda: safe_execute(web_ghost),
-        "burp": lambda: safe_execute(run_burp_proxy),
-        "shodan": lambda: safe_execute(shodan_intel),
-        "dns": lambda: safe_execute(dns_intel),
+        "web":     lambda: safe_execute(web_ghost),
+        "burp":    lambda: safe_execute(run_burp_proxy),
+        "shodan":  lambda: safe_execute(shodan_intel),
+        "dns":     lambda: safe_execute(dns_intel),
         "wayback": lambda: safe_execute(wayback_intel),
-        "dork": lambda: safe_execute(dork_generator),
+        "dork":    lambda: safe_execute(dork_generator),
         "person":  run_person_osint,
-        "geo": lambda: safe_execute(geolocate),
-        "recon": lambda: safe_execute(dns_recon),
+        "geo":     lambda: safe_execute(geolocate),
+        "recon":   lambda: safe_execute(dns_recon),
     }
 
     while True:
@@ -378,19 +392,19 @@ def show_reconnaissance_menu():
                 Separator("─── ACTIVE SCANNING ───────────────────"),
                 Choice("Network Scanner (Nmap) & Sniffer", value="net"),
                 Choice("Web Vulnerability Scanner",        value="web"),
-                Choice("Web Interception Proxy (Burp)",    value="burp"),
-                Choice("DNS Infrastructure Recon",         value="recon"),
+                Choice("Web Interception Proxy (Burp)",   value="burp"),
+                Choice("DNS Infrastructure Recon",        value="recon"),
                 Separator("─── PASSIVE OSINT ──────────────────────"),
-                Choice("Shodan API (Attack Surface)",      value="shodan"),
-                Choice("DNS & Subdomain Mapping",          value="dns"),
+                Choice("Shodan API (Attack Surface)",     value="shodan"),
+                Choice("DNS & Subdomain Mapping",         value="dns"),
                 Separator("─── DEEP ARCHIVE ───────────────────────"),
-                Choice("Wayback Machine (Archive Mining)", value="wayback"),
-                Choice("Google Dork Generator",            value="dork"),
+                Choice("Wayback Machine (Archive Mining)",value="wayback"),
+                Choice("Google Dork Generator",           value="dork"),
                 Separator("─── IDENTITY / GEO ─────────────────────"),
-                Choice("Social OSINT (Identity Tracker)",  value="person"),
-                Choice("Geo-IP Tracker",                   value="geo"),
+                Choice("Social OSINT (Identity Tracker)", value="person"),
+                Choice("Geo-IP Tracker",                  value="geo"),
                 Separator("─── NAVIGATION ─────────────────────────"),
-                Choice("Return to Main Menu",              value="back"),
+                Choice("Return to Main Menu",             value="back"),
             ],
             style=Q_STYLE
         ).ask()
@@ -402,13 +416,13 @@ def show_reconnaissance_menu():
 
 def show_assault_menu():
     actions = {
-        "msf": lambda: safe_execute(run_msf),
-        "ad": lambda: safe_execute(run_ad_ops),
+        "msf":   lambda: safe_execute(run_msf),
+        "ad":    lambda: safe_execute(run_ad_ops),
         "cloud": lambda: safe_execute(run_cloud_ops),
-        "loot": lambda: safe_execute(run_looter),
-        "mitm": lambda: safe_execute(lambda: MITMEngine().run()) if MITMEngine else safe_execute(None),
-        "dns": lambda: safe_execute(start_dns_spoof),
-        "wifi": lambda: safe_execute(run_wifi_suite),
+        "loot":  lambda: safe_execute(run_looter),
+        "mitm":  lambda: safe_execute(lambda: MITMEngine().run()) if MITMEngine else safe_execute(None),
+        "dns":   lambda: safe_execute(start_dns_spoof),
+        "wifi":  lambda: safe_execute(run_wifi_suite),
         "clone": lambda: safe_execute(run_cloner),
         "crack": lambda: safe_execute(crack_hash),
     }
@@ -420,19 +434,19 @@ def show_assault_menu():
             "Select Assault Vector:",
             choices=[
                 Separator("─── ENTERPRISE EXPLOITATION ────────────"),
-                Choice("Metasploit Framework (MSF-RPC)",   value="msf"),
-                Choice("Active Directory Ops",             value="ad"),
-                Choice("Cloud & Container Warfare",        value="cloud"),
-                Choice("PrivEsc Looter (Post-Exploit)",    value="loot"),
+                Choice("Metasploit Framework (MSF-RPC)",  value="msf"),
+                Choice("Active Directory Ops",            value="ad"),
+                Choice("Cloud & Container Warfare",       value="cloud"),
+                Choice("PrivEsc Looter (Post-Exploit)",   value="loot"),
                 Separator("─── NETWORK ATTACKS ────────────────────"),
-                Choice("MITM Interceptor (ARP Poison)",    value="mitm"),
-                Choice("DNS Spoofer",                      value="dns"),
-                Choice("WiFi Attack Suite",                value="wifi"),
+                Choice("MITM Interceptor (ARP Poison)",   value="mitm"),
+                Choice("DNS Spoofer",                     value="dns"),
+                Choice("WiFi Attack Suite",               value="wifi"),
                 Separator("─── SOCIAL & CREDENTIAL ─────────────────"),
-                Choice("AitM Web Cloner (Phishing Proxy)", value="clone"),
-                Choice("Hash Cracker",                     value="crack"),
+                Choice("AitM Web Cloner (Phishing Proxy)",value="clone"),
+                Choice("Hash Cracker",                    value="crack"),
                 Separator("─── NAVIGATION ─────────────────────────"),
-                Choice("Return to Main Menu",              value="back"),
+                Choice("Return to Main Menu",             value="back"),
             ],
             style=Q_STYLE
         ).ask()
@@ -444,12 +458,12 @@ def show_assault_menu():
 
 def show_infrastructure_menu():
     actions = {
-        "forge": lambda: safe_execute(generate_shell),
+        "forge":   lambda: safe_execute(generate_shell),
         "crypt":   run_encrypt,
         "persist": run_persist,
-        "c2": lambda: safe_execute(run_ghost_hub),
-        "audit": lambda: safe_execute(run_auditor),
-        "stego": lambda: safe_execute(run_stego),
+        "c2":      lambda: safe_execute(run_ghost_hub),
+        "audit":   lambda: safe_execute(run_auditor),
+        "stego":   lambda: safe_execute(run_stego),
     }
 
     while True:
@@ -459,16 +473,16 @@ def show_infrastructure_menu():
             "Select C2 Operation:",
             choices=[
                 Separator("─── WEAPONIZATION ──────────────────────"),
-                Choice("AI Polymorphic Payload Forge",     value="forge"),
-                Choice("Payload Encryptor (CryptKeeper)",  value="crypt"),
-                Choice("Steganography (Hide Data in Image)", value="stego"),
+                Choice("AI Polymorphic Payload Forge",      value="forge"),
+                Choice("Payload Encryptor (CryptKeeper)",   value="crypt"),
+                Choice("Steganography (Hide Data in Image)",value="stego"),
                 Separator("─── PERSISTENCE & C2 ───────────────────"),
-                Choice("Persistence Installer",            value="persist"),
-                Choice("GhostHub C2 Server",               value="c2"),
+                Choice("Persistence Installer",             value="persist"),
+                Choice("GhostHub C2 Server",                value="c2"),
                 Separator("─── AUDIT ───────────────────────────────"),
-                Choice("System Posture Auditor",           value="audit"),
+                Choice("System Posture Auditor",            value="audit"),
                 Separator("─── NAVIGATION ─────────────────────────"),
-                Choice("Return to Main Menu",              value="back"),
+                Choice("Return to Main Menu",               value="back"),
             ],
             style=Q_STYLE
         ).ask()
@@ -491,8 +505,7 @@ def show_plugins_menu():
 
         choices = [Separator("─── LOADED PLUGINS ────────────────────")]
         for idx, plugin in enumerate(LOADED_PLUGINS):
-            choices.append(
-                Choice(f"{plugin.name} (by {plugin.author})", value=idx))
+            choices.append(Choice(f"{plugin.name} (by {plugin.author})", value=idx))
         choices.append(Separator("───────────────────────────────────────"))
         choices.append(Choice("Return to Main Menu", value="back"))
 
@@ -504,15 +517,14 @@ def show_plugins_menu():
 
         try:
             plugin = LOADED_PLUGINS[choice]
-            console.print(
-                f"\n[*] Executing Plugin: [bold cyan]{plugin.name}[/bold cyan]")
+            console.print(f"\n[*] Executing Plugin: [bold cyan]{plugin.name}[/bold cyan]")
             console.print(f"[dim]{plugin.description}[/dim]\n")
             plugin.run()
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         except Exception as e:
-            console.print(
-                f"[bold red][!] Plugin execution failed:[/bold red] {e}")
+            console.print(f"[bold red][!] Plugin execution failed:[/bold red] {e}")
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  MAIN LOOP
@@ -532,8 +544,8 @@ def main():
         "recon":   show_reconnaissance_menu,
         "assault": show_assault_menu,
         "infra":   show_infrastructure_menu,
-        "god": lambda: safe_execute(run_god_mode),
-        "purple": lambda: safe_execute(run_purple_team),
+        "god":     lambda: safe_execute(run_god_mode),
+        "purple":  lambda: safe_execute(run_purple_team),
         "ai":      run_ai_ops,
         "sys":     configure_global_context,
         "plugins": show_plugins_menu,
@@ -558,8 +570,7 @@ def main():
                     Choice("5.  GOD MODE (Auto-Campaign)",  value="god"),
                     Choice("6.  Purple Team Emulation",     value="purple"),
                     Separator("─── ECOSYSTEM ──────────────────────────"),
-                    Choice(
-                        f"    Community Plugins ({len(LOADED_PLUGINS)})", value="plugins"),
+                    Choice(f"    Community Plugins ({len(LOADED_PLUGINS)})", value="plugins"),
                     Separator("─── SYSTEM ─────────────────────────────"),
                     Choice("    Configuration & Context",   value="sys"),
                     Choice("    Framework Update",          value="update"),
@@ -572,7 +583,9 @@ def main():
             if not phase:
                 continue
             if phase == "exit":
-                if questionary.confirm("Execute Vanish Protocol?", default=True, style=Q_STYLE).ask():
+                if questionary.confirm(
+                        "Execute Vanish Protocol?",
+                        default=True, style=Q_STYLE).ask():
                     execute_vanish_protocol()
             elif phase in actions:
                 actions[phase]()
@@ -580,8 +593,7 @@ def main():
         except KeyboardInterrupt:
             execute_vanish_protocol()
         except Exception as e:
-            console.print(
-                f"\n[bold red]Critical error in main loop:[/bold red] {e}")
+            console.print(f"\n[bold red]Critical error in main loop:[/bold red] {e}")
             input("Press Enter to continue...")
 
 

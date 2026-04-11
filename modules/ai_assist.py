@@ -1,5 +1,7 @@
 """
 ai_assist.py — Davoid Cortex (Local Ollama AI Advisor)
+UPGRADED: Reads default AI model and base URL from config/context so
+          users don't have to select it on every run.
 FIX: db.cursor.execute() replaced with dual-mode DB access that works
      whether core/database.py uses raw SQLite or SQLAlchemy ORM.
 """
@@ -21,12 +23,12 @@ def _get_critical_logs(limit=10):
     """
     Fetch HIGH/CRITICAL logs from the mission database.
     Supports three patterns depending on what core/database.py exposes:
-      1. db.get_critical_logs()  — if the method exists
+      1. db.get_critical_logs()  — if the method exists (preferred)
       2. db.cursor (raw SQLite)
       3. db.get_all()            — filter in Python
     Returns a list of dicts with keys: timestamp, module, target, severity, details
     """
-    # Strategy 1: dedicated method
+    # Strategy 1: dedicated method (new database.py has this)
     if hasattr(db, 'get_critical_logs'):
         try:
             return db.get_critical_logs(limit=limit)
@@ -59,16 +61,19 @@ def _get_critical_logs(limit=10):
             all_logs = db.get_all()
             filtered = []
             for log in all_logs:
-                # Supports both dict and ORM-object access patterns
-                sev = log.get('severity') if isinstance(
-                    log, dict) else getattr(log, 'severity', '')
+                sev = (log.get('severity') if isinstance(log, dict)
+                       else getattr(log, 'severity', ''))
                 if sev in ('HIGH', 'CRITICAL'):
                     filtered.append({
-                        "timestamp": log.get('timestamp') if isinstance(log, dict) else getattr(log, 'timestamp', ''),
-                        "module":    log.get('module') if isinstance(log, dict) else getattr(log, 'module',    ''),
-                        "target":    log.get('target') if isinstance(log, dict) else getattr(log, 'target',    ''),
+                        "timestamp": (log.get('timestamp') if isinstance(log, dict)
+                                      else getattr(log, 'timestamp', '')),
+                        "module":    (log.get('module') if isinstance(log, dict)
+                                      else getattr(log, 'module', '')),
+                        "target":    (log.get('target') if isinstance(log, dict)
+                                      else getattr(log, 'target', '')),
                         "severity":  sev,
-                        "details":   log.get('details') if isinstance(log, dict) else getattr(log, 'details',   ''),
+                        "details":   (log.get('details') if isinstance(log, dict)
+                                      else getattr(log, 'details', '')),
                     })
             return filtered[:limit]
         except Exception:
@@ -78,9 +83,18 @@ def _get_critical_logs(limit=10):
 
 
 class AIEngine:
-    def __init__(self, model="llama3"):
-        self.base_url = "http://127.0.0.1:11434/api"
-        self.model = model
+    def __init__(self, model=None):
+        # ── Read default model + URL from config/context ──────────────────────
+        # Config is loaded at startup into ctx by core/config.py
+        # Falls back to "llama3" if nothing is configured
+        try:
+            from core.context import ctx
+            self.base_url = ctx.get("AI_URL") or "http://127.0.0.1:11434/api"
+            self.model    = model or ctx.get("AI_MODEL") or "llama3"
+        except Exception:
+            self.base_url = "http://127.0.0.1:11434/api"
+            self.model    = model or "llama3"
+
         self.history = []
         self.system_prompt = (
             "You are DAVOID CORTEX, an elite Red Team tactical AI advisor. "
@@ -108,28 +122,28 @@ class AIEngine:
     def chat(self, user_input, override_prompt=None):
         """Stream Ollama response directly to stdout."""
         system_role = override_prompt or self.system_prompt
-        messages = (
+        messages    = (
             [{"role": "system", "content": system_role}]
             + self.history
             + [{"role": "user", "content": user_input}]
         )
-        payload = {"model": self.model, "messages": messages, "stream": True}
+        payload      = {"model": self.model, "messages": messages, "stream": True}
+        full_response = ""
 
         console.print(
             f"\n[bold cyan]Cortex ({self.model}) computing...[/bold cyan]\n")
-        full_response = ""
 
         try:
             with requests.post(
-                    f"{self.base_url}/chat", json=payload, stream=True, timeout=120) as r:
+                    f"{self.base_url}/chat",
+                    json=payload, stream=True, timeout=120) as r:
                 r.raise_for_status()
                 sys.stdout.write("\033[92m")   # green
                 for line in r.iter_lines():
                     if line:
                         try:
-                            body = json.loads(line)
-                            content = body.get(
-                                "message", {}).get("content", "")
+                            body    = json.loads(line)
+                            content = body.get("message", {}).get("content", "")
                             sys.stdout.write(content)
                             sys.stdout.flush()
                             full_response += content
@@ -138,12 +152,10 @@ class AIEngine:
                 sys.stdout.write("\033[0m\n\n")
 
             self.history.append({"role": "user",      "content": user_input})
-            self.history.append(
-                {"role": "assistant",  "content": full_response})
+            self.history.append({"role": "assistant",  "content": full_response})
 
         except requests.exceptions.ConnectionError:
-            console.print(
-                "[bold red][!] Lost connection to Ollama.[/bold red]")
+            console.print("[bold red][!] Lost connection to Ollama.[/bold red]")
         except Exception as e:
             console.print(f"[bold red][!] AI error:[/bold red] {e}")
 
@@ -161,12 +173,24 @@ class AIEngine:
 
         context = "MISSION DATABASE EXTRACT:\n\n"
         for row in rows:
+            # Support both dict and LogRow object access
+            ts      = (row['timestamp'] if isinstance(row, dict)
+                       else getattr(row, 'timestamp', ''))
+            module  = (row['module']    if isinstance(row, dict)
+                       else getattr(row, 'module',    ''))
+            target  = (row['target']    if isinstance(row, dict)
+                       else getattr(row, 'target',    ''))
+            sev     = (row['severity']  if isinstance(row, dict)
+                       else getattr(row, 'severity',  ''))
+            details = (row['details']   if isinstance(row, dict)
+                       else getattr(row, 'details',   ''))
+
             context += (
-                f"Time: {row['timestamp']}\n"
-                f"Module: {row['module']}\n"
-                f"Target: {row['target']}\n"
-                f"Severity: {row['severity']}\n"
-                f"Details:\n{row['details']}\n"
+                f"Time: {ts}\n"
+                f"Module: {module}\n"
+                f"Target: {target}\n"
+                f"Severity: {sev}\n"
+                f"Details:\n{details}\n"
                 + "─" * 40 + "\n"
             )
 
@@ -185,8 +209,7 @@ class AIEngine:
 
     def clear_history(self):
         self.history = []
-        console.print(
-            "[bold green][+] Conversation memory wiped.[/bold green]")
+        console.print("[bold green][+] Conversation memory wiped.[/bold green]")
 
 
 def run_ai_console():
@@ -196,7 +219,8 @@ def run_ai_console():
     if not engine.check_connection():
         console.print("[bold red][!] Ollama is offline.[/bold red]")
         console.print(
-            "[white]Run:[/white] [bold cyan]ollama serve[/bold cyan]  in a separate terminal.")
+            "[white]Run:[/white] [bold cyan]ollama serve[/bold cyan]  "
+            "in a separate terminal.")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
@@ -207,8 +231,15 @@ def run_ai_console():
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
+    # If a model was pre-configured, use it as the default selection
+    default_model = engine.model if engine.model in models else models[0]
+
     engine.model = questionary.select(
-        "Select AI Model:", choices=models, style=Q_STYLE).ask()
+        "Select AI Model:",
+        choices=models,
+        default=default_model,
+        style=Q_STYLE).ask()
+
     if not engine.model:
         return
 
@@ -233,7 +264,8 @@ def run_ai_console():
         if "Chat" in choice:
             console.print(Panel(
                 "[bold white]Tactical Link Active.[/bold white] "
-                "Ask for exploit syntax, evasion techniques, or post-exploitation tactics.\n"
+                "Ask for exploit syntax, evasion techniques, or "
+                "post-exploitation tactics.\n"
                 "[dim]Type 'exit', 'quit', or 'back' to return.[/dim]",
                 border_style="cyan"))
             while True:

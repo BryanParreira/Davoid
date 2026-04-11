@@ -1,5 +1,7 @@
 """
 bruteforce.py — Multi-Core Hash Cracker with Mutation Engine
+UPGRADED: Reads default wordlist path from config/context so users
+          don't have to type the path on every run.
 FIX: multiprocessing.Event() replaced with multiprocessing.Manager().Event()
      so the stop signal is correctly shared across spawned child processes
      (required on macOS/Windows which use 'spawn' not 'fork' for Process()).
@@ -12,11 +14,35 @@ import sys
 import time
 import questionary
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+from rich.progress import (Progress, SpinnerColumn, BarColumn,
+                           TextColumn, TimeElapsedColumn)
 from rich.panel import Panel
 from core.ui import draw_header, Q_STYLE
 
 console = Console()
+
+
+def _get_default_wordlist() -> str:
+    """
+    Read the configured wordlist path from context (set by config.yaml).
+    Falls back to the standard rockyou location if nothing is configured.
+    """
+    try:
+        from core.context import ctx
+        configured = ctx.get("WORDLIST")
+        if configured and os.path.exists(configured):
+            return configured
+    except Exception:
+        pass
+    # Common fallback locations
+    for path in [
+        "/usr/share/wordlists/rockyou.txt",
+        "/usr/share/wordlists/rockyou.txt.gz",
+        "/opt/wordlists/rockyou.txt",
+    ]:
+        if os.path.exists(path):
+            return path
+    return "/usr/share/wordlists/rockyou.txt"
 
 
 class HashEngine:
@@ -35,15 +61,16 @@ class HashEngine:
 
         variants = {word, word.upper(), word.lower(), word.capitalize()}
 
-        suffixes = ["123", "1234", "2024", "2025",
-                    "2026", "!", "!!", "@", "#", "1!"]
+        suffixes  = ["123", "1234", "2024", "2025",
+                     "2026", "!", "!!", "@", "#", "1!"]
         base_list = list(variants)
         for v in base_list:
             for s in suffixes:
                 variants.add(v + s)
                 variants.add(s + v)
 
-        leet = {'a': '@', 'e': '3', 'i': '1', 'o': '0', 's': '$', 't': '7'}
+        leet     = {'a': '@', 'e': '3', 'i': '1',
+                    'o': '0', 's': '$', 't': '7'}
         leet_word = "".join(leet.get(c.lower(), c) for c in word)
         variants.add(leet_word)
         variants.add(leet_word.capitalize())
@@ -52,10 +79,11 @@ class HashEngine:
         return list(variants)
 
     @staticmethod
-    def _crack_worker(target_hash, algo, wordlist_chunk, found_queue, stop_event):
+    def _crack_worker(target_hash, algo, wordlist_chunk,
+                      found_queue, stop_event):
         """
-        Worker process. stop_event is a Manager().Event() so it's shared correctly
-        across spawn-based process start methods (macOS, Windows).
+        Worker process. stop_event is a Manager().Event() so it's shared
+        correctly across spawn-based process start methods (macOS, Windows).
         """
         try:
             for word in wordlist_chunk:
@@ -77,19 +105,31 @@ class HashEngine:
     def run(self, target_hash):
         draw_header("Cracker-Pro: Multi-Core Mutation Engine")
 
+        # ── Read default wordlist from config ─────────────────────────────────
+        default_wl = _get_default_wordlist()
         path = questionary.text(
-            "Wordlist path (e.g. /usr/share/wordlists/rockyou.txt):",
+            "Wordlist path:",
+            default=default_wl,
             style=Q_STYLE).ask()
+
         if not path or not os.path.exists(path):
             console.print("[red][!] Wordlist not found.[/red]")
+            if path and not os.path.exists(path):
+                console.print(
+                    f"[dim]Path does not exist: {path}[/dim]")
+                console.print(
+                    "[dim]Update 'wordlists.passwords' in config.yaml "
+                    "with your wordlist path.[/dim]")
             return
 
         # Auto-detect algorithm from hash length
-        length_map = {32: "md5", 40: "sha1", 56: "sha224",
-                      64: "sha256", 96: "sha384", 128: "sha512"}
+        length_map = {
+            32: "md5", 40: "sha1", 56: "sha224",
+            64: "sha256", 96: "sha384", 128: "sha512"}
         self.algo = length_map.get(len(target_hash), self.algo)
         console.print(
-            f"[*] Detected algorithm: [bold cyan]{self.algo.upper()}[/bold cyan]")
+            f"[*] Detected algorithm: "
+            f"[bold cyan]{self.algo.upper()}[/bold cyan]")
 
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -98,30 +138,32 @@ class HashEngine:
             console.print(f"[red][!] Cannot read wordlist: {e}[/red]")
             return
 
-        total = len(words)
-        num_cores = multiprocessing.cpu_count()
+        total      = len(words)
+        num_cores  = multiprocessing.cpu_count()
         chunk_size = max(1, total // num_cores)
-        chunks = [words[i:i + chunk_size] for i in range(0, total, chunk_size)]
+        chunks     = [words[i:i + chunk_size]
+                      for i in range(0, total, chunk_size)]
 
-        # ── Manager-based shared objects (work across spawn/fork) ──
-        manager = multiprocessing.Manager()
-        stop_event = manager.Event()          # ← FIX: was multiprocessing.Event()
+        # ── Manager-based shared objects (work across spawn/fork) ─────────────
+        manager    = multiprocessing.Manager()
+        stop_event = manager.Event()
         found_queue = manager.Queue()
 
         console.print(
-            f"[*] Dispatching across {num_cores} cores — {total:,} words + mutations...")
+            f"[*] Dispatching across {num_cores} cores — "
+            f"{total:,} words + mutations...")
 
         processes = []
         for chunk in chunks:
             p = multiprocessing.Process(
                 target=HashEngine._crack_worker,
                 args=(target_hash, self.algo, chunk, found_queue, stop_event),
-                daemon=True
+                daemon=True,
             )
             p.start()
             processes.append(p)
 
-        # ── Monitor loop ───────────────────────────────────────────
+        # ── Monitor loop ──────────────────────────────────────────────────────
         found_password = None
         with Progress(
             SpinnerColumn(),
@@ -129,7 +171,7 @@ class HashEngine:
             BarColumn(bar_width=40),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeElapsedColumn(),
-            console=console
+            console=console,
         ) as progress:
             task = progress.add_task(
                 f"Cracking {target_hash[:16]}...", total=total)
@@ -139,10 +181,9 @@ class HashEngine:
                     found_password = found_queue.get()
                     break
                 time.sleep(0.3)
-                # approximate progress
                 progress.advance(task, chunk_size * 0.3)
 
-        # ── Cleanup ───────────────────────────────────────────────
+        # ── Cleanup ───────────────────────────────────────────────────────────
         stop_event.set()
         for p in processes:
             p.terminate()
@@ -153,18 +194,21 @@ class HashEngine:
             console.print(Panel(
                 f"[bold green][+] CRACKED![/bold green]\n\n"
                 f"[white]Hash  :[/white] {target_hash}\n"
-                f"[white]Plain :[/white] [bold yellow]{found_password}[/bold yellow]",
-                title="Success", border_style="green"
+                f"[white]Plain :[/white] "
+                f"[bold yellow]{found_password}[/bold yellow]",
+                title="Success", border_style="green",
             ))
         else:
-            console.print("[red][!] Wordlist exhausted. No match found.[/red]")
+            console.print(
+                "[red][!] Wordlist exhausted. No match found.[/red]")
 
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
 
 def crack_hash(target_hash=None):
     if not target_hash:
-        target_hash = questionary.text("Target hash:", style=Q_STYLE).ask()
+        target_hash = questionary.text(
+            "Target hash:", style=Q_STYLE).ask()
     if target_hash:
         HashEngine().run(target_hash.strip())
 

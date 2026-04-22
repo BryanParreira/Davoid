@@ -14,7 +14,8 @@ from rich.panel import Panel
 
 # --- UI Polish: Silence LangChain Advertisements & Deprecation Warnings ---
 from langchain_core._api.deprecation import LangChainDeprecationWarning
-warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="langchain")
+warnings.filterwarnings("ignore", message=".*initialize_agent.*")
 warnings.filterwarnings("ignore", message=".*LangChain agents will continue to be supported.*")
 
 # Modern Langchain Agent Imports

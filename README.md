@@ -12,12 +12,14 @@ Davoid is a modular security engine built for speed, clarity, and deep-level net
 
 ## 🚀 Installation
 
-Deploy Davoid globally on your Mac or Linux system. This command clones the repository to `/opt/davoid`, configures an isolated Python virtual environment, and links the global `davoid` command to your PATH.
+Deploy Davoid globally on your Mac or Linux system. This command clones the repository to `/opt/davoid`, configures an isolated Docker virtual environment, and links the global `davoid` command to your PATH.
 
 ```
    git clone https://github.com/BryanParreira/Davoid.git
    cd Davoid
-   sudo bash install.sh
+   chmod +x install.sh
+   ./install.sh
+
 ```
 
 > **Note:** Root privileges are required for installation and execution due to raw socket operations.
@@ -27,42 +29,46 @@ Deploy Davoid globally on your Mac or Linux system. This command clones the repo
 ## 🛠️ Security Modules
 
 ### 1️⃣ Intelligence & OSINT (The Holmes Engine)
+
 Focused on passive and active information gathering, this hub incorporates elite features from the Mr. Holmes project.
 
-| Tool | Key | Description |
-|------|-----|-------------|
-| **Net-Mapper** | `[1]` | High-speed L2/L3 discovery with CVE vulnerability mapping and hardware vendor identification |
-| **Live Interceptor** | `[2]` | Real-time traffic analysis with DNS query tracking and session token extraction |
-| **Holmes Engine** | `[3]` | Advanced profiling including Username Tracking across 10+ platforms, Phone Intelligence, and Geospatial Tracking |
-| **Web Recon** | `[4]` | Automated Robots.txt scraping and domain reputation auditing for attack surface mapping |
+| Tool                 | Key   | Description                                                                                                      |
+| -------------------- | ----- | ---------------------------------------------------------------------------------------------------------------- |
+| **Net-Mapper**       | `[1]` | High-speed L2/L3 discovery with CVE vulnerability mapping and hardware vendor identification                     |
+| **Live Interceptor** | `[2]` | Real-time traffic analysis with DNS query tracking and session token extraction                                  |
+| **Holmes Engine**    | `[3]` | Advanced profiling including Username Tracking across 10+ platforms, Phone Intelligence, and Geospatial Tracking |
+| **Web Recon**        | `[4]` | Automated Robots.txt scraping and domain reputation auditing for attack surface mapping                          |
 
 ### 2️⃣ Offensive Operations
+
 A powerhouse for active network manipulation and traffic redirection.
 
-| Tool | Key | Description |
-|------|-----|-------------|
-| **MITM Engine** | `[5]` | Subnet-wide ARP poisoning with automatic IP forwarding configuration for macOS and Linux |
-| **DNS Spoofer** | `[6]` | Real-time hijacking of DNS queries to redirect targets to custom phishing portals |
-| **Phantom Cloner** | `[7]` | Dynamic web cloning with JS Form-Hooking for automated credential harvesting |
-| **GHOST-HUB C2** | `[8]` | Encrypted Command & Control center for remote session management and orchestration |
+| Tool               | Key   | Description                                                                              |
+| ------------------ | ----- | ---------------------------------------------------------------------------------------- |
+| **MITM Engine**    | `[5]` | Subnet-wide ARP poisoning with automatic IP forwarding configuration for macOS and Linux |
+| **DNS Spoofer**    | `[6]` | Real-time hijacking of DNS queries to redirect targets to custom phishing portals        |
+| **Phantom Cloner** | `[7]` | Dynamic web cloning with JS Form-Hooking for automated credential harvesting             |
+| **GHOST-HUB C2**   | `[8]` | Encrypted Command & Control center for remote session management and orchestration       |
 
 ### 3️⃣ Payloads & Post-Exploitation
+
 Tools for establishing persistence and maintaining access.
 
-| Tool | Key | Description |
-|------|-----|-------------|
-| **Shell Forge** | `[9]` | Multipurpose payload generator supporting Bash, Python, PHP, Ruby, and PowerShell for cross-platform exploitation |
-| **Crypt-Keeper** | `[0]` | Advanced payload encryption and evasion logic with self-decrypting loaders to bypass static AV signatures |
-| **Persistence Engine** | `[P]` | Cross-platform backdoor installation via Systemd, Cron (Linux), or Windows Registry Run keys |
-| **Hash Cracker** | `[H]` | Multi-threaded bruteforce tool supporting MD5 and SHA256 with optional symmetric salting |
+| Tool                   | Key   | Description                                                                                                       |
+| ---------------------- | ----- | ----------------------------------------------------------------------------------------------------------------- |
+| **Shell Forge**        | `[9]` | Multipurpose payload generator supporting Bash, Python, PHP, Ruby, and PowerShell for cross-platform exploitation |
+| **Crypt-Keeper**       | `[0]` | Advanced payload encryption and evasion logic with self-decrypting loaders to bypass static AV signatures         |
+| **Persistence Engine** | `[P]` | Cross-platform backdoor installation via Systemd, Cron (Linux), or Windows Registry Run keys                      |
+| **Hash Cracker**       | `[H]` | Multi-threaded bruteforce tool supporting MD5 and SHA256 with optional symmetric salting                          |
 
 ### 4️⃣ System & Stealth
+
 Operational security and environment health.
 
-| Tool | Key | Description |
-|------|-----|-------------|
+| Tool              | Key   | Description                                                                                                      |
+| ----------------- | ----- | ---------------------------------------------------------------------------------------------------------------- |
 | **Setup Auditor** | `[A]` | Performs "pre-flight check" to verify system dependencies and ensure network interface supports packet injection |
-| **Vanish** | `[Q]` | Instantly shuts down the framework and clears operational traces from the console |
+| **Vanish**        | `[Q]` | Instantly shuts down the framework and clears operational traces from the console                                |
 
 ---
 
@@ -118,6 +124,7 @@ git pull origin main
 source venv/bin/activate
 pip install -r requirements.txt --upgrade
 ```
+
 ---
 
 ## 🔐 Security Best Practices

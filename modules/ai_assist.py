@@ -1,7 +1,6 @@
 """
 modules/ai_assist.py — Davoid Cortex (Autonomous AI Agent)
-Upgraded to use LangChain Tools, allowing the local LLM to execute code
-and read databases autonomously.
+Upgraded to use LangChain Tools and modern .invoke() methods.
 """
 
 import os
@@ -9,8 +8,14 @@ import sys
 import requests
 import questionary
 import subprocess
+import warnings
 from rich.console import Console
 from rich.panel import Panel
+
+# --- UI Polish: Silence LangChain Advertisements & Deprecation Warnings ---
+from langchain_core._api.deprecation import LangChainDeprecationWarning
+warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
+warnings.filterwarnings("ignore", message=".*LangChain agents will continue to be supported.*")
 
 # Modern Langchain Agent Imports
 from langchain_ollama import ChatOllama
@@ -133,8 +138,9 @@ class AutonomousCortex:
     def chat(self, user_input: str):
         console.print(f"\n[bold cyan]Cortex ({self.model_name}) thinking and using tools...[/bold cyan]")
         try:
-            # Let the LangChain Agent decide if it needs tools or just chat
-            response = self.agent.run(user_input)
+            # MODERN METHOD: Use .invoke() instead of the deprecated .run()
+            result = self.agent.invoke({"input": user_input})
+            response = result.get("output", str(result))
             
             console.print("\n[bold green]Cortex:[/bold green]")
             console.print(response + "\n")

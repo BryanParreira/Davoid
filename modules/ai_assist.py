@@ -34,10 +34,7 @@ console = Console()
 def tool_query_mission_db(query: str = "") -> str:
     """Reads the penetration testing database for previous findings."""
     try:
-        # Pull the latest findings using the new Encrypted ORM methods
         rows = db.get_critical_logs(limit=10)
-        
-        # If no critical logs, just grab the latest general logs
         if not rows:
             rows = db.get_all()[:10]
             
@@ -46,7 +43,6 @@ def tool_query_mission_db(query: str = "") -> str:
             
         result = "Recent Findings:\n"
         for r in rows:
-            # Safely access the decrypted data using the LogRow attributes
             result += f"- Target: {r.target} | Severity: {r.severity} | Detail: {r.details}\n"
         return result
     except Exception as e:
@@ -63,7 +59,6 @@ def tool_ping_target(target_ip: str) -> str:
 def tool_nmap_scan(target: str) -> str:
     """Runs a fast Nmap port scan on a target."""
     try:
-        # Runs a fast (-F), polite (-T3) scan without DNS resolution (-n)
         output = subprocess.check_output(f"nmap -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT)
         return f"Nmap Scan Results for {target}:\n{output.decode('utf-8')}"
     except Exception as e:
@@ -114,8 +109,12 @@ class AutonomousCortex:
         try:
             from core.context import ctx
             self.model_name = model or ctx.get("AI_MODEL") or "llama3"
+            self.operator_ip = ctx.get("LHOST") or "Unknown"
+            self.gateway_ip = ctx.get("GATEWAY") or "Unknown"
         except Exception:
             self.model_name = model or "llama3"
+            self.operator_ip = "Unknown"
+            self.gateway_ip = "Unknown"
 
         self.base_url = self._auto_detect_ollama()
         
@@ -145,6 +144,7 @@ class AutonomousCortex:
                 agent_kwargs={
                     "system_message": (
                         "You are DAVOID CORTEX, an autonomous Red Team AI agent. "
+                        f"Your current Operator IP is {self.operator_ip} and the Gateway is {self.gateway_ip}. "
                         "You have access to tools to ping targets, scan ports with Nmap, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
                         "If the user asks you to scan, ping, check a target, or exploit a vulnerability, YOU MUST USE YOUR TOOLS. "
                         "Return your final answer in clean Markdown format."
@@ -224,7 +224,7 @@ def run_ai_console():
         console.print(Panel(
             "[bold white]Autonomous Link Active.[/bold white]\n"
             "The AI now has access to the [bold cyan]Full Recon & Exploitation Arsenal[/bold cyan]. Try asking it:\n"
-            " - [dim]'Can you run an nmap scan on 192.168.1.0/24?'[/dim]\n"
+            " - [dim]'Can you run an nmap scan on my gateway?'[/dim]\n"
             " - [dim]'Can you query the database to see what we found?'[/dim]\n"
             "Type 'exit' to return.",
             border_style="cyan"

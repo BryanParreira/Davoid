@@ -9,7 +9,6 @@ import warnings
 import shutil
 import time
 import importlib.util
-import inspect
 from typing import Callable, Optional
 
 import questionary
@@ -38,7 +37,6 @@ try:
     from core.updater import check_version, perform_update
     from core.context import ctx
     from core.database import db
-    from core.plugin import DavoidPlugin
     from core.config import load_config
 except ImportError as e:
     print(f"[!] Critical core component missing. Error: {e}")
@@ -70,13 +68,29 @@ generate_report    = load_module("modules.reporter", "generate_report")
 def detect_network_environment() -> bool:
     try:
         from scapy.all import conf, get_if_addr
+        
+        # 1. Get Interface
         iface = str(conf.iface)
         ctx.set("INTERFACE", iface)
+        
+        # 2. Get Local IP
         local_ip = get_if_addr(iface)
         if local_ip and local_ip != "0.0.0.0":
             ctx.set("LHOST", local_ip)
+            
+        # 3. Get Default Gateway
+        try:
+            gw = conf.route.route("0.0.0.0")[2]
+            if gw and gw != "0.0.0.0":
+                ctx.set("GATEWAY", gw)
+            else:
+                ctx.set("GATEWAY", "Unknown")
+        except Exception:
+            ctx.set("GATEWAY", "Unknown")
+            
         return True
     except Exception:
+        ctx.set("GATEWAY", "Unknown")
         return False
 
 def execute_vanish_protocol() -> None:

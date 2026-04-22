@@ -25,7 +25,6 @@ def check_version():
 def perform_update():
     console.print("\n[bold cyan][*] Initiating Framework Update Sequence...[/bold cyan]")
 
-    # 1. Handle Docker Environment
     if is_running_in_docker():
         console.print(Panel(
             "[bold yellow]Docker Environment Detected[/bold yellow]\n\n"
@@ -39,19 +38,11 @@ def perform_update():
         questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()
         return
 
-    # 2. Handle Native Environment
     try:
-        # Determine the absolute path to the Davoid root directory
         BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         
         console.print("[dim]Pulling latest changes from GitHub...[/dim]")
-        # Run git pull strictly inside the Davoid directory
-        result = subprocess.run(
-            ["git", "pull", "origin", "main"], 
-            cwd=BASE_DIR, 
-            capture_output=True, 
-            text=True
-        )
+        result = subprocess.run(["git", "pull", "origin", "main"], cwd=BASE_DIR, capture_output=True, text=True)
         console.print(f"[white]{result.stdout}[/white]")
         
         if "Already up to date." in result.stdout:
@@ -59,7 +50,6 @@ def perform_update():
             return
 
         console.print("[dim]Updating Python dependencies...[/dim]")
-        # Run pip install strictly inside the Davoid directory and bypass cache warnings
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-r", "requirements.txt"], 
             cwd=BASE_DIR, 
@@ -69,8 +59,9 @@ def perform_update():
         console.print("\n[bold green][+] Update complete! Restarting framework...[/bold green]")
         time.sleep(1.5)
         
-        # Restart the application
-        os.execv(sys.executable, ['python'] + sys.argv)
+        # FOOLPROOF RESTART: Use absolute paths so it never gets lost
+        main_script = os.path.join(BASE_DIR, "main.py")
+        os.execv(sys.executable, [sys.executable, main_script] + sys.argv[1:])
         
     except FileNotFoundError:
         console.print("[bold red][!] Git is not installed or not in PATH.[/bold red]")

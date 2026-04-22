@@ -20,37 +20,31 @@ console = Console()
 
 def _get_critical_logs(limit: int = 10) -> list[dict]:
     if hasattr(db, 'get_critical_logs'):
-        try:
-            return db.get_critical_logs(limit=limit)
-        except Exception:
-            pass
+        try: return db.get_critical_logs(limit=limit)
+        except Exception: pass
     if hasattr(db, 'cursor') and db.cursor is not None:
         try:
             db.cursor.execute(
-                "SELECT timestamp, module, target, severity, details "
-                "FROM logs WHERE severity IN ('HIGH','CRITICAL') "
-                "ORDER BY timestamp DESC LIMIT ?",
+                "SELECT timestamp, module, target, severity, details FROM logs WHERE severity IN ('HIGH','CRITICAL') ORDER BY timestamp DESC LIMIT ?",
                 (limit,)
             )
-            rows = db.cursor.fetchall()
-            return [{"timestamp": r[0], "module": r[1], "target": r[2], "severity": r[3], "details": r[4]} for r in rows]
-        except Exception:
-            pass
+            return [{"timestamp": r[0], "module": r[1], "target": r[2], "severity": r[3], "details": r[4]} for r in db.cursor.fetchall()]
+        except Exception: pass
     return []
 
 class AgenticCortex:
     def __init__(self, model: str = None):
+        # Determine the model
         try:
             from core.context import ctx
-            # For Mac/Windows Docker to reach host Ollama:
-            raw_url = ctx.get("AI_URL") or "http://host.docker.internal:11434/api"
-            self.base_url = raw_url.replace("/api", "") 
             self.model_name = model or ctx.get("AI_MODEL") or "llama3"
         except Exception:
-            self.base_url = "http://host.docker.internal:11434"
             self.model_name = model or "llama3"
 
+        # Auto-detect the correct network route silently
+        self.base_url = self._auto_detect_ollama()
         self.history = []
+        
         self.llm = ChatOllama(
             base_url=self.base_url,
             model=self.model_name,
@@ -63,24 +57,34 @@ class AgenticCortex:
             "Format your output purely in Markdown, prioritizing exact terminal commands."
         ))
 
+    def _auto_detect_ollama(self) -> str:
+        """Silently probe the network to find Ollama, eliminating manual configuration."""
+        urls_to_test = [
+            "http://127.0.0.1:11434",            # Native Mac/Linux
+            "http://host.docker.internal:11434", # Docker Desktop
+            "http://172.17.0.1:11434"            # Raw Docker Bridge
+        ]
+        
+        for url in urls_to_test:
+            try:
+                if requests.get(f"{url}/api/tags", timeout=1).status_code == 200:
+                    return url
+            except requests.exceptions.RequestException:
+                continue
+                
+        # Fallback default
+        return "http://127.0.0.1:11434"
+
     def check_connection(self) -> bool:
-        """Test connection to Ollama instance."""
-        try:
-            r = requests.get(f"{self.base_url}/api/tags", timeout=3)
-            return r.status_code == 200
-        except Exception:
-            return False
+        try: return requests.get(f"{self.base_url}/api/tags", timeout=2).status_code == 200
+        except Exception: return False
 
     def list_models(self) -> list:
-        """Fetch all installed models directly from Ollama API."""
         try:
-            r = requests.get(f"{self.base_url}/api/tags", timeout=3)
+            r = requests.get(f"{self.base_url}/api/tags", timeout=2)
             if r.status_code == 200:
-                data = r.json()
-                # Extract just the names of the models
-                return [model.get("name") for model in data.get("models", [])]
-        except Exception:
-            pass
+                return [model.get("name") for model in r.json().get("models", [])]
+        except Exception: pass
         return []
 
     def chat(self, user_input: str):
@@ -131,13 +135,12 @@ def run_ai_console():
     # 1. Ensure Ollama is running
     if not agent.check_connection():
         console.print(f"[bold red][!] Ollama is unreachable at {agent.base_url}[/bold red]")
-        console.print("Ensure Ollama is running on your Mac and you have pulled a model (`ollama pull llama3`).")
+        console.print("Ensure Ollama is running in the background on your Mac and you have downloaded a model.")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
-    # 2. Fetch available models from Ollama
+    # 2. Fetch available models dynamically
     available_models = agent.list_models()
-    
     if not available_models:
         console.print("[bold red][!] No models found installed in Ollama.[/bold red]")
         console.print("Run `ollama pull llama3` in your terminal to download a model.")
@@ -151,10 +154,9 @@ def run_ai_console():
         style=Q_STYLE
     ).ask()
 
-    if not agent.model_name:  # If user presses Ctrl+C
-        return
+    if not agent.model_name: return
 
-    # 4. Initialize agent with the selected model
+    # 4. Re-initialize with selected model
     agent = AgenticCortex(model=agent.model_name)
 
     while True:
@@ -165,7 +167,9 @@ def run_ai_console():
             choices=["1. Tactical Chat", "2. Analyze Mission Database", "3. Wipe Agent Memory", "Return to Main Menu"],
             style=Q_STYLE
         ).ask()
+        
         if not choice or "Return" in choice: break
+        
         if "Chat" in choice:
             while True:
                 try:

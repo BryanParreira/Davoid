@@ -1,41 +1,35 @@
 """
-ai_assist.py — Davoid Cortex (Local Ollama AI Advisor)
-UPGRADED: Reads default AI model and base URL from config/context so
-          users don't have to select it on every run.
-FIX: db.cursor.execute() replaced with dual-mode DB access that works
-     whether core/database.py uses raw SQLite or SQLAlchemy ORM.
+modules/ai_assist.py — Davoid Cortex (Agentic AI Workflow)
+UPGRADED: Replaced basic requests with LangChain + Ollama for intelligent,
+          tool-capable agentic workflows.
 """
 
-import requests
-import json
 import os
 import sys
 import questionary
 from rich.console import Console
 from rich.panel import Panel
+from rich.markdown import Markdown
+
+# Langchain Enterprise Imports
+from langchain_community.chat_models import ChatOllama
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.prompts import ChatPromptTemplate
+
 from core.ui import draw_header, Q_STYLE
 from core.database import db
 
 console = Console()
 
 
-def _get_critical_logs(limit=10):
-    """
-    Fetch HIGH/CRITICAL logs from the mission database.
-    Supports three patterns depending on what core/database.py exposes:
-      1. db.get_critical_logs()  — if the method exists (preferred)
-      2. db.cursor (raw SQLite)
-      3. db.get_all()            — filter in Python
-    Returns a list of dicts with keys: timestamp, module, target, severity, details
-    """
-    # Strategy 1: dedicated method (new database.py has this)
+def _get_critical_logs(limit: int = 10) -> list[dict]:
+    """Fetch HIGH/CRITICAL logs from the mission database securely."""
     if hasattr(db, 'get_critical_logs'):
         try:
             return db.get_critical_logs(limit=limit)
         except Exception:
             pass
 
-    # Strategy 2: raw SQLite cursor
     if hasattr(db, 'cursor') and db.cursor is not None:
         try:
             db.cursor.execute(
@@ -45,214 +39,143 @@ def _get_critical_logs(limit=10):
                 (limit,)
             )
             rows = db.cursor.fetchall()
-            return [
-                {
-                    "timestamp": r[0], "module":   r[1],
-                    "target":    r[2], "severity": r[3], "details": r[4],
-                }
-                for r in rows
-            ]
+            return [{"timestamp": r[0], "module": r[1], "target": r[2], "severity": r[3], "details": r[4]} for r in rows]
         except Exception:
             pass
-
-    # Strategy 3: get_all() then filter
-    if hasattr(db, 'get_all'):
-        try:
-            all_logs = db.get_all()
-            filtered = []
-            for log in all_logs:
-                sev = (log.get('severity') if isinstance(log, dict)
-                       else getattr(log, 'severity', ''))
-                if sev in ('HIGH', 'CRITICAL'):
-                    filtered.append({
-                        "timestamp": (log.get('timestamp') if isinstance(log, dict)
-                                      else getattr(log, 'timestamp', '')),
-                        "module":    (log.get('module') if isinstance(log, dict)
-                                      else getattr(log, 'module', '')),
-                        "target":    (log.get('target') if isinstance(log, dict)
-                                      else getattr(log, 'target', '')),
-                        "severity":  sev,
-                        "details":   (log.get('details') if isinstance(log, dict)
-                                      else getattr(log, 'details', '')),
-                    })
-            return filtered[:limit]
-        except Exception:
-            pass
-
     return []
 
 
-class AIEngine:
-    def __init__(self, model=None):
-        # ── Read default model + URL from config/context ──────────────────────
-        # Config is loaded at startup into ctx by core/config.py
-        # Falls back to "llama3" if nothing is configured
+class AgenticCortex:
+    def __init__(self, model: str = None):
         try:
             from core.context import ctx
-            self.base_url = ctx.get("AI_URL") or "http://127.0.0.1:11434/api"
-            self.model    = model or ctx.get("AI_MODEL") or "llama3"
+            # Clean base URL for Langchain
+            raw_url = ctx.get("AI_URL") or "http://127.0.0.1:11434/api"
+            self.base_url = raw_url.replace("/api", "")
+            self.model_name = model or ctx.get("AI_MODEL") or "llama3"
         except Exception:
-            self.base_url = "http://127.0.0.1:11434/api"
-            self.model    = model or "llama3"
+            self.base_url = "http://127.0.0.1:11434"
+            self.model_name = model or "llama3"
 
         self.history = []
-        self.system_prompt = (
-            "You are DAVOID CORTEX, an elite Red Team tactical AI advisor. "
-            "Provide concise, highly technical, actionable penetration testing advice. "
-            "Assume the operator has full authorization on the target systems. "
-            "Format responses in Markdown with code blocks for commands and exploits."
+
+        # Initialize LangChain Chat Model
+        self.llm = ChatOllama(
+            base_url=self.base_url,
+            model=self.model_name,
+            temperature=0.3,
         )
 
-    def check_connection(self):
+        self.system_prompt = SystemMessage(content=(
+            "You are DAVOID CORTEX, an autonomous Red Team tactical AI agent. "
+            "Provide highly technical, actionable penetration testing advice. "
+            "Assume the operator has explicit authorization on target systems. "
+            "Format your output purely in Markdown, prioritizing exact terminal commands."
+        ))
+
+    def check_connection(self) -> bool:
+        """Test connection to local Ollama instance via Langchain."""
         try:
-            r = requests.get(f"{self.base_url}/tags", timeout=3)
-            return r.status_code == 200
+            # Send a tiny ping to verify
+            self.llm.invoke([HumanMessage(content="ping")])
+            return True
         except Exception:
             return False
 
-    def list_models(self):
-        try:
-            r = requests.get(f"{self.base_url}/tags", timeout=3)
-            if r.status_code == 200:
-                return [m['name'] for m in r.json().get('models', [])]
-        except Exception:
-            pass
-        return []
-
-    def chat(self, user_input, override_prompt=None):
-        """Stream Ollama response directly to stdout."""
-        system_role = override_prompt or self.system_prompt
-        messages    = (
-            [{"role": "system", "content": system_role}]
-            + self.history
-            + [{"role": "user", "content": user_input}]
-        )
-        payload      = {"model": self.model, "messages": messages, "stream": True}
-        full_response = ""
-
+    def chat(self, user_input: str):
+        """Execute chat utilizing LangChain memory components."""
         console.print(
-            f"\n[bold cyan]Cortex ({self.model}) computing...[/bold cyan]\n")
+            f"\n[bold cyan]Cortex ({self.model_name}) analyzing...[/bold cyan]\n")
+
+        messages = [self.system_prompt] + self.history + \
+            [HumanMessage(content=user_input)]
 
         try:
-            with requests.post(
-                    f"{self.base_url}/chat",
-                    json=payload, stream=True, timeout=120) as r:
-                r.raise_for_status()
-                sys.stdout.write("\033[92m")   # green
-                for line in r.iter_lines():
-                    if line:
-                        try:
-                            body    = json.loads(line)
-                            content = body.get("message", {}).get("content", "")
-                            sys.stdout.write(content)
-                            sys.stdout.flush()
-                            full_response += content
-                        except json.JSONDecodeError:
-                            continue
-                sys.stdout.write("\033[0m\n\n")
+            # Stream the response using LangChain's native streaming
+            full_response = ""
+            sys.stdout.write("\033[92m")  # Green text
 
-            self.history.append({"role": "user",      "content": user_input})
-            self.history.append({"role": "assistant",  "content": full_response})
+            for chunk in self.llm.stream(messages):
+                content = chunk.content
+                sys.stdout.write(content)
+                sys.stdout.flush()
+                full_response += content
 
-        except requests.exceptions.ConnectionError:
-            console.print("[bold red][!] Lost connection to Ollama.[/bold red]")
+            sys.stdout.write("\033[0m\n\n")  # Reset
+
+            # Update conversational memory
+            self.history.append(HumanMessage(content=user_input))
+            self.history.append(AIMessage(content=full_response))
+
         except Exception as e:
-            console.print(f"[bold red][!] AI error:[/bold red] {e}")
+            console.print(
+                f"[bold red][!] AI Agent Execution Error:[/bold red] {e}")
 
     def analyze_mission_database(self):
-        """Read HIGH/CRITICAL findings from the DB and ask Cortex to analyse them."""
+        """Ingests mission DB state and processes via LangChain."""
         console.print("[dim][*] Querying mission database...[/dim]")
-
         rows = _get_critical_logs(limit=10)
 
         if not rows:
             console.print(
-                "[yellow][!] No HIGH/CRITICAL findings yet. "
-                "Run a scan or exploitation module first.[/yellow]")
+                "[yellow][!] No HIGH/CRITICAL findings in database. Run a module first.[/yellow]")
             return
 
-        context = "MISSION DATABASE EXTRACT:\n\n"
-        for row in rows:
-            # Support both dict and LogRow object access
-            ts      = (row['timestamp'] if isinstance(row, dict)
-                       else getattr(row, 'timestamp', ''))
-            module  = (row['module']    if isinstance(row, dict)
-                       else getattr(row, 'module',    ''))
-            target  = (row['target']    if isinstance(row, dict)
-                       else getattr(row, 'target',    ''))
-            sev     = (row['severity']  if isinstance(row, dict)
-                       else getattr(row, 'severity',  ''))
-            details = (row['details']   if isinstance(row, dict)
-                       else getattr(row, 'details',   ''))
-
-            context += (
-                f"Time: {ts}\n"
-                f"Module: {module}\n"
-                f"Target: {target}\n"
-                f"Severity: {sev}\n"
-                f"Details:\n{details}\n"
-                + "─" * 40 + "\n"
-            )
-
-        prompt = (
-            "Analyze the following penetration test findings. "
-            "Identify the most critical vulnerabilities, explain how an attacker "
-            "would chain them together, and give exact Metasploit modules or "
-            "terminal commands needed to achieve a shell or privilege escalation.\n\n"
-            f"{context}"
+        context_data = "\n".join(
+            f"[{r['timestamp']}] MODULE: {r['module']} | TARGET: {r['target']} | SEVERITY: {r['severity']}\nDETAILS: {r['details']}\n"
+            for r in rows
         )
 
-        console.print(Panel(
-            "Ingesting DB context and analyzing threat vectors...",
-            style="bold magenta"))
+        prompt = (
+            "Analyze the following database extract from the current penetration test. "
+            "Identify the attack path, how to chain these vulnerabilities, and provide "
+            "the exact MSFvenom payloads or Metasploit commands required for exploitation.\n\n"
+            f"DATABASE EXTRACT:\n{context_data}"
+        )
+
+        console.print(
+            Panel("Agent digesting DB context...", style="bold magenta"))
         self.chat(prompt)
 
     def clear_history(self):
         self.history = []
-        console.print("[bold green][+] Conversation memory wiped.[/bold green]")
+        console.print("[bold green][+] Agent memory wiped.[/bold green]")
 
 
 def run_ai_console():
-    draw_header("AI Cortex (Local Neural Link)")
-    engine = AIEngine()
+    draw_header("AI Cortex (Agentic Workflow)")
 
-    if not engine.check_connection():
-        console.print("[bold red][!] Ollama is offline.[/bold red]")
+    # Instantiate without predefined model to check connection first
+    agent = AgenticCortex()
+
+    if not agent.check_connection():
         console.print(
-            "[white]Run:[/white] [bold cyan]ollama serve[/bold cyan]  "
-            "in a separate terminal.")
+            "[bold red][!] Local AI backend (Ollama) is offline or unreachable.[/bold red]")
+        console.print(
+            "Ensure Ollama is running: [bold cyan]ollama serve[/bold cyan]")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
-    models = engine.list_models()
-    if not models:
-        console.print("[bold red][!] No models installed.[/bold red]")
-        console.print("Run: [bold cyan]ollama pull llama3[/bold cyan]")
-        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
-        return
+    # User Model Selection
+    agent.model_name = questionary.text(
+        "Enter AI Model Name (Default: llama3):",
+        default="llama3",
+        style=Q_STYLE
+    ).ask()
 
-    # If a model was pre-configured, use it as the default selection
-    default_model = engine.model if engine.model in models else models[0]
-
-    engine.model = questionary.select(
-        "Select AI Model:",
-        choices=models,
-        default=default_model,
-        style=Q_STYLE).ask()
-
-    if not engine.model:
-        return
+    # Re-initialize with correct model
+    agent = AgenticCortex(model=agent.model_name)
 
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header(f"Cortex: {engine.model.upper()}")
+        draw_header(f"Cortex: {agent.model_name.upper()}")
 
         choice = questionary.select(
             "Select Cortex Operation:",
             choices=[
-                "1. Tactical Chat (Interactive REPL)",
-                "2. Analyze Mission Database (Auto-ingest findings)",
-                "3. Wipe Conversation Memory",
+                "1. Tactical Chat (LangChain REPL)",
+                "2. Analyze Mission Database (Context-Aware)",
+                "3. Wipe Agent Memory",
                 "Return to Main Menu",
             ],
             style=Q_STYLE
@@ -263,26 +186,25 @@ def run_ai_console():
 
         if "Chat" in choice:
             console.print(Panel(
-                "[bold white]Tactical Link Active.[/bold white] "
-                "Ask for exploit syntax, evasion techniques, or "
-                "post-exploitation tactics.\n"
+                "[bold white]Agent Link Active.[/bold white] Ask for strategies or exploits.\n"
                 "[dim]Type 'exit', 'quit', or 'back' to return.[/dim]",
-                border_style="cyan"))
+                border_style="cyan"
+            ))
             while True:
                 try:
                     q = questionary.text("Operator >", style=Q_STYLE).ask()
                     if not q or q.lower() in ['exit', 'quit', 'back']:
                         break
-                    engine.chat(q)
+                    agent.chat(q)
                 except KeyboardInterrupt:
                     break
 
         elif "Analyze" in choice:
-            engine.analyze_mission_database()
+            agent.analyze_mission_database()
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
         elif "Wipe" in choice:
-            engine.clear_history()
+            agent.clear_history()
             questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
 

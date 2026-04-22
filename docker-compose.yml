@@ -1,0 +1,16 @@
+# docker-compose.yml
+version: "3.8"
+
+services:
+  davoid:
+    build: .
+    container_name: davoid-core
+    network_mode: "host" # Required for local network scanning
+    volumes:
+      - ./logs:/app/logs
+      - ./payloads:/app/payloads
+      - ./reports:/app/reports
+    environment:
+      - AI_URL=http://127.0.0.1:11434/api
+    stdin_open: true # Required for interactive CLI
+    tty: true # Required for interactive CLI

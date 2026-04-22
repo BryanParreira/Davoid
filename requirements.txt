@@ -23,3 +23,9 @@ paramiko
 stegano
 Pillow
 weasyprint
+# --- NEW ENTERPRISE DEPENDENCIES ---
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-ollama>=0.0.1

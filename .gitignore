@@ -1,21 +1,47 @@
-# Python bytecode (compiled files)
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Virtual Environment (Local to your machine)
-venv/
+*.so
+.Python
 env/
-.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Environment variables / Secrets
+# Davoid Specific
+logs/
+payloads/
+reports/
+clones/
+plugins/__pycache__/
+core/__pycache__/
+modules/__pycache__/
+
+# Environments
 .env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
-# System Files
+# IDEs and OS
+.vscode/
+.idea/
+*.swp
 .DS_Store
 Thumbs.db
-
-# Distribution / Build folders
-dist/
-build/
-*.egg-info/

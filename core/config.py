@@ -8,6 +8,7 @@ FIXES & IMPROVEMENTS:
   - create_default_config() helper to scaffold a config.yaml if missing
   - Config values now actually flow into the app (was previously ignored)
 """
+from __future__ import annotations
 
 import os
 import yaml

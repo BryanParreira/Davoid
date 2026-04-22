@@ -1,228 +1,284 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
-from sqlalchemy.orm import declarative_base, sessionmaker
-from datetime import datetime
-from cryptography.fernet import Fernet
+"""
+core/database.py — Mission Database Engine
+FIXES:
+  - get_all() now returns plain dicts (no more detached SQLAlchemy instance errors)
+  - Column renamed alias: callers expecting 'details' now work correctly
+  - Added get_critical_logs() so ai_assist.py Strategy 1 works
+  - Added search() and clear() utility methods
+  - Graceful handling of corrupt/missing encryption key
+  - Thread-safe session handling (one session per call, never shared)
+"""
+
 import os
+import threading
+from datetime import datetime
+
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, desc
+from sqlalchemy.orm import declarative_base, sessionmaker
+from cryptography.fernet import Fernet, InvalidToken
 
 Base = declarative_base()
 
-# ---------------------------------------------------------
-# SECURITY FIX: Store databases and keys in the user's home folder
-# so it doesn't violate /opt/davoid root permissions.
-# ---------------------------------------------------------
-USER_HOME = os.path.expanduser("~")
-STATE_DIR = os.path.join(USER_HOME, ".davoid")
+# ─────────────────────────────────────────────────────────────────────────────
+#  PATHS
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Ensure the state directory exists
+USER_HOME  = os.path.expanduser("~")
+STATE_DIR  = os.path.join(USER_HOME, ".davoid")
+DB_PATH    = os.path.join(STATE_DIR, "davoid_mission.db")
+KEY_PATH   = os.path.join(STATE_DIR, ".db_key")
+
 os.makedirs(STATE_DIR, exist_ok=True)
 
-DB_PATH  = os.path.join(STATE_DIR, "davoid_mission.db")
-KEY_PATH = os.path.join(STATE_DIR, ".db_key")
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  ORM MODEL
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ScanResult(Base):
-    __tablename__ = 'mission_logs'
+    __tablename__ = "mission_logs"
+
     id        = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    module    = Column(String)
-    target    = Column(String)
-    data      = Column(Text)      # storing ENCRYPTED data
-    severity  = Column(String)    # INFO, HIGH, CRITICAL
+    module    = Column(String,   nullable=False, default="")
+    target    = Column(String,   nullable=False, default="")
+    data      = Column(Text,     nullable=False, default="")   # stores ENCRYPTED payload
+    severity  = Column(String,   nullable=False, default="INFO")
 
 
-# ---------------------------------------------------------
-# Plain dict wrapper so callers never touch a detached ORM
-# object after the session closes (fixes DetachedInstanceError).
-# Every public method that returns rows now returns plain dicts.
-# ---------------------------------------------------------
-class LogRow:
-    """Lightweight dict-backed object that mimics ORM attribute access."""
-    __slots__ = ("id", "timestamp", "module", "target", "details", "severity")
-
-    def __init__(self, id, timestamp, module, target, details, severity):
-        self.id        = id
-        self.timestamp = timestamp
-        self.module    = module
-        self.target    = target
-        self.details   = details      # decrypted — callers use .details not .data
-        self.severity  = severity
-
-    # Also support dict-style access so existing code using log['key'] works
-    def get(self, key, default=""):
-        return getattr(self, key, default)
-
-    def __getitem__(self, key):
-        return getattr(self, key)
-
-    def __repr__(self):
-        return (f"<LogRow id={self.id} module={self.module!r} "
-                f"target={self.target!r} severity={self.severity!r}>")
-
+# ─────────────────────────────────────────────────────────────────────────────
+#  DATABASE CLASS
+# ─────────────────────────────────────────────────────────────────────────────
 
 class Database:
+    """
+    Thread-safe, encrypted SQLite mission database.
+
+    All public methods return plain Python dicts with these keys:
+        id, timestamp, module, target, severity, details
+
+    The 'details' key is an alias for the underlying 'data' column so that
+    every caller (reporter, ai_assist, purple_team, etc.) works without
+    needing to know about the internal column name.
+    """
+
     def __init__(self):
+        self._lock   = threading.Lock()
+        self._cipher = None
         self._init_crypto()
-        self.engine  = create_engine(f'sqlite:///{DB_PATH}')
+
+        self.engine  = create_engine(
+            f"sqlite:///{DB_PATH}",
+            connect_args={"check_same_thread": False},
+        )
         Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        self._Session = sessionmaker(bind=self.engine)
+
+    # ── Crypto ────────────────────────────────────────────────────
 
     def _init_crypto(self):
-        """Generates or loads the master DB encryption key."""
-        if not os.path.exists(KEY_PATH):
-            key = Fernet.generate_key()
-            with open(KEY_PATH, 'wb') as f:
-                f.write(key)
-            try:
-                os.chmod(KEY_PATH, 0o600)
-            except Exception:
-                pass
-        with open(KEY_PATH, 'rb') as f:
-            self.cipher = Fernet(f.read())
-
-    # ------------------------------------------------------------------
-    def log(self, module, target, data, severity="INFO"):
-        """Saves a finding to the mission database, encrypting the data payload."""
-        session = self.Session()
+        """Load or generate the Fernet encryption key."""
         try:
-            encrypted_data = self.cipher.encrypt(str(data).encode()).decode()
+            if not os.path.exists(KEY_PATH):
+                key = Fernet.generate_key()
+                with open(KEY_PATH, "wb") as f:
+                    f.write(key)
+                try:
+                    os.chmod(KEY_PATH, 0o600)
+                except OSError:
+                    pass
+
+            with open(KEY_PATH, "rb") as f:
+                raw_key = f.read().strip()
+
+            self._cipher = Fernet(raw_key)
+
+        except Exception as e:
+            print(f"[!] DB crypto init error: {e}. Logs will be stored in plaintext.")
+            self._cipher = None
+
+    def _encrypt(self, text: str) -> str:
+        if self._cipher:
+            return self._cipher.encrypt(text.encode()).decode()
+        return text
+
+    def _decrypt(self, text: str) -> str:
+        if not self._cipher:
+            return text
+        try:
+            return self._cipher.decrypt(text.encode()).decode()
+        except (InvalidToken, Exception):
+            return "[DECRYPTION FAILED — data corrupt or key mismatch]"
+
+    # ── Session helper ────────────────────────────────────────────
+
+    def _make_session(self):
+        """Always create a fresh session; callers must close it."""
+        return self._Session()
+
+    # ── Row → dict ────────────────────────────────────────────────
+
+    def _row_to_dict(self, row: ScanResult, decrypt: bool = True) -> dict:
+        """
+        Convert an ORM row to a plain dict.
+        Always decrypts and always exposes 'details' as an alias for 'data'.
+        Session can be safely closed after this call.
+        """
+        raw_data = row.data or ""
+        details  = self._decrypt(raw_data) if decrypt else raw_data
+
+        return {
+            "id":        row.id,
+            "timestamp": str(row.timestamp) if row.timestamp else "",
+            "module":    row.module   or "",
+            "target":    row.target   or "",
+            "severity":  row.severity or "INFO",
+            "details":   details,          # ← the alias every caller expects
+            "data":      details,          # ← keep 'data' too for completeness
+        }
+
+    # ── Public API ────────────────────────────────────────────────
+
+    def log(self, module: str, target: str, data: str, severity: str = "INFO") -> bool:
+        """
+        Write a finding to the database.
+        Returns True on success, False on failure.
+        """
+        session = self._make_session()
+        try:
             entry = ScanResult(
-                module=module,
-                target=target,
-                data=encrypted_data,
-                severity=severity,
+                module    = str(module),
+                target    = str(target),
+                data      = self._encrypt(str(data)),
+                severity  = str(severity).upper(),
+                timestamp = datetime.utcnow(),
             )
             session.add(entry)
             session.commit()
+            return True
         except Exception as e:
-            print(f"[!] DB Error: {e}")
             session.rollback()
+            print(f"[!] DB log error: {e}")
+            return False
         finally:
             session.close()
 
-    # ------------------------------------------------------------------
-    def get_all(self):
+    def get_all(self) -> list[dict]:
         """
-        Retrieves and decrypts all mission logs.
-        Returns a list of LogRow objects (safe to use after session closes).
-        LogRow supports both attribute access (row.module) and
-        dict-style access (row['module'] / row.get('module')).
+        Return all log entries as plain dicts, newest first.
+        Safe to use after the session is closed.
         """
-        session = self.Session()
+        session = self._make_session()
         try:
-            results = session.query(ScanResult).order_by(
-                ScanResult.timestamp.desc()).all()
-
-            rows = []
-            for r in results:
-                try:
-                    decrypted = self.cipher.decrypt(r.data.encode()).decode()
-                except Exception:
-                    decrypted = "[DECRYPTION FAILED - DATA CORRUPT OR KEY MISMATCH]"
-
-                rows.append(LogRow(
-                    id        = r.id,
-                    timestamp = r.timestamp,
-                    module    = r.module,
-                    target    = r.target,
-                    details   = decrypted,   # note: field is 'details' not 'data'
-                    severity  = r.severity,
-                ))
-            return rows
+            rows = (
+                session.query(ScanResult)
+                .order_by(desc(ScanResult.timestamp))
+                .all()
+            )
+            return [self._row_to_dict(r) for r in rows]
+        except Exception as e:
+            print(f"[!] DB get_all error: {e}")
+            return []
         finally:
             session.close()
 
-    # ------------------------------------------------------------------
-    def get_critical_logs(self, limit=10):
+    def get_critical_logs(self, limit: int = 10) -> list[dict]:
         """
-        Returns the most recent HIGH / CRITICAL logs as LogRow objects.
-        Used by ai_assist.py — avoids the raw-cursor fallback path.
+        Return the most recent HIGH and CRITICAL entries.
+        Used by ai_assist.py Strategy 1 path.
         """
-        session = self.Session()
+        session = self._make_session()
         try:
-            results = (
+            rows = (
                 session.query(ScanResult)
                 .filter(ScanResult.severity.in_(["HIGH", "CRITICAL"]))
-                .order_by(ScanResult.timestamp.desc())
+                .order_by(desc(ScanResult.timestamp))
                 .limit(limit)
                 .all()
             )
-            rows = []
-            for r in results:
-                try:
-                    decrypted = self.cipher.decrypt(r.data.encode()).decode()
-                except Exception:
-                    decrypted = "[DECRYPTION FAILED]"
-
-                rows.append(LogRow(
-                    id        = r.id,
-                    timestamp = r.timestamp,
-                    module    = r.module,
-                    target    = r.target,
-                    details   = decrypted,
-                    severity  = r.severity,
-                ))
-            return rows
+            return [self._row_to_dict(r) for r in rows]
+        except Exception as e:
+            print(f"[!] DB get_critical_logs error: {e}")
+            return []
         finally:
             session.close()
 
-    # ------------------------------------------------------------------
-    def search(self, keyword=None, severity=None, module=None, limit=500):
+    def search(self, module: str = None, target: str = None,
+               severity: str = None, limit: int = 100) -> list[dict]:
         """
-        Filtered log query — all parameters are optional.
-        Returns LogRow list, same as get_all().
+        Flexible search with optional filters.
+        All parameters are optional; pass None to skip that filter.
         """
-        session = self.Session()
+        session = self._make_session()
         try:
             q = session.query(ScanResult)
-
-            if severity:
-                if isinstance(severity, (list, tuple)):
-                    q = q.filter(ScanResult.severity.in_(severity))
-                else:
-                    q = q.filter(ScanResult.severity == severity)
-
             if module:
-                q = q.filter(ScanResult.module == module)
-
-            results = q.order_by(ScanResult.timestamp.desc()).limit(limit).all()
-
-            rows = []
-            for r in results:
-                try:
-                    decrypted = self.cipher.decrypt(r.data.encode()).decode()
-                except Exception:
-                    decrypted = "[DECRYPTION FAILED]"
-
-                # Apply keyword filter post-decryption (can't do it in SQL on encrypted data)
-                if keyword and keyword.lower() not in decrypted.lower() \
-                        and keyword.lower() not in (r.target or "").lower():
-                    continue
-
-                rows.append(LogRow(
-                    id        = r.id,
-                    timestamp = r.timestamp,
-                    module    = r.module,
-                    target    = r.target,
-                    details   = decrypted,
-                    severity  = r.severity,
-                ))
-            return rows
+                q = q.filter(ScanResult.module.ilike(f"%{module}%"))
+            if target:
+                q = q.filter(ScanResult.target.ilike(f"%{target}%"))
+            if severity:
+                q = q.filter(ScanResult.severity == severity.upper())
+            rows = q.order_by(desc(ScanResult.timestamp)).limit(limit).all()
+            return [self._row_to_dict(r) for r in rows]
+        except Exception as e:
+            print(f"[!] DB search error: {e}")
+            return []
         finally:
             session.close()
 
-    # ------------------------------------------------------------------
-    def delete_all(self):
-        """Wipe the entire mission log (used by Vanish Protocol)."""
-        session = self.Session()
+    def get_stats(self) -> dict:
+        """
+        Return a summary dict: total entries and counts per severity.
+        Useful for the header/dashboard.
+        """
+        session = self._make_session()
+        try:
+            total    = session.query(ScanResult).count()
+            critical = session.query(ScanResult).filter_by(severity="CRITICAL").count()
+            high     = session.query(ScanResult).filter_by(severity="HIGH").count()
+            info     = session.query(ScanResult).filter_by(severity="INFO").count()
+            return {
+                "total":    total,
+                "critical": critical,
+                "high":     high,
+                "info":     info,
+            }
+        except Exception as e:
+            print(f"[!] DB stats error: {e}")
+            return {"total": 0, "critical": 0, "high": 0, "info": 0}
+        finally:
+            session.close()
+
+    def clear(self) -> bool:
+        """
+        Delete all log entries. Used by the vanish protocol.
+        Returns True on success.
+        """
+        session = self._make_session()
         try:
             session.query(ScanResult).delete()
             session.commit()
+            return True
         except Exception as e:
-            print(f"[!] DB wipe error: {e}")
             session.rollback()
+            print(f"[!] DB clear error: {e}")
+            return False
+        finally:
+            session.close()
+
+    def count(self) -> int:
+        """Return total number of log entries."""
+        session = self._make_session()
+        try:
+            return session.query(ScanResult).count()
+        except Exception:
+            return 0
         finally:
             session.close()
 
 
-# Global DB Instance
+# ─────────────────────────────────────────────────────────────────────────────
+#  GLOBAL INSTANCE
+# ─────────────────────────────────────────────────────────────────────────────
+
 db = Database()

@@ -18,7 +18,7 @@ Deploy Davoid globally on your Mac or Linux system. This command clones the repo
    git clone https://github.com/BryanParreira/Davoid.git
    cd Davoid
    chmod +x install.sh
-   ./install.sh
+   sudo bash install.sh
 
 ```
 

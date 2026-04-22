@@ -71,6 +71,18 @@ class AgenticCortex:
         except Exception:
             return False
 
+    def list_models(self) -> list:
+        """Fetch all installed models directly from Ollama API."""
+        try:
+            r = requests.get(f"{self.base_url}/api/tags", timeout=3)
+            if r.status_code == 200:
+                data = r.json()
+                # Extract just the names of the models
+                return [model.get("name") for model in data.get("models", [])]
+        except Exception:
+            pass
+        return []
+
     def chat(self, user_input: str):
         console.print(f"\n[bold cyan]Cortex ({self.model_name}) analyzing...[/bold cyan]\n")
         messages = [self.system_prompt] + self.history + [HumanMessage(content=user_input)]
@@ -116,13 +128,33 @@ def run_ai_console():
     draw_header("AI Cortex (Agentic Workflow)")
     agent = AgenticCortex()
 
+    # 1. Ensure Ollama is running
     if not agent.check_connection():
         console.print(f"[bold red][!] Ollama is unreachable at {agent.base_url}[/bold red]")
         console.print("Ensure Ollama is running on your Mac and you have pulled a model (`ollama pull llama3`).")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 
-    agent.model_name = questionary.text("Enter AI Model Name (Default: llama3):", default="llama3", style=Q_STYLE).ask()
+    # 2. Fetch available models from Ollama
+    available_models = agent.list_models()
+    
+    if not available_models:
+        console.print("[bold red][!] No models found installed in Ollama.[/bold red]")
+        console.print("Run `ollama pull llama3` in your terminal to download a model.")
+        questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+        return
+
+    # 3. Present the Dynamic Dropdown
+    agent.model_name = questionary.select(
+        "Select an Installed AI Model:",
+        choices=available_models,
+        style=Q_STYLE
+    ).ask()
+
+    if not agent.model_name:  # If user presses Ctrl+C
+        return
+
+    # 4. Initialize agent with the selected model
     agent = AgenticCortex(model=agent.model_name)
 
     while True:

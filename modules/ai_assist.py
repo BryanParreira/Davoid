@@ -1,6 +1,6 @@
 """
-modules/ai_assist.py — Davoid Cortex (Autonomous AI Agent)
-True LangChain implementation. The AI has tools to ping targets and read databases autonomously.
+modules/ai_assist.py — Davoid Cortex (Ultimate Autonomous Agent)
+Equipped with Nmap, Metasploit, DNS Recon, Web Recon, DB Query, and Ping.
 """
 
 import os
@@ -12,14 +12,15 @@ import warnings
 from rich.console import Console
 from rich.panel import Panel
 
-# --- SILENCE ALL LANGCHAIN WARNINGS COMPLETELY ---
+# --- SILENCE ALL WARNINGS ---
 warnings.filterwarnings("ignore")
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*initialize_agent.*")
 
 # Modern Langchain Agent Imports
 from langchain_ollama import ChatOllama
 from langchain.agents import initialize_agent, AgentType, Tool
-from langchain_core.messages import SystemMessage
 
 from core.ui import draw_header, Q_STYLE
 from core.database import db
@@ -27,11 +28,11 @@ from core.database import db
 console = Console()
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  AGENT TOOLS (Functions the AI executes autonomously)
+#  ARSENAL: AUTONOMOUS AGENT TOOLS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def tool_query_mission_db(query: str = "") -> str:
-    """Tool for the AI to read the penetration testing database."""
+    """Reads the penetration testing database for previous findings."""
     if hasattr(db, 'cursor') and db.cursor is not None:
         try:
             db.cursor.execute("SELECT timestamp, module, target, severity, details FROM logs ORDER BY timestamp DESC LIMIT 10")
@@ -47,12 +48,60 @@ def tool_query_mission_db(query: str = "") -> str:
     return "Database not accessible."
 
 def tool_ping_target(target_ip: str) -> str:
-    """Tool for the AI to check if a target is online."""
+    """Checks if a target is online using ICMP Ping."""
     try:
         output = subprocess.check_output(f"ping -c 1 -W 1 {target_ip}", shell=True, stderr=subprocess.STDOUT)
         return f"Target {target_ip} is ONLINE.\n{output.decode('utf-8')}"
     except subprocess.CalledProcessError:
         return f"Target {target_ip} is OFFLINE or blocking ICMP."
+
+def tool_nmap_scan(target: str) -> str:
+    """Runs a fast Nmap port scan on a target."""
+    try:
+        # Runs a fast (-F), polite (-T3) scan without DNS resolution (-n)
+        output = subprocess.check_output(f"nmap -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT)
+        return f"Nmap Scan Results for {target}:\n{output.decode('utf-8')}"
+    except Exception as e:
+        return f"Nmap scan failed: {e}"
+
+def tool_run_metasploit(commands: str) -> str:
+    """Executes a Metasploit exploit autonomously."""
+    try:
+        # Ensure it always exits so the AI doesn't hang the terminal
+        if "exit" not in commands:
+            commands += "; exit"
+            
+        # Run msfconsole silently (-q) and execute the AI's command string (-x)
+        output = subprocess.check_output(
+            f"msfconsole -q -x '{commands}'", 
+            shell=True, 
+            stderr=subprocess.STDOUT,
+            timeout=120 # 2 minute timeout so it doesn't hang forever
+        )
+        return f"Metasploit Execution Results:\n{output.decode('utf-8')}"
+    except subprocess.TimeoutExpired:
+        return "Metasploit execution timed out after 120 seconds. Exploit may have failed or required interaction."
+    except Exception as e:
+        return f"Metasploit failed: {e}"
+
+def tool_dns_recon(domain: str) -> str:
+    """Performs DNS lookup on a domain to find IP addresses."""
+    try:
+        output = subprocess.check_output(f"nslookup {domain}", shell=True, stderr=subprocess.STDOUT)
+        return f"DNS Results for {domain}:\n{output.decode('utf-8')}"
+    except Exception as e:
+        return f"DNS lookup failed: {e}"
+
+def tool_web_headers(url: str) -> str:
+    """Grabs HTTP headers from a web server to identify software versions."""
+    if not url.startswith("http"):
+        url = "http://" + url
+    try:
+        r = requests.head(url, timeout=5, allow_redirects=True)
+        headers_str = "\n".join([f"{k}: {v}" for k, v in r.headers.items()])
+        return f"HTTP Headers for {url}:\n{headers_str}"
+    except Exception as e:
+        return f"Failed to connect to web server: {e}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CORTEX ENGINE
@@ -68,25 +117,21 @@ class AutonomousCortex:
 
         self.base_url = self._auto_detect_ollama()
         
-        # Initialize the LLM with low temperature for tool accuracy
+        # Initialize the LLM with Low Temperature for accurate tool execution
         self.llm = ChatOllama(
             base_url=self.base_url,
             model=self.model_name,
             temperature=0.1, 
         )
         
-        # Register the Tools
+        # Register the Full Arsenal of Tools
         self.tools = [
-            Tool(
-                name="QueryMissionDatabase",
-                func=tool_query_mission_db,
-                description="Use this to check what vulnerabilities have been found in the database."
-            ),
-            Tool(
-                name="PingTarget",
-                func=tool_ping_target,
-                description="Use this to check if an IP address is online. Input must be an IP (e.g., 192.168.1.5)."
-            )
+            Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to see what vulnerabilities or targets have been saved to the database."),
+            Tool(name="PingTarget", func=tool_ping_target, description="Use to check if an IP address is online. Input: exactly an IP or Domain."),
+            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input: exactly an IP or Domain."),
+            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Use to execute Metasploit exploits. Input must be semi-colon separated msfconsole commands. Example: 'use exploit/windows/smb/ms17_010_eternalblue; set RHOSTS 192.168.1.5; exploit'"),
+            Tool(name="DNSRecon", func=tool_dns_recon, description="Use to resolve a domain name to an IP address using DNS. Input: a domain name (e.g., google.com)."),
+            Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Use to grab HTTP headers from a web server to find software versions. Input: an IP or Domain.")
         ]
         
         # Suppress standard output warnings while creating agent
@@ -101,8 +146,9 @@ class AutonomousCortex:
                 agent_kwargs={
                     "system_message": (
                         "You are DAVOID CORTEX, an autonomous Red Team AI agent. "
-                        "You have access to tools to query the database and ping targets. "
-                        "Always use your tools if you need context to answer the user's question."
+                        "You have access to tools to ping targets, scan ports with Nmap, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
+                        "If the user asks you to scan, ping, check a target, or exploit a vulnerability, YOU MUST USE YOUR TOOLS. "
+                        "Do not guess the answer. Return your final answer in clean Markdown format."
                     )
                 }
             )
@@ -134,9 +180,9 @@ class AutonomousCortex:
         return []
 
     def chat(self, user_input: str):
-        console.print(f"\n[bold cyan]Cortex ({self.model_name}) thinking and running tools...[/bold cyan]")
+        console.print(f"\n[bold cyan]Cortex ({self.model_name}) thinking and deploying tools...[/bold cyan]")
         try:
-            # Execute the LangChain Agent
+            # Execute the LangChain Agent using the modern invoke method
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 result = self.agent.invoke({"input": user_input})
@@ -180,9 +226,10 @@ def run_ai_console():
         
         console.print(Panel(
             "[bold white]Autonomous Link Active.[/bold white]\n"
-            "The AI now has access to [cyan]Tools[/cyan]. Try asking it:\n"
-            " - [dim]'What did we find in the database so far?'[/dim]\n"
-            " - [dim]'Can you check if 8.8.8.8 is online?'[/dim]\n"
+            "The AI now has access to the [bold cyan]Full Recon & Exploitation Arsenal[/bold cyan]. Try asking it:\n"
+            " - [dim]'Can you run an nmap scan on 192.168.1.5?'[/dim]\n"
+            " - [dim]'Can you try to exploit 192.168.1.5 using ms17_010_eternalblue?'[/dim]\n"
+            " - [dim]'Can you grab the web headers for google.com?'[/dim]\n"
             "Type 'exit' to return.",
             border_style="cyan"
         ))

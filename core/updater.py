@@ -41,9 +41,17 @@ def perform_update():
 
     # 2. Handle Native Environment
     try:
+        # Determine the absolute path to the Davoid root directory
+        BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        
         console.print("[dim]Pulling latest changes from GitHub...[/dim]")
-        # Run git pull
-        result = subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True)
+        # Run git pull strictly inside the Davoid directory
+        result = subprocess.run(
+            ["git", "pull", "origin", "main"], 
+            cwd=BASE_DIR, 
+            capture_output=True, 
+            text=True
+        )
         console.print(f"[white]{result.stdout}[/white]")
         
         if "Already up to date." in result.stdout:
@@ -51,7 +59,12 @@ def perform_update():
             return
 
         console.print("[dim]Updating Python dependencies...[/dim]")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+        # Run pip install strictly inside the Davoid directory and bypass cache warnings
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-r", "requirements.txt"], 
+            cwd=BASE_DIR, 
+            check=True
+        )
         
         console.print("\n[bold green][+] Update complete! Restarting framework...[/bold green]")
         time.sleep(1.5)

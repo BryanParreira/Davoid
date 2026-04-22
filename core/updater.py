@@ -1,224 +1,67 @@
+"""
+core/updater.py — Enterprise Update Manager
+Self-aware updater that handles native pulls or provides Docker rebuild instructions.
+"""
+
 import os
 import sys
-import shutil
-import subprocess
-import requests
-import questionary
 import time
+import subprocess
+import questionary
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-from rich.table import Table
-from rich import box
 from core.ui import Q_STYLE
 
 console = Console()
 
-# --- CONFIGURATION ---
-VERSION = "1.2.0"
-REPO_URL = "https://raw.githubusercontent.com/BryanParreira/Davoid/main/core/updater.py"
-INSTALL_DIR = "/opt/davoid"
-BACKUP_DIR = "/tmp/davoid_backup"
-
+def is_running_in_docker() -> bool:
+    """Detects if the framework is currently sandboxed."""
+    return os.path.exists('/.dockerenv')
 
 def check_version():
-    """Passive background version check."""
-    try:
-        response = requests.get(REPO_URL, timeout=3)
-        if response.status_code == 200:
-            for line in response.text.splitlines():
-                if "VERSION =" in line:
-                    parts = line.split('"')
-                    if len(parts) >= 2:
-                        remote_version = parts[1]
-                        if remote_version != VERSION:
-                            return remote_version
-    except Exception:
-        pass
-    return None
-
-
-def create_snapshot():
-    """Creates a fail-safe backup before updating."""
-    try:
-        if os.path.exists(BACKUP_DIR):
-            shutil.rmtree(BACKUP_DIR, ignore_errors=True)
-        shutil.copytree(INSTALL_DIR, BACKUP_DIR, ignore=shutil.ignore_patterns(
-            'venv', '.git', '__pycache__'))
-        return True
-    except Exception as e:
-        console.print(f"[bold red][!] Snapshot Failed:[/bold red] {e}")
-        return False
-
-
-def rollback():
-    """Restores the framework to the last stable snapshot."""
-    console.print(
-        "\n[bold red on white] WARNING: UPDATE INTERRUPTED. INITIATING ROLLBACK SEQUENCE [/bold red on white]")
-    try:
-        if not os.path.exists(BACKUP_DIR):
-            return console.print("[bold red][!] Critical: No backup found to restore from.[/bold red]")
-
-        with console.status("[bold red]Restoring previous stable snapshot...", spinner="bouncingBar"):
-            for item in os.listdir(BACKUP_DIR):
-                s = os.path.join(BACKUP_DIR, item)
-                d = os.path.join(INSTALL_DIR, item)
-                if os.path.isdir(s):
-                    shutil.rmtree(d, ignore_errors=True)
-                    shutil.copytree(s, d, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(s, d)
-            time.sleep(1)
-
-        console.print(
-            "[bold green][+] Rollback Successful. Framework integrity restored.[/bold green]")
-    except Exception as e:
-        console.print(
-            f"[bold red][!] Total System Failure during rollback: {e}[/bold red]")
-
+    """Placeholder for future remote version checking against GitHub API."""
+    pass
 
 def perform_update():
-    # --- SEAMLESS IN-APP SUDO ESCALATION ---
-    if hasattr(os, 'geteuid') and os.geteuid() != 0:
-        console.print(
-            "\n[bold yellow][*] Framework updates require system permissions.[/bold yellow]")
-        console.print(
-            "[dim]You will now be prompted for your local password to authorize the update...[/dim]\n")
-        time.sleep(1)
+    console.print("\n[bold cyan][*] Initiating Framework Update Sequence...[/bold cyan]")
 
-        try:
-            os.execvp("sudo", ["sudo", sys.executable,
-                      sys.argv[0], "--update"])
-        except Exception as e:
-            console.print(
-                f"[red][!] Failed to seamlessly escalate privileges: {e}[/red]")
-            sys.exit(1)
-    # ---------------------------------------
-
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-    console.print(Panel(
-        "[bold white]DAVOID FRAMEWORK : OVER-THE-AIR (OTA) UPDATE[/bold white]\n"
-        "[dim]Establishing secure uplink to Mainframe Repository...[/dim]",
-        border_style="bold red",
-        expand=True
-    ))
-
-    if not os.path.exists(INSTALL_DIR):
-        console.print(
-            f"[bold red][!] Critical Error:[/bold red] Installation directory {INSTALL_DIR} not found.")
+    # 1. Handle Docker Environment
+    if is_running_in_docker():
+        console.print(Panel(
+            "[bold yellow]Docker Environment Detected[/bold yellow]\n\n"
+            "Because Davoid is securely sandboxed in a container, it cannot safely overwrite host files.\n"
+            "To install the latest updates, exit the framework and run the following on your host terminal:\n\n"
+            "[bold cyan]cd davoid[/bold cyan]\n"
+            "[bold cyan]git pull origin main[/bold cyan]\n"
+            "[bold cyan]./install.sh[/bold cyan]",
+            border_style="yellow"
+        ))
+        questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()
         return
 
-    console.print(
-        "[cyan][*] Initializing pre-flight snapshot (Creating backup restore point)...[/cyan]")
-    if not create_snapshot():
-        if not questionary.confirm("Snapshot failed. Proceed with update anyway? (Dangerous)", default=False, style=Q_STYLE).ask():
-            console.print("[yellow][*] Update aborted by user.[/yellow]")
-            return
-    else:
-        console.print(
-            "[green][+] Snapshot secured at /tmp/davoid_backup[/green]\n")
-
+    # 2. Handle Native Environment
     try:
-        with Progress(
-            SpinnerColumn("dots2", style="bold red"),
-            TextColumn("[bold white]{task.description}[/bold white]"),
-            BarColumn(bar_width=45, style="dark_red",
-                      complete_style="bold red", finished_style="bold green"),
-            TextColumn("[bold red]{task.percentage:>3.0f}%[/bold red]"),
-            console=console
-        ) as progress:
+        console.print("[dim]Pulling latest changes from GitHub...[/dim]")
+        # Run git pull
+        result = subprocess.run(["git", "pull", "origin", "main"], capture_output=True, text=True)
+        console.print(f"[white]{result.stdout}[/white]")
+        
+        if "Already up to date." in result.stdout:
+            questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()
+            return
 
-            task_git = progress.add_task(
-                "Synchronizing Core Modules (Git)", total=3)
-            os.chdir(INSTALL_DIR)
-
-            subprocess.run(["git", "config", "--global", "--add",
-                           "safe.directory", INSTALL_DIR], check=False, capture_output=True)
-            subprocess.run(["git", "fetch", "--all"],
-                           check=True, capture_output=True)
-            progress.update(task_git, advance=1)
-
-            subprocess.run(["git", "reset", "--hard", "origin/main"],
-                           check=True, capture_output=True)
-            progress.update(task_git, advance=1)
-
-            subprocess.run(["git", "pull", "origin", "main"],
-                           check=True, capture_output=True)
-            progress.update(task_git, advance=1)
-
-            task_pip = progress.add_task(
-                "Updating Virtual Environment (Pip)", total=1)
-            pip_path = os.path.join(INSTALL_DIR, "venv/bin/pip")
-            req_path = os.path.join(INSTALL_DIR, "requirements.txt")
-
-            if os.path.exists(req_path):
-                subprocess.run([pip_path, "install", "-r", req_path],
-                               check=True, capture_output=True)
-            progress.update(task_pip, advance=1)
-
-            task_mig = progress.add_task(
-                "Applying Secure Rootless Capabilities", total=1)
-            if hasattr(os, 'geteuid') and os.geteuid() == 0:
-                subprocess.run(["chown", "-R", "root:root",
-                               INSTALL_DIR], check=False)
-                subprocess.run(
-                    ["chmod", "-R", "755", INSTALL_DIR], check=False)
-
-                venv_python = os.path.join(INSTALL_DIR, "venv/bin/python3")
-                # FIX: Only apply setcap if on Linux. macOS doesn't support it.
-                if os.path.exists(venv_python) and sys.platform != "darwin":
-                    subprocess.run(
-                        ["setcap", "cap_net_raw,cap_net_admin=eip", venv_python], check=False)
-            progress.update(task_mig, advance=1)
-
-        console.print("\n")
-        table = Table(title="[bold white]SYSTEM INTEGRITY DIAGNOSTICS[/bold white]",
-                      border_style="red", box=box.SQUARE, expand=True)
-        table.add_column("Component Layer", style="cyan")
-        table.add_column("Integrity Status",
-                         style="bold green", justify="right")
-
-        table.add_row("Pre-Update Snapshot",
-                      "[bold green]VERIFIED[/bold green]")
-        table.add_row("Core Engine & Modules",
-                      "[bold green]SYNCHRONIZED[/bold green]")
-        table.add_row("Python Dependencies",
-                      "[bold green]OPTIMIZED[/bold green]")
-
-        if hasattr(os, 'geteuid') and os.geteuid() == 0:
-            table.add_row("Rootless Sandbox",
-                          "[bold green]MIGRATED[/bold green]")
-
-        console.print(table)
-
-        console.print(
-            "\n[bold red][+] Update Complete. Weapon systems primed.[/bold red]")
-
-        if hasattr(os, 'geteuid') and os.geteuid() == 0 and sys.platform != "darwin":
-            console.print(
-                "[bold yellow][!] SECURITY MIGRATION COMPLETE: You no longer need 'sudo' to run Davoid (on Linux).[/bold yellow]")
-            console.print(
-                "[dim]Please exit and run 'davoid' as a standard user from now on.[/dim]")
-
-        console.print("[dim]Press Enter to reboot Davoid...[/dim]")
-        input()
-        sys.exit(0)
-
-    except subprocess.CalledProcessError as e:
-        console.print(
-            f"\n[bold red][!] Update Critical Failure: Command '{e.cmd}' returned non-zero exit status {e.returncode}.[/bold red]")
-        if e.stderr:
-            console.print(
-                f"[dim]Git output: {e.stderr.decode('utf-8', errors='ignore')}[/dim]")
-        rollback()
-        input("\nPress Enter to exit...")
+        console.print("[dim]Updating Python dependencies...[/dim]")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+        
+        console.print("\n[bold green][+] Update complete! Restarting framework...[/bold green]")
+        time.sleep(1.5)
+        
+        # Restart the application
+        os.execv(sys.executable, ['python'] + sys.argv)
+        
+    except FileNotFoundError:
+        console.print("[bold red][!] Git is not installed or not in PATH.[/bold red]")
+        questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()
     except Exception as e:
-        console.print(
-            f"\n[bold red][!] Update Critical Failure:[/bold red] {e}")
-        rollback()
-        input("\nPress Enter to exit...")
-
-
-if __name__ == "__main__":
-    perform_update()
+        console.print(f"[bold red][!] Update failed:[/bold red] {e}")
+        questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()

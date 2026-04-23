@@ -80,7 +80,6 @@ def tool_nmap_scan(target: str) -> str:
         console.print("[yellow][-] Scan denied by operator.[/yellow]")
         return "Operator denied the Nmap scan. Do not attempt to scan this target again unless asked."
 
-    # Map choice to safe argument arrays
     if "Quick" in profile:
         args = ["-Pn", "-F", "-T4", "--open"]
     elif "Standard" in profile:
@@ -102,7 +101,6 @@ def tool_nmap_scan(target: str) -> str:
         return f"Nmap scan failed: {e}"
 
 def tool_shodan_lookup(ip: str) -> str:
-    """Uses the free InternetDB API (Shodan tier) to find open ports and CVEs."""
     try:
         res = requests.get(f"https://internetdb.shodan.io/{ip.strip()}", timeout=10)
         if res.status_code == 200:
@@ -113,7 +111,6 @@ def tool_shodan_lookup(ip: str) -> str:
         return f"Shodan lookup failed: {e}"
 
 def tool_subdomain_recon(domain: str) -> str:
-    """Quickly pulls passive subdomains using crt.sh"""
     domain = domain.strip()
     try:
         url = f"https://crt.sh/?q=%.{domain}&output=json"
@@ -124,7 +121,7 @@ def tool_subdomain_recon(domain: str) -> str:
                 for sub in entry.get('name_value', '').split('\n'):
                     if not sub.startswith('*') and domain in sub:
                         raw.add(sub.strip().lower())
-            return f"Passive subdomains discovered for {domain}: " + ", ".join(list(raw)[:20])
+            return f"Passive subdomains discovered for {domain}:\n" + "\n".join(f"- {sub}" for sub in list(raw)[:20])
         return "Subdomain lookup failed: non-200 status code."
     except Exception as e:
         return f"Subdomain lookup failed: {e}"
@@ -148,7 +145,7 @@ def tool_web_headers(url: str) -> str:
         url = "http://" + url
     try:
         r = requests.head(url, timeout=5, allow_redirects=True)
-        headers_str = "\n".join([f"{k}: {v}" for k, v in r.headers.items()])
+        headers_str = "\n".join([f"- **{k}**: {v}" for k, v in r.headers.items()])
         return f"HTTP Headers for {url}:\n{headers_str}"
     except Exception as e:
         return f"Failed to connect to web server: {e}"
@@ -222,7 +219,13 @@ class AutonomousCortex:
             "If the user asks you to scan, gather intel, or exploit a target, YOU MUST USE YOUR TOOLS. "
             "IMPORTANT: When you use Nmap or Metasploit, the interface will automatically pause and ask the human operator for authorization. If the operator denies the action, acknowledge the denial and suggest a different approach. "
             "Think step-by-step. Use Shodan and SubdomainRecon before active Nmap scans to stay stealthy if requested. "
-            "Return your final answer in clean Markdown format."
+            "\n\n--- CRITICAL FORMATTING INSTRUCTIONS ---\n"
+            "You MUST format your final answers cleanly and professionally using Markdown. DO NOT output massive walls of raw text.\n"
+            "1. For Nmap and Shodan: ALWAYS output a detailed Markdown table (Port, State, Service, Version/Info). Never summarize ports into a paragraph.\n"
+            "2. For Subdomains and DNS: Output a clean, bulleted list of discovered assets.\n"
+            "3. For Web Headers and Ping: Use clean Markdown key-value formatting.\n"
+            "4. For Metasploit: Provide a structured 'Action Report' block showing the Exploit Status and any critical session output.\n"
+            "5. ALWAYS conclude your response with a brief **Tactical Analysis** section explaining what the findings mean and suggesting the next attack vector."
         )
 
         with warnings.catch_warnings():

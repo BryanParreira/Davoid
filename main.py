@@ -26,7 +26,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 # Enforce secure directories
-for directory in ["logs", "payloads", "plugins", "reports"]:
+for directory in ["logs", "payloads", "reports"]:
     os.makedirs(os.path.join(SCRIPT_DIR, directory), exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,15 +63,13 @@ generate_report    = load_module("modules.reporter", "generate_report")
 # ── Weaponization, Post-Exploit & Advanced Recon ──
 run_god_mode       = load_module("modules.god_mode", "run_god_mode")
 run_cloud_ops      = load_module("modules.cloud_ops", "run_cloud_ops")
-run_auditor        = load_module("modules.auditor", "run_auditor")
 run_cred_tester    = load_module("modules.cred_tester", "run_cred_tester")
 encrypt_payload    = load_module("modules.crypt_keeper", "encrypt_payload")
 run_looter         = load_module("modules.looter", "run_looter")
 generate_shell     = load_module("modules.payloads", "generate_shell")
 run_purple_team    = load_module("modules.purple_team", "run_purple_team")
-run_sniffer        = load_module("modules.sniff", "run_sniffer")
 web_ghost          = load_module("modules.web_recon", "web_ghost")
-shodan_intel       = load_module("modules.recon", "shodan_intel")
+shodan_intel       = load_module("modules.shodan_recon", "shodan_intel")
 
 # ── Persistence Wrapper ──
 # The persistence module expects a payload path, so we wrap it for the menu
@@ -195,7 +193,6 @@ def show_reconnaissance_menu():
         "nmap":    lambda: safe_execute(network_discovery),
         "shodan":  lambda: safe_execute(shodan_intel),
         "web":     lambda: safe_execute(web_ghost),
-        "sniff":   lambda: safe_execute(run_sniffer),
         "cloud":   lambda: safe_execute(run_cloud_ops),
     }
     while True:
@@ -207,7 +204,6 @@ def show_reconnaissance_menu():
                 Separator("─── ACTIVE INFRASTRUCTURE SCANNING ──────"),
                 Choice("Network Scanner (Nmap Engine)", value="nmap"),
                 Choice("Web Infrastructure Recon (Web Ghost)", value="web"),
-                Choice("Live WLAN Packet Sniffer", value="sniff"),
                 Separator("─── CLOUD & PASSIVE ───────────────────────"),
                 Choice("Cloud & Container Warfare", value="cloud"),
                 Choice("Passive Attack Surface (Shodan/InternetDB)", value="shodan"),
@@ -271,7 +267,6 @@ def main():
         "c2":      lambda: safe_execute(run_ghost_hub),
         "report":  lambda: safe_execute(generate_report),
         "purple":  lambda: safe_execute(run_purple_team),
-        "audit":   lambda: safe_execute(run_auditor),
         "sys":     configure_global_context,
         "update":  perform_update,
     }
@@ -293,7 +288,6 @@ def main():
                     Choice("5. Purple Team MITRE ATT&CK Mapper", value="purple"),
                     Choice("6. Generate Mission HTML Report", value="report"),
                     Separator("─── SYSTEM ───────────────────────────────"),
-                    Choice("   Setup Auditor & Posture Scout", value="audit"),
                     Choice("   Context Configuration", value="sys"),
                     Choice("   Framework Update", value="update"),
                     Choice("   Execute Vanish Protocol", value="exit"),

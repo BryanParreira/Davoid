@@ -225,9 +225,10 @@ class AutonomousCortex:
             "CRITICAL OUTPUT FORMATTING (YOU MUST OBEY THESE RULES):\n"
             "======================================================\n"
             "1. You MUST ALWAYS start your final response with exactly: 'Final Answer: '\n"
-            "2. NEVER summarize open ports into a paragraph. If you use Nmap or Shodan, you MUST output a strict Markdown table with columns: | Port | State | Service | Version |\n"
-            "3. If you use Metasploit, output an 'Action Report' block detailing what was executed and the result.\n"
-            "4. ALWAYS conclude your response with a '**Tactical Analysis:**' section suggesting the next attack vector.\n"
+            "2. For Nmap/Shodan: Output a clean Markdown table (Port, State, Service, Version). \n"
+            "3. FULL AUDIT RULE: If the Nmap scan contains NSE script output, vulnerabilities, or OS detection, you MUST include a 'Deep Scan Details' section BELOW the table to display that extra information.\n"
+            "4. If you use Metasploit, output an 'Action Report' block detailing what was executed and the result.\n"
+            "5. ALWAYS conclude your response with a '**Tactical Analysis:**' section suggesting the next attack vector.\n"
             "Failure to follow this exact formatting will compromise the mission."
         )
 

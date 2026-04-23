@@ -1,5 +1,5 @@
 """
-main.py — Davoid Red Team Framework (Enterprise Edition)
+main.py — Davoid Autonomous Black-Box Red Team Framework
 Laser-focused on Network Exploitation, Active Directory, and Autonomous AI.
 """
 
@@ -48,19 +48,19 @@ def load_module(module_path: str, attr: str) -> Optional[Callable]:
     try:
         mod = importlib.import_module(module_path)
         return getattr(mod, attr)
-    except Exception:
+    except Exception as e:
+        # Keep silent on import error to allow graceful degradation
         return None
 
 # ── Core Enterprise Modules ──
 network_discovery  = load_module("modules.scanner", "network_discovery")
 run_msf            = load_module("modules.msf_engine", "run_msf")
 run_ad_ops         = load_module("modules.ad_ops", "run_ad_ops")
-crack_hash         = load_module("modules.bruteforce", "crack_hash")
 run_ghost_hub      = load_module("modules.ghost_hub", "run_ghost_hub")
 run_ai_console     = load_module("modules.ai_assist", "run_ai_console")
 generate_report    = load_module("modules.reporter", "generate_report")
 
-# ── Newly Linked Modules ──
+# ── Weaponization, Post-Exploit & Advanced Recon ──
 run_god_mode       = load_module("modules.god_mode", "run_god_mode")
 run_cloud_ops      = load_module("modules.cloud_ops", "run_cloud_ops")
 run_auditor        = load_module("modules.auditor", "run_auditor")
@@ -71,39 +71,58 @@ generate_shell     = load_module("modules.payloads", "generate_shell")
 run_purple_team    = load_module("modules.purple_team", "run_purple_team")
 run_sniffer        = load_module("modules.sniff", "run_sniffer")
 web_ghost          = load_module("modules.web_recon", "web_ghost")
-
-# Recon sub-menus
-dns_recon          = load_module("modules.recon", "dns_recon")
 shodan_intel       = load_module("modules.recon", "shodan_intel")
-passive_intel_menu = load_module("modules.recon", "passive_intel_menu")
-person_osint_menu  = load_module("modules.recon", "person_osint_menu")
+
+# ── Persistence Wrapper ──
+# The persistence module expects a payload path, so we wrap it for the menu
+def run_persistence_menu():
+    draw_header("Persistence Deployment Engine")
+    try:
+        from modules.persistence import PersistenceEngine
+        payload = questionary.text("Enter absolute path to payload to persist:", style=Q_STYLE).ask()
+        if payload and os.path.exists(payload):
+            engine = PersistenceEngine(payload)
+            engine.run()
+            questionary.press_any_key_to_continue(style=Q_STYLE).ask()
+        elif payload:
+            console.print("[bold red][!] File not found.[/bold red]")
+            time.sleep(1.5)
+    except Exception as e:
+        console.print(f"[bold red][!] Persistence engine failed:[/bold red] {e}")
+        time.sleep(2)
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  SYSTEM HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
+def pre_flight_checks():
+    """Verify core system binaries are present for a smooth enterprise experience."""
+    missing = []
+    if not shutil.which("nmap"): missing.append("nmap")
+    
+    # Check for Metasploit RPC daemon
+    msf_found = any(os.path.exists(p) for p in [
+        "/opt/metasploit-framework/bin/msfrpcd", "/usr/local/bin/msfrpcd", "/usr/bin/msfrpcd"
+    ])
+    if not msf_found: missing.append("metasploit-framework (msfrpcd)")
+    
+    if missing:
+        console.print(f"[yellow][!] Warning: Missing system binaries: {', '.join(missing)}[/yellow]")
+        console.print("[dim]Some autonomous features (like God Mode) may fail until these are installed.[/dim]\n")
+        time.sleep(1.5)
+
 def detect_network_environment() -> bool:
     try:
         from scapy.all import conf, get_if_addr
-        
-        # 1. Get Interface
         iface = str(conf.iface)
         ctx.set("INTERFACE", iface)
-        
-        # 2. Get Local IP
         local_ip = get_if_addr(iface)
         if local_ip and local_ip != "0.0.0.0":
             ctx.set("LHOST", local_ip)
-            
-        # 3. Get Default Gateway
         try:
             gw = conf.route.route("0.0.0.0")[2]
-            if gw and gw != "0.0.0.0":
-                ctx.set("GATEWAY", gw)
-            else:
-                ctx.set("GATEWAY", "Unknown")
-        except Exception:
+            ctx.set("GATEWAY", gw if gw and gw != "0.0.0.0" else "Unknown")
+        except:
             ctx.set("GATEWAY", "Unknown")
-            
         return True
     except Exception:
         ctx.set("GATEWAY", "Unknown")
@@ -112,8 +131,7 @@ def detect_network_environment() -> bool:
 def execute_vanish_protocol() -> None:
     console.print("\n[bold red]INITIATING FORENSIC VANISH SEQUENCE...[/bold red]")
     try:
-        if hasattr(db, 'delete_all'):
-            db.delete_all()
+        if hasattr(db, 'delete_all'): db.delete_all()
     except Exception: pass
     
     for target_dir in ["payloads", "__pycache__", "logs"]:
@@ -175,30 +193,24 @@ def configure_global_context() -> None:
 def show_reconnaissance_menu():
     actions = {
         "nmap":    lambda: safe_execute(network_discovery),
-        "dns":     lambda: safe_execute(dns_recon),
         "shodan":  lambda: safe_execute(shodan_intel),
         "web":     lambda: safe_execute(web_ghost),
         "sniff":   lambda: safe_execute(run_sniffer),
         "cloud":   lambda: safe_execute(run_cloud_ops),
-        "passive": lambda: safe_execute(passive_intel_menu),
-        "osint":   lambda: safe_execute(person_osint_menu),
     }
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Target Acquisition & Intelligence", context=ctx)
+        draw_header("Target Acquisition & Infrastructure Intel", context=ctx)
         choice = questionary.select(
             "Select Recon Module:",
             choices=[
-                Separator("─── ACTIVE SCANNING ───────────────────────"),
-                Choice("Network Scanner (Nmap)", value="nmap"),
+                Separator("─── ACTIVE INFRASTRUCTURE SCANNING ──────"),
+                Choice("Network Scanner (Nmap Engine)", value="nmap"),
                 Choice("Web Infrastructure Recon (Web Ghost)", value="web"),
-                Choice("DNS & Subdomain Mapping", value="dns"),
-                Choice("Live WLAN Sniffer", value="sniff"),
-                Separator("─── CLOUD & OSINT ─────────────────────────"),
+                Choice("Live WLAN Packet Sniffer", value="sniff"),
+                Separator("─── CLOUD & PASSIVE ───────────────────────"),
                 Choice("Cloud & Container Warfare", value="cloud"),
-                Choice("Attack Surface (Shodan/InternetDB)", value="shodan"),
-                Choice("Passive Archive Intel (Wayback/Dorks)", value="passive"),
-                Choice("Person OSINT (Username/Phone/Geo)", value="osint"),
+                Choice("Passive Attack Surface (Shodan/InternetDB)", value="shodan"),
                 Separator("─── NAVIGATION ────────────────────────────"),
                 Choice("Return to Main Menu", value="back"),
             ],
@@ -212,11 +224,11 @@ def show_assault_menu():
         "god":     lambda: safe_execute(run_god_mode),
         "msf":     lambda: safe_execute(run_msf),
         "ad":      lambda: safe_execute(run_ad_ops),
-        "crack":   lambda: safe_execute(crack_hash),
         "cred":    lambda: safe_execute(run_cred_tester),
         "payload": lambda: safe_execute(generate_shell),
         "crypt":   lambda: safe_execute(encrypt_payload),
         "loot":    lambda: safe_execute(run_looter),
+        "persist": run_persistence_menu,
     }
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -229,13 +241,12 @@ def show_assault_menu():
                 Separator("─── EXPLOITATION ──────────────────────────"),
                 Choice("Metasploit Framework (MSF-RPC)", value="msf"),
                 Choice("Active Directory Ops", value="ad"),
+                Choice("Credential Re-Use Tester", value="cred"),
                 Separator("─── WEAPONIZATION & POST-EXPLOIT ──────────"),
                 Choice("Payload Forge (Shell Generator)", value="payload"),
                 Choice("Crypt-Keeper (Payload Obfuscation)", value="crypt"),
                 Choice("PrivEsc Looter", value="loot"),
-                Separator("─── CREDENTIAL ATTACKS ───────────────────"),
-                Choice("Hash Cracker", value="crack"),
-                Choice("Credential Re-Use Tester", value="cred"),
+                Choice("Persistence Deployment Engine", value="persist"),
                 Separator("─── NAVIGATION ───────────────────────────"),
                 Choice("Return to Main Menu", value="back"),
             ],
@@ -250,6 +261,7 @@ def main():
         sys.exit(0)
 
     load_config()
+    pre_flight_checks()
     detect_network_environment()
 
     actions = {
@@ -267,7 +279,7 @@ def main():
     while True:
         try:
             os.system('cls' if os.name == 'nt' else 'clear')
-            draw_header("Enterprise Master Hub", context=ctx)
+            draw_header("Autonomous Black-Box Master Hub", context=ctx)
             
             phase = questionary.select(
                 "Select Operation Phase:",

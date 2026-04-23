@@ -1,7 +1,6 @@
 import requests
 import urllib3
 import re
-import threading
 import time
 import random
 import questionary
@@ -12,34 +11,34 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.ui import draw_header, Q_STYLE
+from core.database import db
 
 # Only disable warnings if verify_ssl is intentionally turned off
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 console = Console()
 
-# Enhanced dictionary of sensitive paths and files
-SENSITIVE_PATHS = [
-    "/.env", "/.git/config", "/.docker-compose.yml", "/.htaccess",
-    "/backup.sql", "/db.sql", "/config.php", "/config.php.bak",
-    "/phpinfo.php", "/admin/", "/login.php", "/wp-admin/", "/.ssh/id_rsa",
-    "/server-status", "/robots.txt", "/sitemap.xml", "/api/v1/", "/debug"
+# Extremely targeted list of high-impact infrastructure leaks
+CRITICAL_PATHS = [
+    "/.env", "/.env.backup", "/.env.dev", "/.git/config", 
+    "/.docker-compose.yml", "/docker-compose.yml", "/Dockerfile",
+    "/.aws/credentials", "/.ssh/id_rsa", "/.ssh/authorized_keys",
+    "/config.php", "/wp-config.php.bak", "/database.yml", 
+    "/server-status", "/phpinfo.php", "/api/v1/swagger.json",
+    "/actuator/env", "/actuator/health", "/backup.sql"
 ]
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": "Prevents XSS/Injection",
     "Strict-Transport-Security": "Enforces HTTPS (HSTS)",
     "X-Frame-Options": "Prevents Clickjacking",
-    "X-Content-Type-Options": "Prevents MIME-sniffing",
-    "Referrer-Policy": "Controls Metadata Leakage"
+    "X-Content-Type-Options": "Prevents MIME-sniffing"
 }
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
 ]
-
 
 class WebGhost:
     def __init__(self, target, use_tor=True, verify_ssl=True):
@@ -48,7 +47,6 @@ class WebGhost:
         self.session.verify = verify_ssl
         self.proxies_enabled = False
 
-        # [STEALTH] PROXY SUPPORT: Route traffic through Tor (default port 9050)
         if use_tor:
             self.session.proxies = {
                 'http': 'socks5h://127.0.0.1:9050',
@@ -56,14 +54,10 @@ class WebGhost:
             }
             self.proxies_enabled = True
 
-        self.session.headers = {
-            "User-Agent": random.choice(USER_AGENTS)
-        }
+        self.session.headers = {"User-Agent": random.choice(USER_AGENTS)}
 
     def audit_headers(self, headers):
-        """Analyzes response headers for security gaps."""
-        table = Table(title="Security Header Compliance",
-                      border_style="bold red", expand=True)
+        table = Table(title="Security Header Compliance", border_style="bold red", expand=True)
         table.add_column("Header", style="cyan")
         table.add_column("Status", style="white")
         table.add_column("Risk/Purpose", style="dim")
@@ -73,130 +67,85 @@ class WebGhost:
                 status = "[bold green]PASS[/bold green]"
             else:
                 status = "[bold red]MISSING[/bold red]"
+                db.log("Web-Ghost", self.target, f"Missing Security Header: {header}", "INFO")
             table.add_row(header, status, description)
         return table
 
-    def extract_intel(self, html):
-        """Scans HTML source for leaked information (emails, API keys, etc)."""
-        intel = []
-        emails = re.findall(
-            r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', html)
-        if emails:
-            intel.append(
-                f"[cyan]Emails Found:[/cyan] {', '.join(set(emails[:3]))}")
-
-        api_patterns = [
-            r'(?i)api_key["\']?\s?[:=]\s?["\']?([a-zA-Z0-9_-]{20,})["\']?']
-        for p in api_patterns:
-            keys = re.findall(p, html)
-            if keys:
-                intel.append(
-                    f"[bold red]Potential API Key Detected![/bold red]")
-
-        return intel
-
     def check_path(self, path):
-        """Worker function for concurrent path discovery with Stealth."""
         url = f"{self.target}{path}"
         self.session.headers.update({"User-Agent": random.choice(USER_AGENTS)})
 
         try:
             if self.proxies_enabled:
-                time.sleep(random.uniform(0.5, 1.5))
+                time.sleep(random.uniform(0.5, 1.2))
 
             res = self.session.get(url, timeout=10, allow_redirects=False)
 
             if res.status_code == 200:
-                return (path, "[bold green]200 OK[/bold green]")
+                # Basic check to avoid false positive 200s (e.g. custom 404 pages)
+                if "404" not in res.text and "not found" not in res.text.lower():
+                    db.log("Web-Ghost", url, f"Exposed Infrastructure File Found: {path}", "CRITICAL")
+                    return (path, "[bold green]200 OK (EXPOSED)[/bold green]")
             elif res.status_code == 403:
-                return (path, "[yellow]403 Forbidden[/yellow]")
-            elif res.status_code == 301 or res.status_code == 302:
-                return (path, f"[blue]Redirect ({res.status_code})[/blue]")
+                return (path, "[yellow]403 Forbidden (Exists)[/yellow]")
         except:
             pass
         return None
 
     def run(self):
-        draw_header("Web Ghost Elite: Professional Auditor")
+        draw_header("Web Ghost: Infrastructure Leak Hunter")
 
         if self.proxies_enabled:
-            console.print(
-                "[*] Stealth Mode: [bold green]ON[/bold green] (Attempting Tor Connection...)\n")
+            console.print("[*] Stealth Mode: [bold green]ON[/bold green] (Routing through Tor...)\n")
 
-        console.print(
-            f"[*] Analyzing target: [bold yellow]{self.target}[/bold yellow]\n")
+        console.print(f"[*] Analyzing target: [bold yellow]{self.target}[/bold yellow]\n")
 
         try:
             r = self.session.get(self.target, timeout=10)
         except requests.exceptions.SSLError:
-            console.print(
-                "\n[bold red][!] ERROR: SSL Certificate Verification Failed.[/bold red]")
-            console.print(
-                "[yellow]The target is using an invalid or self-signed certificate. If you trust this target, restart Web Ghost and select 'No' when asked to Verify SSL.[/yellow]")
+            console.print("\n[bold red][!] ERROR: SSL Certificate Verification Failed.[/bold red]")
+            console.print("[yellow]If you trust this target, restart Web Ghost and select 'No' to Verify SSL.[/yellow]")
             return
         except requests.exceptions.ConnectionError as e:
             if "SOCKS" in str(e) or "Connection refused" in str(e):
-                console.print(
-                    "\n[bold red][!] ERROR: Tor Proxy Unreachable (127.0.0.1:9050)[/bold red]")
-                console.print(
-                    "[yellow]It appears Tor is not running.[/yellow]")
-
-                if questionary.confirm("Disable Proxy (Stealth OFF) and continue?", default=True, style=Q_STYLE).ask():
-                    console.print(
-                        "\n[red][!] SWITCHING TO CLEARNET. STEALTH DISABLED.[/red]")
+                console.print("\n[bold red][!] ERROR: Tor Proxy Unreachable (127.0.0.1:9050)[/bold red]")
+                if questionary.confirm("Disable Proxy (Stealth OFF) and continue on Clearnet?", default=True, style=Q_STYLE).ask():
                     self.session.proxies = {}
                     self.proxies_enabled = False
                     try:
                         r = self.session.get(self.target, timeout=10)
                     except Exception as e2:
-                        console.print(
-                            f"[bold red][!] Connection failed: {e2}[/bold red]")
+                        console.print(f"[bold red][!] Connection failed: {e2}[/bold red]")
                         return
                 else:
                     return
             else:
-                console.print(
-                    f"[bold red][!] Target Connectivity Error: {e}[/bold red]")
+                console.print(f"[bold red][!] Target Connectivity Error: {e}[/bold red]")
                 return
         except Exception as e:
             console.print(f"[bold red][!] Unexpected Error: {e}[/bold red]")
             return
 
         try:
-            # 1. Header Audit
             console.print(self.audit_headers(r.headers))
 
-            # 2. Fingerprinting & Intelligence
-            soup = BeautifulSoup(r.text, 'html.parser')
             server = r.headers.get("Server", "Undisclosed")
             powered_by = r.headers.get("X-Powered-By", "Unknown")
-            title = soup.title.string.strip() if soup.title else "None"
-
-            intel_findings = self.extract_intel(r.text)
-
-            intel_panel = Panel(
-                f"[white]Title:[/white] {title}\n"
+            console.print(Panel(
                 f"[white]Server:[/white] {server}\n"
-                f"[white]Tech:[/white] {powered_by}\n"
-                f"[white]Leaks:[/white] {' | '.join(intel_findings) if intel_findings else 'None Detected'}",
-                title="Infrastructure Fingerprint",
-                border_style="green"
-            )
-            console.print(intel_panel)
+                f"[white]Tech:[/white] {powered_by}",
+                title="Infrastructure Fingerprint", border_style="green"
+            ))
 
-            # 3. Parallel Path Discovery
-            discovery_table = Table(
-                title="Sensitive Directory Discovery", border_style="bold green", expand=True)
+            discovery_table = Table(title="Critical Infrastructure Discovery", border_style="bold green", expand=True)
             discovery_table.add_column("Path", style="cyan")
             discovery_table.add_column("Status", style="white")
 
             with Progress(SpinnerColumn(), TextColumn("{task.description}"), BarColumn(), console=console) as progress:
-                task = progress.add_task(
-                    "[green]Fuzzing paths...", total=len(SENSITIVE_PATHS))
+                task = progress.add_task("[green]Hunting for exposed configs...", total=len(CRITICAL_PATHS))
 
                 with ThreadPoolExecutor(max_workers=10) as executor:
-                    futures = [executor.submit(self.check_path, p)
-                               for p in SENSITIVE_PATHS]
+                    futures = [executor.submit(self.check_path, p) for p in CRITICAL_PATHS]
                     for f in as_completed(futures):
                         res = f.result()
                         if res:
@@ -210,18 +159,14 @@ class WebGhost:
 
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
-
 def web_ghost():
-    target = questionary.text(
-        "Target URL (e.g., https://example.com):", style=Q_STYLE).ask()
+    target = questionary.text("Target URL (e.g., https://example.com):", style=Q_STYLE).ask()
     if target and target.startswith("http"):
-        verify_cert = questionary.confirm(
-            "Verify SSL Certificates? (Select 'No' ONLY for self-signed targets)", default=True, style=Q_STYLE).ask()
+        verify_cert = questionary.confirm("Verify SSL Certificates?", default=True, style=Q_STYLE).ask()
         scanner = WebGhost(target, use_tor=True, verify_ssl=verify_cert)
         scanner.run()
     else:
-        console.print("[red][!] Invalid URL format.[/red]")
-
+        console.print("[red][!] Invalid URL format. Must include http/https.[/red]")
 
 if __name__ == "__main__":
     web_ghost()

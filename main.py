@@ -53,14 +53,30 @@ def load_module(module_path: str, attr: str) -> Optional[Callable]:
 
 # ── Core Enterprise Modules ──
 network_discovery  = load_module("modules.scanner", "network_discovery")
-dns_recon          = load_module("modules.recon", "dns_recon")
-shodan_intel       = load_module("modules.recon", "shodan_intel")
 run_msf            = load_module("modules.msf_engine", "run_msf")
 run_ad_ops         = load_module("modules.ad_ops", "run_ad_ops")
 crack_hash         = load_module("modules.bruteforce", "crack_hash")
 run_ghost_hub      = load_module("modules.ghost_hub", "run_ghost_hub")
 run_ai_console     = load_module("modules.ai_assist", "run_ai_console")
 generate_report    = load_module("modules.reporter", "generate_report")
+
+# ── Newly Linked Modules ──
+run_god_mode       = load_module("modules.god_mode", "run_god_mode")
+run_cloud_ops      = load_module("modules.cloud_ops", "run_cloud_ops")
+run_auditor        = load_module("modules.auditor", "run_auditor")
+run_cred_tester    = load_module("modules.cred_tester", "run_cred_tester")
+encrypt_payload    = load_module("modules.crypt_keeper", "encrypt_payload")
+run_looter         = load_module("modules.looter", "run_looter")
+generate_shell     = load_module("modules.payloads", "generate_shell")
+run_purple_team    = load_module("modules.purple_team", "run_purple_team")
+run_sniffer        = load_module("modules.sniff", "run_sniffer")
+web_ghost          = load_module("modules.web_recon", "web_ghost")
+
+# Recon sub-menus
+dns_recon          = load_module("modules.recon", "dns_recon")
+shodan_intel       = load_module("modules.recon", "shodan_intel")
+passive_intel_menu = load_module("modules.recon", "passive_intel_menu")
+person_osint_menu  = load_module("modules.recon", "person_osint_menu")
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  SYSTEM HELPERS
@@ -161,6 +177,11 @@ def show_reconnaissance_menu():
         "nmap":    lambda: safe_execute(network_discovery),
         "dns":     lambda: safe_execute(dns_recon),
         "shodan":  lambda: safe_execute(shodan_intel),
+        "web":     lambda: safe_execute(web_ghost),
+        "sniff":   lambda: safe_execute(run_sniffer),
+        "cloud":   lambda: safe_execute(run_cloud_ops),
+        "passive": lambda: safe_execute(passive_intel_menu),
+        "osint":   lambda: safe_execute(person_osint_menu),
     }
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -170,9 +191,14 @@ def show_reconnaissance_menu():
             choices=[
                 Separator("─── ACTIVE SCANNING ───────────────────────"),
                 Choice("Network Scanner (Nmap)", value="nmap"),
+                Choice("Web Infrastructure Recon (Web Ghost)", value="web"),
                 Choice("DNS & Subdomain Mapping", value="dns"),
-                Separator("─── OSINT ─────────────────────────────────"),
-                Choice("Attack Surface (Shodan)", value="shodan"),
+                Choice("Live WLAN Sniffer", value="sniff"),
+                Separator("─── CLOUD & OSINT ─────────────────────────"),
+                Choice("Cloud & Container Warfare", value="cloud"),
+                Choice("Attack Surface (Shodan/InternetDB)", value="shodan"),
+                Choice("Passive Archive Intel (Wayback/Dorks)", value="passive"),
+                Choice("Person OSINT (Username/Phone/Geo)", value="osint"),
                 Separator("─── NAVIGATION ────────────────────────────"),
                 Choice("Return to Main Menu", value="back"),
             ],
@@ -183,9 +209,14 @@ def show_reconnaissance_menu():
 
 def show_assault_menu():
     actions = {
-        "msf":   lambda: safe_execute(run_msf),
-        "ad":    lambda: safe_execute(run_ad_ops),
-        "crack": lambda: safe_execute(crack_hash),
+        "god":     lambda: safe_execute(run_god_mode),
+        "msf":     lambda: safe_execute(run_msf),
+        "ad":      lambda: safe_execute(run_ad_ops),
+        "crack":   lambda: safe_execute(crack_hash),
+        "cred":    lambda: safe_execute(run_cred_tester),
+        "payload": lambda: safe_execute(generate_shell),
+        "crypt":   lambda: safe_execute(encrypt_payload),
+        "loot":    lambda: safe_execute(run_looter),
     }
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -193,11 +224,18 @@ def show_assault_menu():
         choice = questionary.select(
             "Select Assault Vector:",
             choices=[
+                Separator("─── AUTONOMOUS ────────────────────────────"),
+                Choice("GOD MODE (Auto Campaign Engine)", value="god"),
                 Separator("─── EXPLOITATION ──────────────────────────"),
                 Choice("Metasploit Framework (MSF-RPC)", value="msf"),
                 Choice("Active Directory Ops", value="ad"),
+                Separator("─── WEAPONIZATION & POST-EXPLOIT ──────────"),
+                Choice("Payload Forge (Shell Generator)", value="payload"),
+                Choice("Crypt-Keeper (Payload Obfuscation)", value="crypt"),
+                Choice("PrivEsc Looter", value="loot"),
                 Separator("─── CREDENTIAL ATTACKS ───────────────────"),
                 Choice("Hash Cracker", value="crack"),
+                Choice("Credential Re-Use Tester", value="cred"),
                 Separator("─── NAVIGATION ───────────────────────────"),
                 Choice("Return to Main Menu", value="back"),
             ],
@@ -220,6 +258,8 @@ def main():
         "ai":      lambda: safe_execute(run_ai_console),
         "c2":      lambda: safe_execute(run_ghost_hub),
         "report":  lambda: safe_execute(generate_report),
+        "purple":  lambda: safe_execute(run_purple_team),
+        "audit":   lambda: safe_execute(run_auditor),
         "sys":     configure_global_context,
         "update":  perform_update,
     }
@@ -234,12 +274,14 @@ def main():
                 choices=[
                     Separator("─── OFFENSIVE OPERATIONS ─────────────────"),
                     Choice("1. Reconnaissance & Target Acquisition", value="recon"),
-                    Choice("2. Assault & Active Directory", value="assault"),
-                    Choice("3. Command & Control (C2)", value="c2"),
-                    Separator("─── INTELLIGENCE ─────────────────────────"),
+                    Choice("2. Assault, Exploitation & Weapons", value="assault"),
+                    Choice("3. Command & Control (C2 GhostHub)", value="c2"),
+                    Separator("─── INTELLIGENCE & BLUE TEAM ─────────────"),
                     Choice("4. LangChain AI Agent Cortex", value="ai"),
-                    Choice("5. Generate Mission Report", value="report"),
+                    Choice("5. Purple Team MITRE ATT&CK Mapper", value="purple"),
+                    Choice("6. Generate Mission HTML Report", value="report"),
                     Separator("─── SYSTEM ───────────────────────────────"),
+                    Choice("   Setup Auditor & Posture Scout", value="audit"),
                     Choice("   Context Configuration", value="sys"),
                     Choice("   Framework Update", value="update"),
                     Choice("   Execute Vanish Protocol", value="exit"),

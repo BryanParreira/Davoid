@@ -9,20 +9,20 @@ import requests
 import questionary
 import subprocess
 import warnings
+
+from langchain_ollama import ChatOllama
+from langchain.agents import initialize_agent, AgentType, Tool
 from rich.console import Console
 from rich.panel import Panel
+
+from core.ui import draw_header, Q_STYLE
+from core.database import db
 
 # --- SILENCE ALL WARNINGS ---
 warnings.filterwarnings("ignore")
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*initialize_agent.*")
-
-from langchain_ollama import ChatOllama
-from langchain.agents import initialize_agent, AgentType, Tool
-
-from core.ui import draw_header, Q_STYLE
-from core.database import db
 
 console = Console()
 
@@ -47,19 +47,20 @@ def tool_query_mission_db(query: str = "") -> str:
 def tool_ping_target(target_ip: str) -> str:
     try:
         output = subprocess.check_output(f"ping -c 1 -W 1 {target_ip}", shell=True, stderr=subprocess.STDOUT, timeout=10)
-        return f"Target {target_ip} is ONLINE.\n{output.decode('utf-8')}"
+        return f"Target {target_ip} is ONLINE.\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
         return "Ping timed out."
-    except subprocess.CalledProcessError:
-        return f"Target {target_ip} is OFFLINE or blocking ICMP."
+    except subprocess.CalledProcessError as e:
+        return f"Target {target_ip} is OFFLINE or blocking ICMP.\nOutput: {e.output.decode('utf-8', errors='ignore')}"
 
 def tool_nmap_scan(target: str) -> str:
     try:
-        # Added -Pn to forcefully scan gateways/targets that block ICMP pings
         output = subprocess.check_output(f"nmap -Pn -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT, timeout=60)
-        return f"Nmap Scan Results for {target}:\n{output.decode('utf-8')}"
+        return f"Nmap Scan Results for {target}:\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
         return "Nmap scan timed out. The host might be down or filtering all ports."
+    except subprocess.CalledProcessError as e:
+        return f"Nmap Scan Partial/Error Results for {target}:\n{e.output.decode('utf-8', errors='ignore')}"
     except Exception as e:
         return f"Nmap scan failed: {e}"
 
@@ -73,16 +74,20 @@ def tool_run_metasploit(commands: str) -> str:
             stderr=subprocess.STDOUT,
             timeout=120
         )
-        return f"Metasploit Execution Results:\n{output.decode('utf-8')}"
+        return f"Metasploit Execution Results:\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
         return "Metasploit execution timed out after 120 seconds."
+    except subprocess.CalledProcessError as e:
+        return f"Metasploit Execution Results (with errors):\n{e.output.decode('utf-8', errors='ignore')}"
     except Exception as e:
         return f"Metasploit failed: {e}"
 
 def tool_dns_recon(domain: str) -> str:
     try:
         output = subprocess.check_output(f"nslookup {domain}", shell=True, stderr=subprocess.STDOUT, timeout=10)
-        return f"DNS Results for {domain}:\n{output.decode('utf-8')}"
+        return f"DNS Results for {domain}:\n{output.decode('utf-8', errors='ignore')}"
+    except subprocess.CalledProcessError as e:
+        return f"DNS lookup failed or returned partial results:\n{e.output.decode('utf-8', errors='ignore')}"
     except Exception as e:
         return f"DNS lookup failed: {e}"
 
@@ -121,14 +126,22 @@ class AutonomousCortex:
         )
         
         self.tools = [
-            Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to read the database."),
-            Tool(name="PingTarget", func=tool_ping_target, description="Use to check if an IP address is online. Input: exactly an IP or Domain."),
-            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input: exactly an IP or Subnet (e.g. 192.168.1.0/24). Do not ping before scanning, use this tool directly."),
-            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Use to execute Metasploit exploits."),
-            Tool(name="DNSRecon", func=tool_dns_recon, description="Use to resolve a domain name to an IP address using DNS."),
-            Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Use to grab HTTP headers from a web server.")
+            Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to read the database. Input should be empty."),
+            Tool(name="PingTarget", func=tool_ping_target, description="Use to check if an IP address is online. Input MUST be exactly an IP or Domain."),
+            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input MUST be exactly an IP or Subnet (e.g. 192.168.1.0/24). Do not ping before scanning, use this tool directly."),
+            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Use to execute Metasploit exploits. Input MUST be exact MSF commands separated by semicolons."),
+            Tool(name="DNSRecon", func=tool_dns_recon, description="Use to resolve a domain name to an IP address using DNS. Input MUST be exactly a domain name."),
+            Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Use to grab HTTP headers from a web server. Input MUST be exactly a URL.")
         ]
         
+        system_instruction = (
+            "You are DAVOID CORTEX, an autonomous Red Team AI agent. "
+            f"Your current Operator IP is {self.operator_ip} and the Gateway is {self.gateway_ip}. "
+            "You have access to tools to ping targets, scan ports with Nmap, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
+            "If the user asks you to scan, ping, check a target, or exploit a vulnerability, YOU MUST USE YOUR TOOLS. "
+            "Return your final answer in clean Markdown format."
+        )
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self.agent = initialize_agent(
@@ -140,13 +153,7 @@ class AutonomousCortex:
                 max_iterations=5,
                 early_stopping_method="generate",
                 agent_kwargs={
-                    "system_message": (
-                        "You are DAVOID CORTEX, an autonomous Red Team AI agent. "
-                        f"Your current Operator IP is {self.operator_ip} and the Gateway is {self.gateway_ip}. "
-                        "You have access to tools to ping targets, scan ports with Nmap, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
-                        "If the user asks you to scan, ping, check a target, or exploit a vulnerability, YOU MUST USE YOUR TOOLS. "
-                        "Return your final answer in clean Markdown format."
-                    )
+                    "system_message_prefix": system_instruction
                 }
             )
 

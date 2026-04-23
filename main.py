@@ -11,15 +11,15 @@ import time
 import importlib.util
 from typing import Callable, Optional
 
+# Suppress noisy warnings safely before third-party imports
+warnings.filterwarnings("ignore", message=".*OpenSSL 1.1.1+.*")
+warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
+warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
+
 import questionary
 from questionary import Choice, Separator
 from rich.console import Console
 from rich.table import Table
-
-# Suppress noisy warnings
-warnings.filterwarnings("ignore", message=".*OpenSSL 1.1.1+.*")
-warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
-warnings.filterwarnings("ignore", category=UserWarning, module='scapy')
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:

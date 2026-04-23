@@ -55,7 +55,7 @@ def tool_ping_target(target_ip: str) -> str:
 
 def tool_nmap_scan(target: str) -> str:
     try:
-        output = subprocess.check_output(f"nmap -Pn -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT, timeout=60)
+        output = subprocess.check_output(f"nmap -Pn -F -T4 --open {target}", shell=True, stderr=subprocess.STDOUT, timeout=60)
         return f"Nmap Scan Results for {target}:\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
         return "Nmap scan timed out. The host might be down or filtering all ports."
@@ -64,23 +64,32 @@ def tool_nmap_scan(target: str) -> str:
     except Exception as e:
         return f"Nmap scan failed: {e}"
 
-def tool_run_metasploit(commands: str) -> str:
+def tool_shodan_lookup(ip: str) -> str:
+    """Uses the free InternetDB API (Shodan tier) to find open ports and CVEs."""
     try:
-        if "exit" not in commands:
-            commands += "; exit"
-        output = subprocess.check_output(
-            f"msfconsole -q -x '{commands}'", 
-            shell=True, 
-            stderr=subprocess.STDOUT,
-            timeout=120
-        )
-        return f"Metasploit Execution Results:\n{output.decode('utf-8', errors='ignore')}"
-    except subprocess.TimeoutExpired:
-        return "Metasploit execution timed out after 120 seconds."
-    except subprocess.CalledProcessError as e:
-        return f"Metasploit Execution Results (with errors):\n{e.output.decode('utf-8', errors='ignore')}"
+        res = requests.get(f"https://internetdb.shodan.io/{ip}", timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            return f"Shodan Data for {ip}:\nHostnames: {data.get('hostnames')}\nPorts: {data.get('ports')}\nCVEs: {data.get('vulns')}"
+        return f"No Shodan data found for {ip}"
     except Exception as e:
-        return f"Metasploit failed: {e}"
+        return f"Shodan lookup failed: {e}"
+
+def tool_subdomain_recon(domain: str) -> str:
+    """Quickly pulls passive subdomains using crt.sh"""
+    try:
+        url = f"https://crt.sh/?q=%.{domain}&output=json"
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            raw = set()
+            for entry in res.json():
+                for sub in entry.get('name_value', '').split('\n'):
+                    if not sub.startswith('*') and domain in sub:
+                        raw.add(sub.strip().lower())
+            return f"Passive subdomains discovered for {domain}: " + ", ".join(list(raw)[:20])
+        return "Subdomain lookup failed: non-200 status code."
+    except Exception as e:
+        return f"Subdomain lookup failed: {e}"
 
 def tool_dns_recon(domain: str) -> str:
     try:
@@ -100,6 +109,25 @@ def tool_web_headers(url: str) -> str:
         return f"HTTP Headers for {url}:\n{headers_str}"
     except Exception as e:
         return f"Failed to connect to web server: {e}"
+
+def tool_run_metasploit(commands: str) -> str:
+    try:
+        if "exit" not in commands:
+            commands += "; exit"
+        output = subprocess.check_output(
+            f"msfconsole -q -x '{commands}'", 
+            shell=True, 
+            stderr=subprocess.STDOUT,
+            timeout=120
+        )
+        return f"Metasploit Execution Results:\n{output.decode('utf-8', errors='ignore')}"
+    except subprocess.TimeoutExpired:
+        return "Metasploit execution timed out after 120 seconds."
+    except subprocess.CalledProcessError as e:
+        return f"Metasploit Execution Results (with errors):\n{e.output.decode('utf-8', errors='ignore')}"
+    except Exception as e:
+        return f"Metasploit failed: {e}"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CORTEX ENGINE
@@ -127,18 +155,21 @@ class AutonomousCortex:
         
         self.tools = [
             Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to read the database. Input should be empty."),
-            Tool(name="PingTarget", func=tool_ping_target, description="Use to check if an IP address is online. Input MUST be exactly an IP or Domain."),
-            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input MUST be exactly an IP or Subnet (e.g. 192.168.1.0/24). Do not ping before scanning, use this tool directly."),
-            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Use to execute Metasploit exploits. Input MUST be exact MSF commands separated by semicolons."),
-            Tool(name="DNSRecon", func=tool_dns_recon, description="Use to resolve a domain name to an IP address using DNS. Input MUST be exactly a domain name."),
-            Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Use to grab HTTP headers from a web server. Input MUST be exactly a URL.")
+            Tool(name="PingTarget", func=tool_ping_target, description="Check if an IP address is online. Input MUST be exactly an IP or Domain."),
+            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Scan a target for open ports. Input MUST be exactly an IP or Subnet (e.g. 192.168.1.0/24)."),
+            Tool(name="ShodanIntel", func=tool_shodan_lookup, description="Lookup open ports and CVEs for an IP without scanning it actively. Input MUST be an IP."),
+            Tool(name="SubdomainRecon", func=tool_subdomain_recon, description="Find subdomains for a target domain. Input MUST be exactly a domain name (e.g. example.com)."),
+            Tool(name="DNSRecon", func=tool_dns_recon, description="Resolve a domain name to an IP address using DNS. Input MUST be exactly a domain name."),
+            Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Grab HTTP headers from a web server. Input MUST be exactly a URL."),
+            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Execute Metasploit exploits. Input MUST be exact MSF commands separated by semicolons.")
         ]
         
         system_instruction = (
-            "You are DAVOID CORTEX, an autonomous Red Team AI agent. "
+            "You are DAVOID CORTEX, an elite autonomous Red Team AI agent. "
             f"Your current Operator IP is {self.operator_ip} and the Gateway is {self.gateway_ip}. "
-            "You have access to tools to ping targets, scan ports with Nmap, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
-            "If the user asks you to scan, ping, check a target, or exploit a vulnerability, YOU MUST USE YOUR TOOLS. "
+            "You have access to tools to ping, Nmap scan, lookup Shodan data, find subdomains, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
+            "If the user asks you to scan, gather intel, or exploit a target, YOU MUST USE YOUR TOOLS. "
+            "Think step-by-step. Use Shodan and SubdomainRecon before active Nmap scans to stay stealthy if requested. "
             "Return your final answer in clean Markdown format."
         )
 
@@ -150,7 +181,7 @@ class AutonomousCortex:
                 agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
                 verbose=False,
                 handle_parsing_errors=True,
-                max_iterations=5,
+                max_iterations=7, # Increased iterations to support tool chaining 
                 early_stopping_method="generate",
                 agent_kwargs={
                     "system_message_prefix": system_instruction
@@ -220,7 +251,7 @@ def run_ai_console():
         console.print(Panel(
             "[bold white]Autonomous Link Active.[/bold white]\n"
             "The AI now has access to the [bold cyan]Full Recon & Exploitation Arsenal[/bold cyan]. Try asking it:\n"
-            " - [dim]'Can you run an nmap scan on my gateway?'[/dim]\n"
+            " - [dim]'Can you find subdomains for example.com, scan the first one with Nmap, and check Shodan?'[/dim]\n"
             " - [dim]'Can you query the database to see what we found?'[/dim]\n"
             "Type 'exit' to return.",
             border_style="cyan"

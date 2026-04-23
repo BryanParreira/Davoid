@@ -55,7 +55,7 @@ def tool_ping_target(target_ip: str) -> str:
         )
         return f"Target {target_ip} is ONLINE.\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
-        return "Ping timed out."
+        return "Ping timed out. Tell the operator."
     except subprocess.CalledProcessError as e:
         return f"Target {target_ip} is OFFLINE or blocking ICMP.\nOutput: {e.output.decode('utf-8', errors='ignore')}"
     except Exception as e:
@@ -92,14 +92,15 @@ def tool_nmap_scan(target: str) -> str:
 
     try:
         cmd = ["nmap"] + args + [target]
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=120)
+        # Increased timeout to 600s (10 minutes) so Full Audits have time to finish
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=600)
         return f"Nmap Scan Results for {target}:\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
-        return "Nmap scan timed out. The host might be down or filtering all ports."
+        return "Nmap scan timed out after 10 minutes. DO NOT RETRY. Tell the operator the scan took too long."
     except subprocess.CalledProcessError as e:
-        return f"Nmap Scan Partial/Error Results for {target}:\n{e.output.decode('utf-8', errors='ignore')}"
+        return f"Nmap Scan Partial/Error Results for {target} (DO NOT RETRY - SHOW THIS TO OPERATOR):\n{e.output.decode('utf-8', errors='ignore')}"
     except Exception as e:
-        return f"Nmap scan failed: {e}"
+        return f"Nmap scan failed (DO NOT RETRY): {e}"
 
 def tool_shodan_lookup(ip: str) -> str:
     """Uses the free InternetDB API (Shodan tier) to find open ports and CVEs."""
@@ -176,9 +177,9 @@ def tool_run_metasploit(commands: str) -> str:
     except subprocess.TimeoutExpired:
         return "Metasploit execution timed out after 120 seconds."
     except subprocess.CalledProcessError as e:
-        return f"Metasploit Execution Results (with errors):\n{e.output.decode('utf-8', errors='ignore')}"
+        return f"Metasploit Execution Results (with errors) (DO NOT RETRY):\n{e.output.decode('utf-8', errors='ignore')}"
     except Exception as e:
-        return f"Metasploit failed: {e}"
+        return f"Metasploit failed (DO NOT RETRY): {e}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CORTEX ENGINE
@@ -220,7 +221,7 @@ class AutonomousCortex:
             f"Your current Operator IP is {self.operator_ip} and the Gateway is {self.gateway_ip}. "
             "You have tools to Ping, Nmap scan, Shodan lookup, find Subdomains, do DNS recon, grab Web Headers, query databases, and FIRE EXPLOITS via Metasploit. "
             "You MUST use your tools to complete the operator's requests. "
-            "If a tool (like Metasploit) returns an error, state that the specific exploit failed or module was not found. DO NOT claim the tool itself is missing. "
+            "If a tool (like Nmap or Metasploit) returns an error, timeout, or partial result, DO NOT RETRY THE TOOL. You must immediately state that the tool failed or timed out and present whatever output you received to the operator. "
             "\n\n======================================================\n"
             "CRITICAL OUTPUT FORMATTING (YOU MUST OBEY THESE RULES):\n"
             "======================================================\n"
@@ -288,22 +289,19 @@ class AutonomousCortex:
             
             response = result.get("output", str(result))
             console.print("\n[bold green]Cortex:[/bold green]")
-            console.print(Markdown(response)) # <-- RENDERS BEAUTIFUL UI
+            console.print(Markdown(response))
             console.print()
             
         except Exception as e:
             error_str = str(e)
-            # If the LLM did the work but forgot "Final Answer: ", we catch it and print the output perfectly anyway.
             if "Could not parse LLM output:" in error_str:
                 raw_output = error_str.split("Could not parse LLM output:")[1].strip()
-                
-                # Clean up any trailing backticks or LangChain troubleshooting links
                 raw_output = raw_output.replace("`", "")
                 if "For troubleshooting, visit:" in raw_output:
                     raw_output = raw_output.split("For troubleshooting, visit:")[0].strip()
                 
                 console.print("\n[bold green]Cortex:[/bold green]")
-                console.print(Markdown(raw_output)) # <-- RENDERS BEAUTIFUL UI
+                console.print(Markdown(raw_output))
                 console.print()
             else:
                 console.print(f"[bold red][!] Agent Execution Error:[/bold red] {e}")

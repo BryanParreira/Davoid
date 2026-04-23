@@ -2,15 +2,10 @@ rich
 scapy
 requests[socks]
 cryptography
-pywebcopy
 python-crontab
-dnspython
-python-whois
-flask
 psutil
 netaddr
 beautifulsoup4
-phonenumbers
 jinja2
 questionary
 PyYAML
@@ -20,10 +15,6 @@ ldap3
 pymetasploit3
 python-nmap
 paramiko
-stegano
-Pillow
-weasyprint
-# --- NEW ENTERPRISE DEPENDENCIES ---
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 langchain>=0.1.0

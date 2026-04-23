@@ -1,6 +1,6 @@
 """
 modules/ai_assist.py — Davoid Cortex (Ultimate Autonomous Agent)
-Equipped with Nmap (-Pn), Metasploit, DNS Recon, Web Recon, DB Query, and Ping.
+Equipped with Nmap (-Pn), Metasploit, Subdomain Recon, Shodan, Web Recon, DB Query, and Ping.
 """
 
 import os
@@ -128,7 +128,6 @@ def tool_run_metasploit(commands: str) -> str:
     except Exception as e:
         return f"Metasploit failed: {e}"
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  CORTEX ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +180,7 @@ class AutonomousCortex:
                 agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
                 verbose=False,
                 handle_parsing_errors=True,
-                max_iterations=7, # Increased iterations to support tool chaining 
+                max_iterations=7, 
                 early_stopping_method="generate",
                 agent_kwargs={
                     "system_message_prefix": system_instruction
@@ -205,12 +204,28 @@ class AutonomousCortex:
         except Exception: pass
         return []
 
-    def chat(self, user_input: str):
+    def chat(self, user_input: str, override_prompt: str = None):
         console.print(f"\n[bold cyan]Cortex ({self.model_name}) thinking and deploying tools...[/bold cyan]")
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                result = self.agent.invoke({"input": user_input})
+            # Re-initialize agent if override_prompt is given (used heavily by God Mode)
+            if override_prompt:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    agent_override = initialize_agent(
+                        tools=self.tools,
+                        llm=self.llm,
+                        agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+                        verbose=False,
+                        handle_parsing_errors=True,
+                        max_iterations=7,
+                        early_stopping_method="generate",
+                        agent_kwargs={"system_message_prefix": override_prompt}
+                    )
+                    result = agent_override.invoke({"input": user_input})
+            else:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    result = self.agent.invoke({"input": user_input})
             
             response = result.get("output", str(result))
             console.print("\n[bold green]Cortex:[/bold green]")
@@ -218,7 +233,6 @@ class AutonomousCortex:
             
         except Exception as e:
             console.print(f"[bold red][!] Agent Execution Error:[/bold red] {e}")
-
 
 def run_ai_console():
     draw_header("AI Cortex (Autonomous Agent)")

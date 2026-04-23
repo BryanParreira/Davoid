@@ -101,6 +101,7 @@ def tool_nmap_scan(target: str) -> str:
         return f"Nmap scan failed: {e}"
 
 def tool_shodan_lookup(ip: str) -> str:
+    """Uses the free InternetDB API (Shodan tier) to find open ports and CVEs."""
     try:
         res = requests.get(f"https://internetdb.shodan.io/{ip.strip()}", timeout=10)
         if res.status_code == 200:
@@ -111,6 +112,7 @@ def tool_shodan_lookup(ip: str) -> str:
         return f"Shodan lookup failed: {e}"
 
 def tool_subdomain_recon(domain: str) -> str:
+    """Quickly pulls passive subdomains using crt.sh"""
     domain = domain.strip()
     try:
         url = f"https://crt.sh/?q=%.{domain}&output=json"
@@ -225,7 +227,8 @@ class AutonomousCortex:
             "2. For Subdomains and DNS: Output a clean, bulleted list of discovered assets.\n"
             "3. For Web Headers and Ping: Use clean Markdown key-value formatting.\n"
             "4. For Metasploit: Provide a structured 'Action Report' block showing the Exploit Status and any critical session output.\n"
-            "5. ALWAYS conclude your response with a brief **Tactical Analysis** section explaining what the findings mean and suggesting the next attack vector."
+            "5. ALWAYS conclude your response with a brief **Tactical Analysis** section explaining what the findings mean and suggesting the next attack vector.\n"
+            "6. VERY IMPORTANT: You must ALWAYS prefix your final response to the user with 'Final Answer: '. Do not forget this prefix!"
         )
 
         with warnings.catch_warnings():
@@ -235,7 +238,7 @@ class AutonomousCortex:
                 llm=self.llm,
                 agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
                 verbose=False,
-                handle_parsing_errors="Check your output and make sure it conforms to the Action/Action Input format!",
+                handle_parsing_errors=True,
                 max_iterations=7, 
                 early_stopping_method="generate",
                 agent_kwargs={
@@ -287,7 +290,18 @@ class AutonomousCortex:
             console.print(response + "\n")
             
         except Exception as e:
-            console.print(f"[bold red][!] Agent Execution Error:[/bold red] {e}")
+            error_str = str(e)
+            # Intercept LangChain parsing failures gracefully to keep output clean
+            if "Could not parse LLM output:" in error_str:
+                raw_output = error_str.split("Could not parse LLM output:")[1].strip()
+                raw_output = raw_output.replace("`", "")
+                if "For troubleshooting, visit:" in raw_output:
+                    raw_output = raw_output.split("For troubleshooting, visit:")[0].strip()
+                
+                console.print("\n[bold green]Cortex:[/bold green]")
+                console.print(raw_output + "\n")
+            else:
+                console.print(f"[bold red][!] Agent Execution Error:[/bold red] {e}")
 
 def run_ai_console():
     draw_header("AI Cortex (Autonomous Agent)")

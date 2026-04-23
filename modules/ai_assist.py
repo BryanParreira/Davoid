@@ -1,6 +1,6 @@
 """
 modules/ai_assist.py — Davoid Cortex (Ultimate Autonomous Agent)
-Equipped with Nmap, Metasploit, DNS Recon, Web Recon, DB Query, and Ping.
+Equipped with Nmap (-Pn), Metasploit, DNS Recon, Web Recon, DB Query, and Ping.
 """
 
 import os
@@ -55,8 +55,8 @@ def tool_ping_target(target_ip: str) -> str:
 
 def tool_nmap_scan(target: str) -> str:
     try:
-        # Added timeout=60 so nmap never hangs the AI
-        output = subprocess.check_output(f"nmap -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT, timeout=60)
+        # Added -Pn to forcefully scan gateways/targets that block ICMP pings
+        output = subprocess.check_output(f"nmap -Pn -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT, timeout=60)
         return f"Nmap Scan Results for {target}:\n{output.decode('utf-8')}"
     except subprocess.TimeoutExpired:
         return "Nmap scan timed out. The host might be down or filtering all ports."
@@ -123,7 +123,7 @@ class AutonomousCortex:
         self.tools = [
             Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to read the database."),
             Tool(name="PingTarget", func=tool_ping_target, description="Use to check if an IP address is online. Input: exactly an IP or Domain."),
-            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input: exactly an IP or Subnet (e.g. 192.168.1.0/24)."),
+            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input: exactly an IP or Subnet (e.g. 192.168.1.0/24). Do not ping before scanning, use this tool directly."),
             Tool(name="RunMetasploit", func=tool_run_metasploit, description="Use to execute Metasploit exploits."),
             Tool(name="DNSRecon", func=tool_dns_recon, description="Use to resolve a domain name to an IP address using DNS."),
             Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Use to grab HTTP headers from a web server.")
@@ -137,8 +137,8 @@ class AutonomousCortex:
                 agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
                 verbose=False,
                 handle_parsing_errors=True,
-                max_iterations=5, # Forces the AI to stop looping and give an answer
-                early_stopping_method="generate", # Forces output generation if loop limit is hit
+                max_iterations=5,
+                early_stopping_method="generate",
                 agent_kwargs={
                     "system_message": (
                         "You are DAVOID CORTEX, an autonomous Red Team AI agent. "

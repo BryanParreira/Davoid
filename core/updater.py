@@ -18,6 +18,10 @@ def is_running_in_docker() -> bool:
     """Detects if the framework is currently sandboxed."""
     return os.path.exists('/.dockerenv')
 
+def check_version():
+    """Placeholder for future remote version checking against GitHub API."""
+    pass
+
 def perform_update():
     console.print("\n[bold cyan][*] Initiating Framework Update Sequence...[/bold cyan]")
 

@@ -9,6 +9,7 @@ import requests
 import questionary
 import subprocess
 import warnings
+import shlex
 
 from langchain_ollama import ChatOllama
 from langchain.agents import initialize_agent, AgentType, Tool
@@ -27,7 +28,7 @@ warnings.filterwarnings("ignore", message=".*initialize_agent.*")
 console = Console()
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  ARSENAL: AUTONOMOUS AGENT TOOLS
+#  ARSENAL: AUTONOMOUS AGENT TOOLS (Hardened & HITL Secured)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def tool_query_mission_db(query: str = "") -> str:
@@ -46,16 +47,52 @@ def tool_query_mission_db(query: str = "") -> str:
 
 def tool_ping_target(target_ip: str) -> str:
     try:
-        output = subprocess.check_output(f"ping -c 1 -W 1 {target_ip}", shell=True, stderr=subprocess.STDOUT, timeout=10)
+        output = subprocess.check_output(
+            ["ping", "-c", "1", "-W", "1", target_ip.strip()], 
+            stderr=subprocess.STDOUT, 
+            timeout=10
+        )
         return f"Target {target_ip} is ONLINE.\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
         return "Ping timed out."
     except subprocess.CalledProcessError as e:
         return f"Target {target_ip} is OFFLINE or blocking ICMP.\nOutput: {e.output.decode('utf-8', errors='ignore')}"
+    except Exception as e:
+        return f"Ping failed: {e}"
 
 def tool_nmap_scan(target: str) -> str:
+    target = target.strip()
+    
+    # [HITL] Operator Gate & Parameter Selection
+    console.print(Panel(f"[bold yellow]Cortex is requesting an NMAP scan on: {target}[/bold yellow]", border_style="yellow"))
+    profile = questionary.select(
+        "Authorize and select scan profile:",
+        choices=[
+            "1. Quick Scan (-F -T4)",
+            "2. Standard Scan (-sS -T4)",
+            "3. Full Audit (-sS -sV -sC -p- -T4)",
+            "Cancel / Deny Authorization"
+        ],
+        style=Q_STYLE
+    ).ask()
+
+    if not profile or "Cancel" in profile:
+        console.print("[yellow][-] Scan denied by operator.[/yellow]")
+        return "Operator denied the Nmap scan. Do not attempt to scan this target again unless asked."
+
+    # Map choice to safe argument arrays
+    if "Quick" in profile:
+        args = ["-Pn", "-F", "-T4", "--open"]
+    elif "Standard" in profile:
+        args = ["-Pn", "-sS", "-T4", "--open"]
+    elif "Full" in profile:
+        args = ["-Pn", "-sS", "-sV", "-sC", "-p-", "-T4", "--open"]
+    else:
+        args = ["-Pn", "-F", "-T4", "--open"]
+
     try:
-        output = subprocess.check_output(f"nmap -Pn -F -T4 --open {target}", shell=True, stderr=subprocess.STDOUT, timeout=60)
+        cmd = ["nmap"] + args + [target]
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=120)
         return f"Nmap Scan Results for {target}:\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.TimeoutExpired:
         return "Nmap scan timed out. The host might be down or filtering all ports."
@@ -67,7 +104,7 @@ def tool_nmap_scan(target: str) -> str:
 def tool_shodan_lookup(ip: str) -> str:
     """Uses the free InternetDB API (Shodan tier) to find open ports and CVEs."""
     try:
-        res = requests.get(f"https://internetdb.shodan.io/{ip}", timeout=10)
+        res = requests.get(f"https://internetdb.shodan.io/{ip.strip()}", timeout=10)
         if res.status_code == 200:
             data = res.json()
             return f"Shodan Data for {ip}:\nHostnames: {data.get('hostnames')}\nPorts: {data.get('ports')}\nCVEs: {data.get('vulns')}"
@@ -77,6 +114,7 @@ def tool_shodan_lookup(ip: str) -> str:
 
 def tool_subdomain_recon(domain: str) -> str:
     """Quickly pulls passive subdomains using crt.sh"""
+    domain = domain.strip()
     try:
         url = f"https://crt.sh/?q=%.{domain}&output=json"
         res = requests.get(url, timeout=15)
@@ -93,7 +131,11 @@ def tool_subdomain_recon(domain: str) -> str:
 
 def tool_dns_recon(domain: str) -> str:
     try:
-        output = subprocess.check_output(f"nslookup {domain}", shell=True, stderr=subprocess.STDOUT, timeout=10)
+        output = subprocess.check_output(
+            ["nslookup", domain.strip()], 
+            stderr=subprocess.STDOUT, 
+            timeout=10
+        )
         return f"DNS Results for {domain}:\n{output.decode('utf-8', errors='ignore')}"
     except subprocess.CalledProcessError as e:
         return f"DNS lookup failed or returned partial results:\n{e.output.decode('utf-8', errors='ignore')}"
@@ -101,6 +143,7 @@ def tool_dns_recon(domain: str) -> str:
         return f"DNS lookup failed: {e}"
 
 def tool_web_headers(url: str) -> str:
+    url = url.strip()
     if not url.startswith("http"):
         url = "http://" + url
     try:
@@ -111,13 +154,22 @@ def tool_web_headers(url: str) -> str:
         return f"Failed to connect to web server: {e}"
 
 def tool_run_metasploit(commands: str) -> str:
+    commands = commands.strip()
+    
+    # [HITL] Operator Gate for Exploitation
+    console.print(Panel(f"[bold red]Cortex is attempting to execute Metasploit payload:[/bold red]\n[dim]{commands}[/dim]", border_style="red"))
+    confirm = questionary.confirm("Authorize this exploit execution?", default=False, style=Q_STYLE).ask()
+    
+    if not confirm:
+        console.print("[yellow][-] Exploit execution denied by operator.[/yellow]")
+        return "Operator explicitly denied the Metasploit execution. Do not attempt this exploit again."
+
     try:
         if "exit" not in commands:
             commands += "; exit"
         output = subprocess.check_output(
-            f"msfconsole -q -x '{commands}'", 
-            shell=True, 
-            stderr=subprocess.STDOUT,
+            ["msfconsole", "-q", "-x", commands], 
+            stderr=subprocess.STDOUT, 
             timeout=120
         )
         return f"Metasploit Execution Results:\n{output.decode('utf-8', errors='ignore')}"
@@ -155,12 +207,12 @@ class AutonomousCortex:
         self.tools = [
             Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to read the database. Input should be empty."),
             Tool(name="PingTarget", func=tool_ping_target, description="Check if an IP address is online. Input MUST be exactly an IP or Domain."),
-            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Scan a target for open ports. Input MUST be exactly an IP or Subnet (e.g. 192.168.1.0/24)."),
+            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Scan a target for open ports. The system will prompt the human operator for the scan profile. Input MUST be exactly an IP or Subnet (e.g. 192.168.1.0/24)."),
             Tool(name="ShodanIntel", func=tool_shodan_lookup, description="Lookup open ports and CVEs for an IP without scanning it actively. Input MUST be an IP."),
             Tool(name="SubdomainRecon", func=tool_subdomain_recon, description="Find subdomains for a target domain. Input MUST be exactly a domain name (e.g. example.com)."),
             Tool(name="DNSRecon", func=tool_dns_recon, description="Resolve a domain name to an IP address using DNS. Input MUST be exactly a domain name."),
             Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Grab HTTP headers from a web server. Input MUST be exactly a URL."),
-            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Execute Metasploit exploits. Input MUST be exact MSF commands separated by semicolons.")
+            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Execute Metasploit exploits. The system will prompt the human operator for authorization before executing. Input MUST be exact MSF commands separated by semicolons.")
         ]
         
         system_instruction = (
@@ -168,6 +220,7 @@ class AutonomousCortex:
             f"Your current Operator IP is {self.operator_ip} and the Gateway is {self.gateway_ip}. "
             "You have access to tools to ping, Nmap scan, lookup Shodan data, find subdomains, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
             "If the user asks you to scan, gather intel, or exploit a target, YOU MUST USE YOUR TOOLS. "
+            "IMPORTANT: When you use Nmap or Metasploit, the interface will automatically pause and ask the human operator for authorization. If the operator denies the action, acknowledge the denial and suggest a different approach. "
             "Think step-by-step. Use Shodan and SubdomainRecon before active Nmap scans to stay stealthy if requested. "
             "Return your final answer in clean Markdown format."
         )
@@ -179,7 +232,7 @@ class AutonomousCortex:
                 llm=self.llm,
                 agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
                 verbose=False,
-                handle_parsing_errors=True,
+                handle_parsing_errors="Check your output and make sure it conforms to the Action/Action Input format!",
                 max_iterations=7, 
                 early_stopping_method="generate",
                 agent_kwargs={
@@ -207,7 +260,6 @@ class AutonomousCortex:
     def chat(self, user_input: str, override_prompt: str = None):
         console.print(f"\n[bold cyan]Cortex ({self.model_name}) thinking and deploying tools...[/bold cyan]")
         try:
-            # Re-initialize agent if override_prompt is given (used heavily by God Mode)
             if override_prompt:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")

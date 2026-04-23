@@ -277,16 +277,16 @@ def main():
             draw_header("NEXUS COMMAND CENTER", context=ctx)
             
             phase = questionary.select(
-                "Select Operational Phase:",
+                "Select Command:",
                 choices=[
                     Separator("─── OFFENSIVE OPERATIONS ─────────────────"),
-                    Choice("Phase 1: Target Acquisition (Recon & Mapping)", value="recon"),
-                    Choice("Phase 2: Assault Engine (Exploitation & Payloads)", value="assault"),
-                    Choice("Phase 3: GhostHub C2 (Encrypted Beacon Network)", value="c2"),
+                    Choice("1. Target Acquisition (Recon & Mapping)", value="recon"),
+                    Choice("2. Assault Engine (Exploitation & Payloads)", value="assault"),
+                    Choice("3. GhostHub C2 (Encrypted Beacon Network)", value="c2"),
                     Separator("─── INTELLIGENCE & ANALYTICS ─────────────"),
-                    Choice("Phase 4: AI Cortex (Autonomous LLM Agent)", value="ai"),
-                    Choice("Phase 5: Purple Team (MITRE ATT&CK Emulation)", value="purple"),
-                    Choice("Phase 6: Generate Actionable HTML Report", value="report"),
+                    Choice("4. AI Cortex (Autonomous LLM Agent)", value="ai"),
+                    Choice("5. Purple Team (MITRE ATT&CK Emulation)", value="purple"),
+                    Choice("6. Generate Actionable HTML Report", value="report"),
                     Separator("─── SYSTEM SETTINGS ──────────────────────"),
                     Choice("   Context Configuration", value="sys"),
                     Choice("   Framework Update", value="update"),

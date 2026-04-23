@@ -217,18 +217,17 @@ class AutonomousCortex:
         system_instruction = (
             "You are DAVOID CORTEX, an elite autonomous Red Team AI agent. "
             f"Your current Operator IP is {self.operator_ip} and the Gateway is {self.gateway_ip}. "
-            "You have access to tools to ping, Nmap scan, lookup Shodan data, find subdomains, do DNS recon, grab web headers, read databases, and FIRE EXPLOITS via Metasploit. "
-            "If the user asks you to scan, gather intel, or exploit a target, YOU MUST USE YOUR TOOLS. "
-            "IMPORTANT: When you use Nmap or Metasploit, the interface will automatically pause and ask the human operator for authorization. If the operator denies the action, acknowledge the denial and suggest a different approach. "
-            "Think step-by-step. Use Shodan and SubdomainRecon before active Nmap scans to stay stealthy if requested. "
-            "\n\n--- CRITICAL FORMATTING INSTRUCTIONS ---\n"
-            "You MUST format your final answers cleanly and professionally using Markdown. DO NOT output massive walls of raw text.\n"
-            "1. For Nmap and Shodan: ALWAYS output a detailed Markdown table (Port, State, Service, Version/Info). Never summarize ports into a paragraph.\n"
-            "2. For Subdomains and DNS: Output a clean, bulleted list of discovered assets.\n"
-            "3. For Web Headers and Ping: Use clean Markdown key-value formatting.\n"
-            "4. For Metasploit: Provide a structured 'Action Report' block showing the Exploit Status and any critical session output.\n"
-            "5. ALWAYS conclude your response with a brief **Tactical Analysis** section explaining what the findings mean and suggesting the next attack vector.\n"
-            "6. VERY IMPORTANT: You must ALWAYS prefix your final response to the user with 'Final Answer: '. Do not forget this prefix!"
+            "You have tools to Ping, Nmap scan, Shodan lookup, find Subdomains, do DNS recon, grab Web Headers, query databases, and FIRE EXPLOITS via Metasploit. "
+            "You MUST use your tools to complete the operator's requests. "
+            "If a tool (like Metasploit) returns an error, state that the specific exploit failed or module was not found. DO NOT claim the tool itself is missing. "
+            "\n\n======================================================\n"
+            "CRITICAL OUTPUT FORMATTING (YOU MUST OBEY THESE RULES):\n"
+            "======================================================\n"
+            "1. You MUST ALWAYS start your final response with exactly: 'Final Answer: '\n"
+            "2. NEVER summarize open ports into a paragraph. If you use Nmap or Shodan, you MUST output a strict Markdown table with columns: | Port | State | Service | Version |\n"
+            "3. If you use Metasploit, output an 'Action Report' block detailing what was executed and the result.\n"
+            "4. ALWAYS conclude your response with a '**Tactical Analysis:**' section suggesting the next attack vector.\n"
+            "Failure to follow this exact formatting will compromise the mission."
         )
 
         with warnings.catch_warnings():
@@ -238,7 +237,7 @@ class AutonomousCortex:
                 llm=self.llm,
                 agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
                 verbose=False,
-                handle_parsing_errors=True,
+                handle_parsing_errors="Check your output and make sure it conforms to the Action/Action Input format!",
                 max_iterations=7, 
                 early_stopping_method="generate",
                 agent_kwargs={
@@ -291,9 +290,11 @@ class AutonomousCortex:
             
         except Exception as e:
             error_str = str(e)
-            # Intercept LangChain parsing failures gracefully to keep output clean
+            # If the LLM did the work but forgot "Final Answer: ", we catch it and print the output perfectly anyway.
             if "Could not parse LLM output:" in error_str:
                 raw_output = error_str.split("Could not parse LLM output:")[1].strip()
+                
+                # Clean up any trailing backticks or LangChain troubleshooting links
                 raw_output = raw_output.replace("`", "")
                 if "For troubleshooting, visit:" in raw_output:
                     raw_output = raw_output.split("For troubleshooting, visit:")[0].strip()

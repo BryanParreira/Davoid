@@ -18,10 +18,6 @@ def is_running_in_docker() -> bool:
     """Detects if the framework is currently sandboxed."""
     return os.path.exists('/.dockerenv')
 
-def check_version():
-    """Placeholder for future remote version checking against GitHub API."""
-    pass
-
 def perform_update():
     console.print("\n[bold cyan][*] Initiating Framework Update Sequence...[/bold cyan]")
 
@@ -41,13 +37,20 @@ def perform_update():
     try:
         BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         
-        console.print("[dim]Pulling latest changes from GitHub...[/dim]")
-        result = subprocess.run(["git", "pull", "origin", "main"], cwd=BASE_DIR, capture_output=True, text=True)
-        console.print(f"[white]{result.stdout}[/white]")
+        console.print("[dim]Fetching latest changes from GitHub...[/dim]")
         
-        if "Already up to date." in result.stdout:
-            questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()
-            return
+        # 1. Fetch updates from the remote repository
+        subprocess.run(["git", "fetch", "origin", "main"], cwd=BASE_DIR, capture_output=True)
+        
+        # 2. FORCE a hard reset so it perfectly matches GitHub (bypasses merge conflicts)
+        result = subprocess.run(
+            ["git", "reset", "--hard", "origin/main"], 
+            cwd=BASE_DIR, 
+            capture_output=True, 
+            text=True
+        )
+        
+        console.print(f"[white]{result.stdout}[/white]")
 
         console.print("[dim]Updating Python dependencies...[/dim]")
         subprocess.run(
@@ -59,7 +62,6 @@ def perform_update():
         console.print("\n[bold green][+] Update complete! Restarting framework...[/bold green]")
         time.sleep(1.5)
         
-        # FOOLPROOF RESTART: Use absolute paths so it never gets lost
         main_script = os.path.join(BASE_DIR, "main.py")
         os.execv(sys.executable, [sys.executable, main_script] + sys.argv[1:])
         

@@ -18,7 +18,6 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*initialize_agent.*")
 
-# Modern Langchain Agent Imports
 from langchain_ollama import ChatOllama
 from langchain.agents import initialize_agent, AgentType, Tool
 
@@ -32,15 +31,12 @@ console = Console()
 # ─────────────────────────────────────────────────────────────────────────────
 
 def tool_query_mission_db(query: str = "") -> str:
-    """Reads the penetration testing database for previous findings."""
     try:
         rows = db.get_critical_logs(limit=10)
         if not rows:
             rows = db.get_all()[:10]
-            
         if not rows:
             return "The database is empty. No vulnerabilities found yet."
-            
         result = "Recent Findings:\n"
         for r in rows:
             result += f"- Target: {r.target} | Severity: {r.severity} | Detail: {r.details}\n"
@@ -49,23 +45,25 @@ def tool_query_mission_db(query: str = "") -> str:
         return f"Error reading encrypted database: {e}"
 
 def tool_ping_target(target_ip: str) -> str:
-    """Checks if a target is online using ICMP Ping."""
     try:
-        output = subprocess.check_output(f"ping -c 1 -W 1 {target_ip}", shell=True, stderr=subprocess.STDOUT)
+        output = subprocess.check_output(f"ping -c 1 -W 1 {target_ip}", shell=True, stderr=subprocess.STDOUT, timeout=10)
         return f"Target {target_ip} is ONLINE.\n{output.decode('utf-8')}"
+    except subprocess.TimeoutExpired:
+        return "Ping timed out."
     except subprocess.CalledProcessError:
         return f"Target {target_ip} is OFFLINE or blocking ICMP."
 
 def tool_nmap_scan(target: str) -> str:
-    """Runs a fast Nmap port scan on a target."""
     try:
-        output = subprocess.check_output(f"nmap -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT)
+        # Added timeout=60 so nmap never hangs the AI
+        output = subprocess.check_output(f"nmap -F -T3 -n {target}", shell=True, stderr=subprocess.STDOUT, timeout=60)
         return f"Nmap Scan Results for {target}:\n{output.decode('utf-8')}"
+    except subprocess.TimeoutExpired:
+        return "Nmap scan timed out. The host might be down or filtering all ports."
     except Exception as e:
         return f"Nmap scan failed: {e}"
 
 def tool_run_metasploit(commands: str) -> str:
-    """Executes a Metasploit exploit autonomously."""
     try:
         if "exit" not in commands:
             commands += "; exit"
@@ -77,20 +75,18 @@ def tool_run_metasploit(commands: str) -> str:
         )
         return f"Metasploit Execution Results:\n{output.decode('utf-8')}"
     except subprocess.TimeoutExpired:
-        return "Metasploit execution timed out after 120 seconds. Exploit may have failed or required interaction."
+        return "Metasploit execution timed out after 120 seconds."
     except Exception as e:
         return f"Metasploit failed: {e}"
 
 def tool_dns_recon(domain: str) -> str:
-    """Performs DNS lookup on a domain to find IP addresses."""
     try:
-        output = subprocess.check_output(f"nslookup {domain}", shell=True, stderr=subprocess.STDOUT)
+        output = subprocess.check_output(f"nslookup {domain}", shell=True, stderr=subprocess.STDOUT, timeout=10)
         return f"DNS Results for {domain}:\n{output.decode('utf-8')}"
     except Exception as e:
         return f"DNS lookup failed: {e}"
 
 def tool_web_headers(url: str) -> str:
-    """Grabs HTTP headers from a web server to identify software versions."""
     if not url.startswith("http"):
         url = "http://" + url
     try:
@@ -125,12 +121,12 @@ class AutonomousCortex:
         )
         
         self.tools = [
-            Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to see what vulnerabilities or targets have been saved to the database."),
+            Tool(name="QueryMissionDatabase", func=tool_query_mission_db, description="Use to read the database."),
             Tool(name="PingTarget", func=tool_ping_target, description="Use to check if an IP address is online. Input: exactly an IP or Domain."),
-            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input: exactly an IP or Domain or Subnet (e.g. 192.168.1.0/24)."),
-            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Use to execute Metasploit exploits. Input must be semi-colon separated msfconsole commands."),
+            Tool(name="NmapPortScan", func=tool_nmap_scan, description="Use to scan a target for open ports. Input: exactly an IP or Subnet (e.g. 192.168.1.0/24)."),
+            Tool(name="RunMetasploit", func=tool_run_metasploit, description="Use to execute Metasploit exploits."),
             Tool(name="DNSRecon", func=tool_dns_recon, description="Use to resolve a domain name to an IP address using DNS."),
-            Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Use to grab HTTP headers from a web server to find software versions.")
+            Tool(name="WebHeaderGrabber", func=tool_web_headers, description="Use to grab HTTP headers from a web server.")
         ]
         
         with warnings.catch_warnings():
@@ -141,6 +137,8 @@ class AutonomousCortex:
                 agent=AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION,
                 verbose=False,
                 handle_parsing_errors=True,
+                max_iterations=5, # Forces the AI to stop looping and give an answer
+                early_stopping_method="generate", # Forces output generation if loop limit is hit
                 agent_kwargs={
                     "system_message": (
                         "You are DAVOID CORTEX, an autonomous Red Team AI agent. "
@@ -154,16 +152,8 @@ class AutonomousCortex:
 
     def _auto_detect_ollama(self) -> str:
         if os.path.exists('/.dockerenv'):
-            target_url = "http://host.docker.internal:11434"
-        else:
-            target_url = "http://127.0.0.1:11434"
-
-        try:
-            if requests.get(f"{target_url}/api/tags", timeout=1).status_code == 200:
-                return target_url
-        except requests.exceptions.RequestException:
-            pass
-        return target_url
+            return "http://host.docker.internal:11434"
+        return "http://127.0.0.1:11434"
 
     def check_connection(self) -> bool:
         try: return requests.get(f"{self.base_url}/api/tags", timeout=2).status_code == 200
@@ -198,7 +188,6 @@ def run_ai_console():
 
     if not agent.check_connection():
         console.print(f"[bold red][!] Ollama is unreachable at {agent.base_url}[/bold red]")
-        console.print("Ensure Ollama is running in the background on your machine.")
         questionary.press_any_key_to_continue(style=Q_STYLE).ask()
         return
 

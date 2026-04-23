@@ -10,7 +10,7 @@ import subprocess
 import questionary
 from rich.console import Console
 from rich.panel import Panel
-from core.ui import Q_STYLE
+from core.ui import draw_header, Q_STYLE
 
 console = Console()
 
@@ -23,7 +23,7 @@ def check_version():
     pass
 
 def perform_update():
-    console.print("\n[bold cyan][*] Initiating Framework Update Sequence...[/bold cyan]")
+    draw_header("NEXUS COMMAND CENTER: SYSTEM UPDATE")
 
     if is_running_in_docker():
         console.print(Panel(
@@ -41,30 +41,43 @@ def perform_update():
     try:
         BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         
-        console.print("[dim]Fetching latest changes from GitHub...[/dim]")
-        
-        # 1. Fetch updates from the remote repository
-        subprocess.run(["git", "fetch", "origin", "main"], cwd=BASE_DIR, capture_output=True)
-        
-        # 2. FORCE a hard reset so it perfectly matches GitHub (bypasses merge conflicts)
-        result = subprocess.run(
-            ["git", "reset", "--hard", "origin/main"], 
-            cwd=BASE_DIR, 
-            capture_output=True, 
-            text=True
-        )
-        
-        console.print(f"[white]{result.stdout}[/white]")
+        console.print(Panel("Initiating secure sync with remote GitHub repository...", border_style="cyan"))
 
-        console.print("[dim]Updating Python dependencies...[/dim]")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-r", "requirements.txt"], 
-            cwd=BASE_DIR, 
-            check=True
-        )
+        # 1. Fetch updates silently
+        with console.status("[bold cyan]Fetching latest telemetry from origin...[/bold cyan]", spinner="bouncingBar"):
+            subprocess.run(["git", "fetch", "origin", "main"], cwd=BASE_DIR, capture_output=True, check=True)
+            time.sleep(0.8) # Slight delay for visual smoothness
         
-        console.print("\n[bold green][+] Update complete! Restarting framework...[/bold green]")
-        time.sleep(1.5)
+        # 2. FORCE a hard reset silently
+        with console.status("[bold cyan]Applying hotfixes and syncing core modules...[/bold cyan]", spinner="bouncingBar"):
+            result = subprocess.run(
+                ["git", "reset", "--hard", "origin/main"], 
+                cwd=BASE_DIR, 
+                capture_output=True, 
+                text=True,
+                check=True
+            )
+            time.sleep(0.8)
+
+        # 3. Update dependencies silently
+        with console.status("[bold cyan]Compiling and upgrading Python dependencies...[/bold cyan]", spinner="bouncingBar"):
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--quiet", "--no-cache-dir", "-r", "requirements.txt"], 
+                cwd=BASE_DIR, 
+                capture_output=True,
+                check=True
+            )
+            time.sleep(1)
+        
+        # 4. Success Panel
+        console.print(Panel(
+            f"[bold green]System Upgrade Successful![/bold green]\n\n"
+            f"[dim]{result.stdout.strip()}[/dim]\n\n"
+            f"[cyan]Rebooting Nexus Command Center...[/cyan]",
+            title="Update Complete",
+            border_style="green"
+        ))
+        time.sleep(2)
         
         main_script = os.path.join(BASE_DIR, "main.py")
         os.execv(sys.executable, [sys.executable, main_script] + sys.argv[1:])
@@ -72,6 +85,11 @@ def perform_update():
     except FileNotFoundError:
         console.print("[bold red][!] Git is not installed or not in PATH.[/bold red]")
         questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()
+    except subprocess.CalledProcessError as e:
+        # If a command fails, unhide the error output so the user knows what broke
+        error_msg = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else str(e)
+        console.print(f"\n[bold red][!] Update process encountered a critical error:[/bold red]\n{error_msg}")
+        questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()
     except Exception as e:
-        console.print(f"[bold red][!] Update failed:[/bold red] {e}")
+        console.print(f"\n[bold red][!] Unexpected failure during update:[/bold red] {e}")
         questionary.press_any_key_to_continue("Press any key to return...", style=Q_STYLE).ask()

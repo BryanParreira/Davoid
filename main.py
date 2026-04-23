@@ -201,14 +201,14 @@ def show_reconnaissance_menu():
         choice = questionary.select(
             "Select Recon Module:",
             choices=[
-                Separator("─── ACTIVE INFRASTRUCTURE SCANNING ──────"),
-                Choice("Network Scanner (Nmap Engine)", value="nmap"),
-                Choice("Web Infrastructure Recon (Web Ghost)", value="web"),
-                Separator("─── CLOUD & PASSIVE ───────────────────────"),
-                Choice("Cloud & Container Warfare", value="cloud"),
-                Choice("Passive Attack Surface (Shodan/InternetDB)", value="shodan"),
-                Separator("─── NAVIGATION ────────────────────────────"),
-                Choice("Return to Main Menu", value="back"),
+                Separator("─── ACTIVE INFRASTRUCTURE ──────────────"),
+                Choice("Network Discovery (Tactical Nmap Engine)", value="nmap"),
+                Choice("Infrastructure Leak Hunter (Web Ghost)", value="web"),
+                Separator("─── CLOUD & PASSIVE INTEL ──────────────"),
+                Choice("Cloud & Container Exploitation", value="cloud"),
+                Choice("Attack Surface Mapping (Shodan/InternetDB)", value="shodan"),
+                Separator("────────────────────────────────────────"),
+                Choice("Return to Nexus Command Center", value="back"),
             ],
             style=Q_STYLE
         ).ask()
@@ -228,23 +228,23 @@ def show_assault_menu():
     }
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        draw_header("Direct Action & Exploitation", context=ctx)
+        draw_header("Exploitation & Weaponization Engine", context=ctx)
         choice = questionary.select(
             "Select Assault Vector:",
             choices=[
-                Separator("─── AUTONOMOUS ────────────────────────────"),
-                Choice("GOD MODE (Auto Campaign Engine)", value="god"),
-                Separator("─── EXPLOITATION ──────────────────────────"),
-                Choice("Metasploit Framework (MSF-RPC)", value="msf"),
-                Choice("Active Directory Ops", value="ad"),
-                Choice("Credential Re-Use Tester", value="cred"),
-                Separator("─── WEAPONIZATION & POST-EXPLOIT ──────────"),
-                Choice("Payload Forge (Shell Generator)", value="payload"),
-                Choice("Crypt-Keeper (Payload Obfuscation)", value="crypt"),
-                Choice("PrivEsc Looter", value="loot"),
-                Choice("Persistence Deployment Engine", value="persist"),
-                Separator("─── NAVIGATION ───────────────────────────"),
-                Choice("Return to Main Menu", value="back"),
+                Separator("─── AUTONOMOUS EXPLOITATION ────────────"),
+                Choice("God Mode (Autonomous Kill-Chain)", value="god"),
+                Separator("─── TARGETED EXPLOITATION ───────────────"),
+                Choice("Metasploit RPC Orchestrator", value="msf"),
+                Choice("Active Directory Weaponization", value="ad"),
+                Choice("Credential Re-Use Matrix", value="cred"),
+                Separator("─── WEAPONIZATION & POST-EXPLOIT ───────"),
+                Choice("Payload Forge (Polymorphic Shells)", value="payload"),
+                Choice("Crypt-Keeper (AV/EDR Evasion)", value="crypt"),
+                Choice("Privilege Escalation & Looting", value="loot"),
+                Choice("Advanced Persistence Deployment", value="persist"),
+                Separator("────────────────────────────────────────"),
+                Choice("Return to Nexus Command Center", value="back"),
             ],
             style=Q_STYLE
         ).ask()
@@ -274,23 +274,23 @@ def main():
     while True:
         try:
             os.system('cls' if os.name == 'nt' else 'clear')
-            draw_header("Autonomous Black-Box Master Hub", context=ctx)
+            draw_header("NEXUS COMMAND CENTER", context=ctx)
             
             phase = questionary.select(
-                "Select Operation Phase:",
+                "Select Operational Phase:",
                 choices=[
                     Separator("─── OFFENSIVE OPERATIONS ─────────────────"),
-                    Choice("1. Reconnaissance & Target Acquisition", value="recon"),
-                    Choice("2. Assault, Exploitation & Weapons", value="assault"),
-                    Choice("3. Command & Control (C2 GhostHub)", value="c2"),
-                    Separator("─── INTELLIGENCE & BLUE TEAM ─────────────"),
-                    Choice("4. LangChain AI Agent Cortex", value="ai"),
-                    Choice("5. Purple Team MITRE ATT&CK Mapper", value="purple"),
-                    Choice("6. Generate Mission HTML Report", value="report"),
-                    Separator("─── SYSTEM ───────────────────────────────"),
+                    Choice("Phase 1: Target Acquisition (Recon & Mapping)", value="recon"),
+                    Choice("Phase 2: Assault Engine (Exploitation & Payloads)", value="assault"),
+                    Choice("Phase 3: GhostHub C2 (Encrypted Beacon Network)", value="c2"),
+                    Separator("─── INTELLIGENCE & ANALYTICS ─────────────"),
+                    Choice("Phase 4: AI Cortex (Autonomous LLM Agent)", value="ai"),
+                    Choice("Phase 5: Purple Team (MITRE ATT&CK Emulation)", value="purple"),
+                    Choice("Phase 6: Generate Actionable HTML Report", value="report"),
+                    Separator("─── SYSTEM SETTINGS ──────────────────────"),
                     Choice("   Context Configuration", value="sys"),
                     Choice("   Framework Update", value="update"),
-                    Choice("   Execute Vanish Protocol", value="exit"),
+                    Choice("   Execute Vanish Protocol (Forensic Wipe)", value="exit"),
                 ],
                 style=Q_STYLE,
                 pointer="▶"

@@ -15,6 +15,7 @@ from langchain_ollama import ChatOllama
 from langchain.agents import initialize_agent, AgentType, Tool
 from rich.console import Console
 from rich.panel import Panel
+from rich.markdown import Markdown
 
 from core.ui import draw_header, Q_STYLE
 from core.database import db
@@ -286,7 +287,8 @@ class AutonomousCortex:
             
             response = result.get("output", str(result))
             console.print("\n[bold green]Cortex:[/bold green]")
-            console.print(response + "\n")
+            console.print(Markdown(response)) # <-- RENDERS BEAUTIFUL UI
+            console.print()
             
         except Exception as e:
             error_str = str(e)
@@ -300,7 +302,8 @@ class AutonomousCortex:
                     raw_output = raw_output.split("For troubleshooting, visit:")[0].strip()
                 
                 console.print("\n[bold green]Cortex:[/bold green]")
-                console.print(raw_output + "\n")
+                console.print(Markdown(raw_output)) # <-- RENDERS BEAUTIFUL UI
+                console.print()
             else:
                 console.print(f"[bold red][!] Agent Execution Error:[/bold red] {e}")
 

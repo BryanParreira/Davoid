@@ -523,6 +523,37 @@ def main():
     load_config()
     detect_network_environment()
 
+    # Direct module dispatch — used by the Go TUI via DAVOID_MODULE env var
+    _module_key = os.environ.get("DAVOID_MODULE", "").strip()
+    if _module_key:
+        _direct = {
+            "scanner":      lambda: safe_execute(network_discovery),
+            "osint":        lambda: safe_execute(run_osint),
+            "mitm":         lambda: safe_execute(run_mitm),
+            "sniff":        lambda: safe_execute(run_sniffer),
+            "phishing":     lambda: safe_execute(run_phishing),
+            "ghost_hub":    lambda: safe_execute(run_ghost_hub),
+            "payloads":     lambda: safe_execute(generate_shell),
+            "crypt_keeper": lambda: safe_execute(run_crypt_keeper),
+            "persistence":  run_persistence,
+            "bruteforce":   lambda: safe_execute(crack_hash),
+            "looter":       lambda: safe_execute(run_looter),
+            "cred_tester":  lambda: safe_execute(run_cred_tester),
+            "ad_ops":       lambda: safe_execute(run_ad_ops),
+            "msf_engine":   lambda: safe_execute(run_msf),
+            "ai_assist":    lambda: safe_execute(run_ai_console),
+            "web_recon":    lambda: safe_execute(web_ghost),
+            "cloud_ops":    lambda: safe_execute(run_cloud_ops),
+            "purple_team":  lambda: safe_execute(run_purple_team),
+            "auditor":      lambda: safe_execute(run_auditor),
+            "god_mode":     lambda: safe_execute(run_god_mode),
+        }
+        if _module_key in _direct:
+            os.system('cls' if os.name == 'nt' else 'clear')
+            draw_header(_module_key.replace("_", " ").title(), context=ctx)
+            _direct[_module_key]()
+        sys.exit(0)
+
     actions = {
         "recon":       show_reconnaissance_menu,
         "assault":     show_assault_menu,

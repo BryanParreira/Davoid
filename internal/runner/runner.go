@@ -91,15 +91,24 @@ func FindPython() string {
 }
 
 // FindDavoidRoot locates the Python project root.
+// Binary directory is checked first so a local build always uses
+// its own main.py instead of a stale system install at /opt/davoid.
 func FindDavoidRoot() string {
-	candidates := []string{
-		"/opt/davoid",
-		filepath.Dir(os.Args[0]),
-	}
-	// Try the directory containing the running binary
+	var candidates []string
+
+	// 1. Directory of the running executable (highest priority)
 	if ex, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Dir(ex))
 	}
+
+	// 2. Current working directory
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, wd)
+	}
+
+	// 3. System install (fallback for installed builds)
+	candidates = append(candidates, "/opt/davoid")
+
 	for _, c := range candidates {
 		if _, err := os.Stat(filepath.Join(c, "main.py")); err == nil {
 			return c

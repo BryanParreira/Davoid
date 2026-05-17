@@ -3,7 +3,12 @@ VERSION := $(shell cat version.txt 2>/dev/null || echo "2.0.0")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 BUILD_DIR := dist
 
-.PHONY: build clean install release linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
+.PHONY: build clean install release linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 dev-setup
+
+dev-setup:
+	python3 -m venv venv
+	venv/bin/pip install -r requirements.txt -q
+	@echo "\n  Python venv ready. Now run: make build && ./davoid\n"
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/davoid/

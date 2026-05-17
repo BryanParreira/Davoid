@@ -122,6 +122,10 @@ func RunModule(key string) error {
 	python := FindPython(root)
 	mainPy := filepath.Join(root, "main.py")
 
+	if _, err := os.Stat(mainPy); err != nil {
+		return fmt.Errorf("main.py not found at %s — run install.sh or ensure Davoid is installed to /opt/davoid", root)
+	}
+
 	cmd := exec.Command(python, mainPy)
 	cmd.Dir = root
 	cmd.Stdin = os.Stdin
@@ -131,6 +135,9 @@ func RunModule(key string) error {
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				return fmt.Errorf("module failed (exit 1) — Python dependencies may be missing.\n  Fix: cd %s && python3 -m venv venv && venv/bin/pip install -r requirements.txt", root)
+			}
 			return fmt.Errorf("module exited with code %d", exitErr.ExitCode())
 		}
 		return fmt.Errorf("module error: %w", err)

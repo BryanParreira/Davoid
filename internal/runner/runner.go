@@ -73,9 +73,34 @@ func ByCategory(category string) []Module {
 	return out
 }
 
-// FindPython locates the Python interpreter inside the Davoid venv or falls back.
-func FindPython() string {
+// FindDavoidRoot returns the absolute path of the directory containing main.py.
+// Priority: binary's own directory → cwd → /opt/davoid.
+func FindDavoidRoot() string {
+	var candidates []string
+	if ex, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Dir(ex))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, wd)
+	}
+	candidates = append(candidates, "/opt/davoid")
+
+	for _, c := range candidates {
+		if abs, err := filepath.Abs(c); err == nil {
+			if _, err := os.Stat(filepath.Join(abs, "main.py")); err == nil {
+				return abs
+			}
+		}
+	}
+	return "."
+}
+
+// FindPython returns the Python interpreter to use, preferring the venv
+// local to root so packages are always available.
+func FindPython(root string) string {
 	candidates := []string{
+		filepath.Join(root, "venv/bin/python3"),
+		filepath.Join(root, "venv/bin/python"),
 		"/opt/davoid/venv/bin/python3",
 		"/opt/davoid/venv/bin/python",
 	}
@@ -90,41 +115,14 @@ func FindPython() string {
 	return "python3"
 }
 
-// FindDavoidRoot locates the Python project root.
-// Binary directory is checked first so a local build always uses
-// its own main.py instead of a stale system install at /opt/davoid.
-func FindDavoidRoot() string {
-	var candidates []string
-
-	// 1. Directory of the running executable (highest priority)
-	if ex, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Dir(ex))
-	}
-
-	// 2. Current working directory
-	if wd, err := os.Getwd(); err == nil {
-		candidates = append(candidates, wd)
-	}
-
-	// 3. System install (fallback for installed builds)
-	candidates = append(candidates, "/opt/davoid")
-
-	for _, c := range candidates {
-		if _, err := os.Stat(filepath.Join(c, "main.py")); err == nil {
-			return c
-		}
-	}
-	return "."
-}
-
-// RunModule launches a Python module in a subprocess, streaming output to stdout.
-// It passes the module key via DAVOID_MODULE env var so the Python entry point
-// can skip the interactive menu and jump straight to that module.
+// RunModule launches a Python module directly via DAVOID_MODULE env var,
+// bypassing the interactive menu entirely.
 func RunModule(key string) error {
-	python := FindPython()
 	root := FindDavoidRoot()
+	python := FindPython(root)
+	mainPy := filepath.Join(root, "main.py")
 
-	cmd := exec.Command(python, "main.py")
+	cmd := exec.Command(python, mainPy)
 	cmd.Dir = root
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -142,10 +140,11 @@ func RunModule(key string) error {
 
 // RunInteractivePython launches the full Python TUI (legacy mode).
 func RunInteractivePython() error {
-	python := FindPython()
 	root := FindDavoidRoot()
+	python := FindPython(root)
+	mainPy := filepath.Join(root, "main.py")
 
-	cmd := exec.Command(python, "main.py")
+	cmd := exec.Command(python, mainPy)
 	cmd.Dir = root
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

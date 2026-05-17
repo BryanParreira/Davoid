@@ -2,6 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -325,7 +328,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case stateModuleConfirm:
 		switch key {
 		case "y", "Y", "enter":
-			m.state = stateModuleRunning
 			return m, runModule(m.selectedModule.Key)
 		case "n", "N", "esc":
 			m.state = stateModuleList
@@ -485,10 +487,18 @@ func (m Model) openCategoryMenu(category string) (Model, tea.Cmd) {
 }
 
 func runModule(key string) tea.Cmd {
-	return func() tea.Msg {
-		err := runner.RunModule(key)
+	root := runner.FindDavoidRoot()
+	python := runner.FindPython(root)
+	mainPy := filepath.Join(root, "main.py")
+
+	cmd := exec.Command(python, mainPy)
+	cmd.Env = append(os.Environ(), "DAVOID_MODULE="+key)
+
+	// tea.ExecProcess suspends the TUI, hands full terminal control to
+	// the Python subprocess, then restores the TUI when it exits.
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return moduleRunDone{err: err}
-	}
+	})
 }
 
 func generateReport(engID string) tea.Cmd {
@@ -507,8 +517,6 @@ func generateReport(engID string) tea.Cmd {
 
 func (m Model) View() string {
 	switch m.state {
-	case stateModuleRunning:
-		return StyleBanner.Render("\n  Running module, please wait…\n")
 	case stateEngagementNew:
 		return m.viewNewEngagement()
 	case stateEngagementList:

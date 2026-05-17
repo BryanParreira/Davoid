@@ -21,6 +21,12 @@ clean:
 	rm -rf $(BUILD_DIR) $(BINARY)
 
 release: linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
+	@cd $(BUILD_DIR) && \
+	  if command -v sha256sum >/dev/null 2>&1; then \
+	    sha256sum davoid-* > checksums.txt; \
+	  else \
+	    shasum -a 256 davoid-* > checksums.txt; \
+	  fi
 	@echo "\nBuilt releases in $(BUILD_DIR)/"
 	@ls -lh $(BUILD_DIR)/
 

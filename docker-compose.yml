@@ -1,16 +1,47 @@
-# docker-compose.yml
 version: "3.8"
 
+# Davoid — two profiles:
+#
+#   docker compose --profile safe up    → OSINT, web, AI, phishing, auditor
+#                                         (bridged network, no raw socket access)
+#
+#   docker compose --profile full up    → all modules including sniff, mitm, scanner
+#                                         (host network + CAP_NET_RAW — use on trusted LAN only)
+
 services:
-  davoid:
+  # ── Safe mode: no raw network access ──────────────────────────────────────
+  davoid-safe:
+    profiles: ["safe"]
     build: .
-    container_name: davoid-core
-    network_mode: "host" # Required for local network scanning
+    container_name: davoid-safe
     volumes:
+      - davoid-data:/root/.davoid
+      - ./logs:/app/logs
+      - ./payloads:/app/payloads
+      - ./reports:/app/reports
+    environment:
+      - AI_URL=http://host.docker.internal:11434/api
+    stdin_open: true
+    tty: true
+
+  # ── Full mode: host network + packet capture ───────────────────────────────
+  davoid-full:
+    profiles: ["full"]
+    build: .
+    container_name: davoid-full
+    network_mode: "host"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - davoid-data:/root/.davoid
       - ./logs:/app/logs
       - ./payloads:/app/payloads
       - ./reports:/app/reports
     environment:
       - AI_URL=http://127.0.0.1:11434/api
-    stdin_open: true # Required for interactive CLI
-    tty: true # Required for interactive CLI
+    stdin_open: true
+    tty: true
+
+volumes:
+  davoid-data:

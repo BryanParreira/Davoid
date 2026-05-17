@@ -7,7 +7,6 @@ RUN go build -ldflags "-s -w" -o davoid ./cmd/davoid/
 # Runtime Stage
 FROM debian:bookworm-slim
 
-# Install optional operational tools used by Davoid
 RUN apt-get update && apt-get install -y \
     nmap \
     tcpdump \
@@ -18,7 +17,9 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY --from=builder /app/davoid /usr/local/bin/davoid
 
-RUN mkdir -p logs payloads plugins reports
+# Persistent data directories
+RUN mkdir -p /root/.davoid /app/logs /app/payloads /app/reports
 
-# Set entrypoint to run the compiled binary
+VOLUME ["/root/.davoid"]
+
 ENTRYPOINT ["davoid"]

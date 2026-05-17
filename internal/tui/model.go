@@ -2,9 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,7 +26,6 @@ const (
 	stateFindings
 	stateModuleList
 	stateModuleConfirm
-	stateModuleRunning
 	stateReport
 	stateHelp
 )
@@ -43,7 +39,6 @@ type (
 	engLoadedMsg   struct{ eng *engagement.Engagement }
 	findingsMsg    struct{ findings []*engagement.Finding }
 	engListMsg     struct{ list []*engagement.Engagement }
-	moduleRunDone  struct{ err error }
 	reportReadyMsg struct {
 		content string
 		path    string
@@ -84,28 +79,33 @@ func (f *inputField) handleKey(key string) {
 // --------------------------------------------------------------------------
 
 type Model struct {
-	state           state
-	width           int
-	height          int
-	activeEng       *engagement.Engagement
-	engList         []*engagement.Engagement
-	findings        []*engagement.Finding
-	allEngagements  []*engagement.Engagement
-	selectedModule  runner.Module
-	menuCursor      int
-	menuItems       []menuItem
-	subMenuCursor   int
-	subMenuItems    []menuItem
-	engFields       [3]inputField // name, target, scope
-	engFieldCursor  int
-	reportContent   string
-	reportPath      string
-	statusMsg       string
-	statusIsError   bool
-	findingScroll   int
-	reportScroll    int
-	engListCursor   int
+	state          state
+	width          int
+	height         int
+	activeEng      *engagement.Engagement
+	engList        []*engagement.Engagement
+	findings       []*engagement.Finding
+	allEngagements []*engagement.Engagement
+	selectedModule runner.Module
+	pendingModule  string // set before tea.Quit so main loop can run it
+	menuCursor     int
+	menuItems      []menuItem
+	subMenuCursor  int
+	subMenuItems   []menuItem
+	engFields      [3]inputField
+	engFieldCursor int
+	reportContent  string
+	reportPath     string
+	statusMsg      string
+	statusIsError  bool
+	findingScroll  int
+	reportScroll   int
+	engListCursor  int
 }
+
+// PendingModule returns the module key that should be run after the TUI exits,
+// or an empty string if the user quit normally.
+func (m Model) PendingModule() string { return m.pendingModule }
 
 type menuItem struct {
 	key   string
@@ -204,17 +204,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case engListMsg:
 		m.allEngagements = msg.list
 		return m, nil
-
-	case moduleRunDone:
-		m.state = stateMenu
-		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Module error: %v", msg.err)
-			m.statusIsError = true
-		} else {
-			m.statusMsg = fmt.Sprintf("Module '%s' completed.", m.selectedModule.Name)
-			m.statusIsError = false
-		}
-		return m, loadActiveEng()
 
 	case reportReadyMsg:
 		m.reportContent = msg.content
@@ -328,7 +317,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case stateModuleConfirm:
 		switch key {
 		case "y", "Y", "enter":
-			return m, runModule(m.selectedModule.Key)
+			m.pendingModule = m.selectedModule.Key
+			return m, tea.Quit
 		case "n", "N", "esc":
 			m.state = stateModuleList
 		}
@@ -484,21 +474,6 @@ func (m Model) openCategoryMenu(category string) (Model, tea.Cmd) {
 	m.subMenuCursor = 0
 	m.state = stateModuleList
 	return m, nil
-}
-
-func runModule(key string) tea.Cmd {
-	root := runner.FindDavoidRoot()
-	python := runner.FindPython(root)
-	mainPy := filepath.Join(root, "main.py")
-
-	cmd := exec.Command(python, mainPy)
-	cmd.Env = append(os.Environ(), "DAVOID_MODULE="+key)
-
-	// tea.ExecProcess suspends the TUI, hands full terminal control to
-	// the Python subprocess, then restores the TUI when it exits.
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return moduleRunDone{err: err}
-	})
 }
 
 func generateReport(engID string) tea.Cmd {

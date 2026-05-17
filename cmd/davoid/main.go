@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -14,10 +15,24 @@ import (
 )
 
 func launchTUI() error {
-	m := tui.NewModel()
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
-	return err
+	for {
+		m := tui.NewModel()
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		finalModel, err := p.Run()
+		if err != nil {
+			return err
+		}
+		pending := finalModel.(tui.Model).PendingModule()
+		if pending == "" {
+			break
+		}
+		if err := runner.RunModule(pending); err != nil {
+			fmt.Fprintf(os.Stderr, "\n[!] Module error: %v\n", err)
+		}
+		fmt.Print("\nPress Enter to return to Davoid...")
+		bufio.NewReader(os.Stdin).ReadString('\n')
+	}
+	return nil
 }
 
 const version = "2.0.0"

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Volumes/Davoid/Coding/Projects/Davoid add internal/runner/runner.go internal/modules/aiassist/aiassist.go internal/modules/osint/osint.go internal/modules/persistence/persistence.go)",
+      "Bash(git -C /Volumes/Davoid/Coding/Projects/Davoid diff --staged --stat)",
+      "Bash(git -C /Volumes/Davoid/Coding/Projects/Davoid commit -m ' *)",
+      "Bash(davoid --help)"
+    ]
+  }
+}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -28,7 +29,6 @@ type ollamaResp struct {
 	Done     bool   `json:"done"`
 }
 
-// Built-in tools the AI can call
 type tool struct {
 	name string
 	desc string
@@ -48,38 +48,54 @@ func init() {
 		{"find", "find <path> <name> — find files", toolFind},
 		{"id", "id — show current user", toolID},
 		{"uname", "uname — show system info", toolUname},
-		{"netstat", "netstat — show network connections", toolNetstat},
+		{"netstat", "netstat — show listening ports", toolNetstat},
 	}
 }
 
 func Run() error {
 	ui.Header("AI Console — LLM-Powered Autonomous Pentest Agent")
 
-	// Check Ollama
 	ollamaURL := ui.PromptDefault("Ollama URL", "http://localhost:11434")
-	model := ui.PromptDefault("Model", "llama3")
 
 	if !checkOllama(ollamaURL) {
 		ui.Fail("Ollama not reachable. Start with: ollama serve")
 		ui.Info("Install: https://ollama.ai")
 		return nil
 	}
-	ui.Success(fmt.Sprintf("Ollama connected. Model: %s", model))
+	ui.Success("Ollama connected.")
+
+	// List available models
+	models := listModels(ollamaURL)
+	defaultModel := "llama3"
+	if len(models) > 0 {
+		defaultModel = models[0]
+		ui.Info("Available models: " + strings.Join(models, ", "))
+	}
+	model := ui.PromptDefault("Model", defaultModel)
 
 	fmt.Println()
-	ui.Info("Available tools: " + toolList())
+	ui.Info("Tools: " + toolList())
 	ui.Divider()
-	ui.Info("Chat with the AI. It can invoke tools by saying: TOOL:<name>:<args>")
+	ui.Info("Chat with the AI. It can call tools via TOOL:<name>:<args>")
 	ui.Info("Type 'quit' to exit.")
 	fmt.Println()
 
 	systemPrompt := `You are an expert penetration tester AI assistant running inside Davoid,
 a red team engagement platform. You help operators plan and execute authorized security assessments.
-You have access to tools. To use a tool, respond with: TOOL:<toolname>:<args>
-Available tools: ` + toolList() + `
-After using a tool, you'll receive its output. Use it to inform your next action.
-Always remind the user that all testing must be authorized.`
 
+You have access to the following tools. To use one, respond with exactly:
+TOOL:<toolname>:<args>
+
+Available tools: ` + toolList() + `
+
+Rules:
+- Only use tools when they will genuinely help answer the question.
+- After each tool result, analyze the output and provide a clear recommendation.
+- Always remind users that all testing must be authorized.
+- Be concise and action-oriented.`
+
+	// Sliding window history to prevent context overflow (~8000 chars max)
+	const maxHistoryLen = 8000
 	history := systemPrompt
 	reader := bufio.NewReader(os.Stdin)
 
@@ -95,26 +111,68 @@ Always remind the user that all testing must be authorized.`
 			break
 		}
 
-		history += "\nUser: " + input + "\nAssistant: "
-
-		response := queryOllama(ollamaURL, model, history)
-		if response == "" {
-			ui.Fail("No response from Ollama.")
-			continue
+		// Trim history to sliding window
+		if len(history) > maxHistoryLen {
+			history = systemPrompt + "\n[...earlier context trimmed...]\n" + history[len(history)-maxHistoryLen/2:]
 		}
 
+		history += "\nUser: " + input + "\nAssistant: "
+
+		ui.Info("Thinking...")
+		response := queryOllama(ollamaURL, model, history)
+		if response == "" {
+			ui.Fail("No response from Ollama. Check: ollama serve")
+			continue
+		}
 		history += response
 
-		// Handle tool calls
+		// If AI called tools, execute them and feed results back for analysis
 		if strings.Contains(response, "TOOL:") {
-			response = handleToolCalls(response)
+			toolOutput := executeTools(response)
+			if toolOutput != "" {
+				history += "\n[Tool Results]:\n" + toolOutput + "\nAssistant: "
+				ui.Info("Analyzing results...")
+				followUp := queryOllama(ollamaURL, model, history)
+				if followUp != "" {
+					history += followUp
+					response = followUp
+				}
+			}
 		}
 
 		fmt.Println()
-		fmt.Println(ui.Green.Render("  ai» ") + " " + response)
+		fmt.Println(ui.Green.Render("  ai» ") + " " + strings.TrimSpace(response))
 		fmt.Println()
 	}
 	return nil
+}
+
+// executeTools runs all TOOL: calls in a response, prints output, returns combined output for AI feedback.
+func executeTools(response string) string {
+	var feedback strings.Builder
+	for _, line := range strings.Split(response, "\n") {
+		if !strings.HasPrefix(line, "TOOL:") {
+			continue
+		}
+		parts := strings.SplitN(line[5:], ":", 2)
+		toolName := strings.TrimSpace(parts[0])
+		args := ""
+		if len(parts) > 1 {
+			args = strings.TrimSpace(parts[1])
+		}
+
+		for _, t := range tools {
+			if t.name == toolName {
+				fmt.Printf("\n  %s  %s %s\n", ui.Yellow.Render("[TOOL]"), toolName, args)
+				out := t.fn(args)
+				display := truncate(out, 500)
+				fmt.Printf("  %s\n", ui.Dim.Render(display))
+				feedback.WriteString(fmt.Sprintf("[%s(%s)]:\n%s\n\n", toolName, args, truncate(out, 300)))
+				break
+			}
+		}
+	}
+	return feedback.String()
 }
 
 func queryOllama(baseURL, model, prompt string) string {
@@ -135,38 +193,36 @@ func queryOllama(baseURL, model, prompt string) string {
 	return or.Response
 }
 
-func handleToolCalls(response string) string {
-	lines := strings.Split(response, "\n")
-	var result strings.Builder
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "TOOL:") {
-			parts := strings.SplitN(line[5:], ":", 2)
-			toolName := strings.TrimSpace(parts[0])
-			args := ""
-			if len(parts) > 1 {
-				args = strings.TrimSpace(parts[1])
-			}
-
-			found := false
-			for _, t := range tools {
-				if t.name == toolName {
-					fmt.Printf("\n  %s  %s %s\n", ui.Yellow.Render("[TOOL]"), toolName, args)
-					out := t.fn(args)
-					fmt.Printf("  %s\n", ui.Dim.Render(truncate(out, 500)))
-					result.WriteString(fmt.Sprintf("[Tool %s result: %s]\n", toolName, truncate(out, 200)))
-					found = true
-					break
-				}
-			}
-			if !found {
-				result.WriteString(line + "\n")
-			}
-		} else {
-			result.WriteString(line + "\n")
-		}
+func checkOllama(baseURL string) bool {
+	resp, err := client.Get(baseURL + "/api/tags")
+	if err != nil {
+		return false
 	}
-	return result.String()
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
+func listModels(baseURL string) []string {
+	resp, err := client.Get(baseURL + "/api/tags")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil
+	}
+	names := make([]string, len(result.Models))
+	for i, m := range result.Models {
+		names[i] = m.Name
+	}
+	return names
 }
 
 func toolList() string {
@@ -177,11 +233,6 @@ func toolList() string {
 	return strings.Join(names, ", ")
 }
 
-func checkOllama(baseURL string) bool {
-	resp, err := client.Get(baseURL + "/api/tags")
-	return err == nil && resp.StatusCode == 200
-}
-
 // ── Tool implementations ─────────────────────────────────────────────────────
 
 func toolPing(args string) string {
@@ -189,7 +240,11 @@ func toolPing(args string) string {
 	if len(parts) == 0 {
 		return "usage: ping <host>"
 	}
-	out, _ := exec.Command("ping", "-c", "3", parts[0]).CombinedOutput()
+	count := "-c"
+	if runtime.GOOS == "windows" {
+		count = "-n"
+	}
+	out, _ := exec.Command("ping", count, "3", parts[0]).CombinedOutput()
 	return string(out)
 }
 
@@ -216,8 +271,7 @@ func toolWhois(args string) string {
 	if len(parts) == 0 {
 		return "usage: whois <domain/IP>"
 	}
-	host := parts[0]
-	out, _ := exec.Command("whois", host).CombinedOutput()
+	out, _ := exec.Command("whois", parts[0]).CombinedOutput()
 	if len(out) > 2000 {
 		out = out[:2000]
 	}
@@ -251,7 +305,7 @@ func toolFind(args string) string {
 	if len(parts) < 2 {
 		return "usage: find <path> <name>"
 	}
-	out, _ := exec.Command("find", parts[0], "-name", parts[1], "-type", "f", "2>/dev/null").CombinedOutput()
+	out, _ := exec.Command("find", parts[0], "-name", parts[1], "-type", "f").CombinedOutput()
 	return string(out)
 }
 
@@ -266,7 +320,15 @@ func toolUname(_ string) string {
 }
 
 func toolNetstat(_ string) string {
-	out, _ := exec.Command("netstat", "-tulnp").CombinedOutput()
+	var out []byte
+	switch runtime.GOOS {
+	case "darwin":
+		out, _ = exec.Command("netstat", "-an", "-p", "tcp").CombinedOutput()
+	case "windows":
+		out, _ = exec.Command("netstat", "-an").CombinedOutput()
+	default:
+		out, _ = exec.Command("netstat", "-tulnp").CombinedOutput()
+	}
 	if len(out) > 2000 {
 		out = out[:2000]
 	}

@@ -117,8 +117,10 @@ func Run() error {
 	case <-done:
 	}
 
-	cmd.Process.Signal(syscall.SIGTERM)
-	cmd.Wait()
+	if cmd.Process != nil {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+	}
 
 	fmt.Println()
 	ui.Divider()

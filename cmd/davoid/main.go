@@ -174,6 +174,23 @@ var findingCmd = &cobra.Command{
 	},
 }
 
+var runCmd = &cobra.Command{
+	Use:   "run <module>",
+	Short: "Run a module directly (bypass TUI)",
+	Long:  "Run any module by key without opening the TUI.\n\nExample: davoid run scanner",
+	Args:  cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		var keys []string
+		for _, m := range runner.Registry {
+			keys = append(keys, m.Key+"\t"+m.Name)
+		}
+		return keys, cobra.ShellCompDirectiveNoFileComp
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runner.RunModule(args[0])
+	},
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version",
@@ -210,7 +227,7 @@ func init() {
 	findingCmd.Flags().String("target", "", "Affected target")
 	findingCmd.Flags().String("evidence", "", "Supporting evidence")
 
-	rootCmd.AddCommand(newCmd, listCmd, reportCmd, findingCmd, versionCmd, modulesCmd)
+	rootCmd.AddCommand(newCmd, listCmd, reportCmd, findingCmd, versionCmd, modulesCmd, runCmd)
 }
 
 func main() {

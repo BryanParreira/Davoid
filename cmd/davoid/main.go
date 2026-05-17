@@ -54,10 +54,6 @@ Operator-grade red team engagement platform.
 For authorized penetration testing and security research only.
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		legacy, _ := cmd.Flags().GetBool("legacy")
-		if legacy {
-			return runner.RunInteractivePython()
-		}
 		return launchTUI()
 	},
 }
@@ -98,7 +94,7 @@ var listCmd = &cobra.Command{
 		active, _ := engagement.Active()
 
 		if len(engagements) == 0 {
-			fmt.Println("\n  No engagements yet. Run 'davoid new <name>' to start one.\n")
+			fmt.Println("\n  No engagements yet. Run 'davoid new <name>' to start one.")
 			return nil
 		}
 
@@ -204,8 +200,6 @@ var modulesCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.Flags().Bool("legacy", false, "Launch the Python TUI (legacy mode)")
-
 	newCmd.Flags().String("target", "", "Target IP, CIDR, or domain")
 	newCmd.Flags().String("scope", "", "Engagement scope description")
 

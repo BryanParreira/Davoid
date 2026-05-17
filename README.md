@@ -21,9 +21,9 @@
 
 ---
 
-Davoid is a **single-binary red team engagement platform** built in Go. It combines a full suite of offensive security modules with a first-class **engagement management system** — so every operation you run is tracked, every finding is logged, and every engagement ends with a professional report you can hand to a client.
+Davoid is a **single-binary red team engagement platform** built entirely in Go. It combines a full suite of offensive security modules with a first-class **engagement management system** — so every operation you run is tracked, every finding is logged, and every engagement ends with a professional report you can hand to a client.
 
-Think of it as the tool that sits between your recon phase and your final report, and handles everything in between.
+No Python. No venv. No dependency hell. One binary.
 
 ---
 
@@ -31,10 +31,10 @@ Think of it as the tool that sits between your recon phase and your final report
 
 Most offensive tools do one thing well. You end up juggling a terminal full of separate tools with no shared context — Nmap output in one window, Responder in another, manual notes in a text file. Davoid fixes that.
 
-- **Single binary.** One `davoid` executable, no Python venv, no dependency hell. Cross-compile for any platform.
+- **Single binary.** One `davoid` executable. Cross-compile for any platform. Drop it anywhere, run it.
 - **Engagement-first.** Start every op with `davoid new`, and every module you run logs its findings to that engagement automatically.
 - **Built to be shown.** The TUI is designed to be screenshot-worthy. The reports are designed to be client-ready.
-- **Modular by design.** 20+ built-in modules across recon, MITM, C2, post-exploitation, and AD. Plugin architecture for your own tools.
+- **20 native Go modules.** Recon, MITM, C2, post-exploitation, AD, AI — all compiled in, no subprocess spawning.
 
 ---
 
@@ -64,7 +64,7 @@ go build -o davoid ./cmd/davoid/
 sudo mv davoid /usr/local/bin/
 ```
 
-### Full install (Python modules + Go binary)
+### Full install (auto-installs Go + optional tools)
 
 ```bash
 git clone https://github.com/BryanParreira/Davoid.git
@@ -72,7 +72,7 @@ cd Davoid
 sudo bash install.sh
 ```
 
-> Root is required for raw socket operations (Scapy, ARP poisoning, packet capture).
+> Root is required for raw socket operations (ARP poisoning, packet capture).
 
 ---
 
@@ -107,7 +107,7 @@ davoid report                       →  generates report for active engagement
 davoid report <id>                  →  report for a specific engagement
 ```
 
-Findings are stored in `~/.davoid/engagements.db` (SQLite). Reports go to `~/.davoid/reports/`.
+Findings are stored in `~/.davoid/engagements.db` (SQLite). Reports go to the current directory.
 
 ---
 
@@ -116,39 +116,60 @@ Findings are stored in `~/.davoid/engagements.db` (SQLite). Reports go to `~/.da
 | Module | Category | Description |
 |---|---|---|
 | **Net-Mapper** | Intelligence & OSINT | Nmap orchestration with live CVE lookup via NVD API |
-| **Live Interceptor** | Intelligence & OSINT | Real-time packet capture, DNS tracking, credential extraction |
-| **Holmes Engine** | Intelligence & OSINT | Username OSINT across 14 platforms, phone intel, subdomain brute |
-| **Web Recon** | Intelligence & OSINT | robots.txt, domain reputation, Google Dorks, CT logs, Shodan/InternetDB |
-| **MITM Engine** | Offensive | ARP poisoning + automatic IP forwarding (Linux/macOS) |
-| **Phantom Cloner** | Offensive | Dynamic page cloning with JS form-hooking for credential harvesting |
-| **DNS Spoofer** | Offensive | Real-time DNS hijacking → custom phishing portal |
-| **GHOST-HUB C2** | Offensive | AES-encrypted async HTTP command & control server |
-| **Shell Forge** | Post-Exploitation | Payload generator: Bash, Python, PHP, Ruby, PowerShell, MSF |
-| **Crypt-Keeper** | Post-Exploitation | Payload encryption + self-decrypting AES loaders |
-| **Persistence Engine** | Post-Exploitation | systemd / crontab (Linux), LaunchAgent (macOS), registry (Windows) |
-| **Hash Cracker** | Post-Exploitation | Multi-threaded dictionary/brute — MD5, SHA256, NTLM |
-| **Looter** | Post-Exploitation | Privilege escalation discovery, SSH key harvest |
-| **Credential Tester** | Post-Exploitation | Credential re-use testing across SSH, FTP, HTTP |
-| **AD Ops** | Active Directory | LDAP enum, Kerberoasting, DCSync detection, BloodHound export |
-| **Metasploit Bridge** | Advanced | MSF RPC client — auto exploit selection & execution |
-| **AI Console** | Advanced | LangChain + Ollama AI-assisted attack strategy & payload mutation |
+| **Live Interceptor** | Intelligence & OSINT | Real-time packet capture (tcpdump), DNS tracking, credential extraction |
+| **Holmes Engine** | Intelligence & OSINT | Username OSINT across 14 platforms, subdomain brute, IP intel, Wayback |
+| **Web Recon** | Intelligence & OSINT | Security header audit, path fuzzing, sensitive data extraction, InternetDB |
+| **MITM Engine** | Offensive Operations | ARP poisoning + IP forwarding (Linux/macOS) |
+| **Phantom Cloner** | Offensive Operations | Dynamic page cloning + credential harvesting portal |
+| **GHOST-HUB C2** | Offensive Operations | AES-GCM encrypted async HTTP command & control server |
+| **Shell Forge** | Post-Exploitation | Payload generator: Bash, Python, PHP, Perl, PowerShell, msfvenom |
+| **Crypt-Keeper** | Post-Exploitation | AES-GCM payload encryption + self-decrypting loader stubs |
+| **Persistence Engine** | Post-Exploitation | systemd / crontab (Linux), LaunchAgent (macOS), registry / schtasks (Windows) |
+| **Hash Cracker** | Post-Exploitation | Multi-threaded goroutine dictionary attack — MD5, SHA1, SHA256, SHA512, NTLM |
+| **Looter** | Post-Exploitation | SSH-based PrivEsc enumeration, SUID/sudo/cron, SSH key harvest |
+| **Credential Tester** | Post-Exploitation | Credential re-use testing across SSH, FTP, HTTP Basic Auth |
+| **AD Ops** | Active Directory | LDAP enum, AS-REP roasting, Kerberoasting, password spray, BloodHound export |
+| **Metasploit Bridge** | Advanced | MSF JSONRPC client — session management, exploit execution, msfvenom |
+| **AI Console** | Advanced | Ollama ReAct agent with 10 built-in pentest tools |
+| **Cloud Ops** | Advanced | AWS/Azure/GCP IMDS credential extraction, S3 bucket enum, container escape |
+| **Purple Team** | Advanced | 15 MITRE ATT&CK TTPs, Splunk SPL + Sigma rules, Navigator JSON export |
+| **Setup Auditor** | System | Tool availability, interface enum, local port probe, writability checks |
+| **God Mode** | System | Autonomous campaign: Nmap → AI analysis → vuln correlation → report |
 
 ---
 
 ## Architecture
 
-Davoid v2 is built in Go. The TUI uses [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss). The engagement database is SQLite with no external dependencies.
-
-The existing Python modules run as subprocesses — they're not going away, they're just getting a better driver. Modules will be ported to native Go incrementally.
+Davoid is pure Go — all 20 modules are native Go packages compiled directly into the binary.
 
 ```
-cmd/davoid/          CLI entry point (cobra)
+cmd/davoid/          CLI entry point (Cobra)
 internal/
   tui/               Bubble Tea TUI — menu, views, styles
   engagement/        Engagement & finding management (SQLite)
-  runner/            Module registry + Python subprocess bridge
-modules/             Python security modules (20+)
-core/                Python framework (database, context, UI)
+  runner/            Module registry + dispatcher
+  modules/
+    ui/              Shared terminal I/O helpers (prompts, tables, colors)
+    scanner/         Nmap + NVD CVE
+    osint/           OSINT suite
+    sniff/           Packet capture
+    webrecon/        Web auditor
+    mitm/            ARP poisoning
+    phishing/        Credential harvester
+    ghosthub/        C2 server
+    payloads/        Shell generator
+    cryptkeeper/     AES encryption
+    persistence/     Persistence installs
+    bruteforce/      Hash cracker
+    looter/          SSH post-exploit
+    credtester/      Credential tester
+    adops/           Active Directory
+    msfengine/       Metasploit RPC
+    aiassist/        Ollama AI agent
+    cloudops/        Cloud recon
+    purpleteam/      ATT&CK mapper
+    auditor/         System checker
+    godmode/         Autonomous campaign
 ```
 
 ---
@@ -171,14 +192,27 @@ davoid finding                  Log a finding to active engagement
   --evidence <raw evidence>
 davoid modules                  List all available modules
 davoid version                  Print version
-davoid --legacy                 Launch Python TUI (legacy mode)
 ```
+
+---
+
+## Optional External Tools
+
+Some modules call external tools when available. None are required to run Davoid — they enhance specific modules:
+
+| Tool | Module | Install |
+|------|---------|---------|
+| `nmap` | Net-Mapper, God Mode | `brew install nmap` / `apt install nmap` |
+| `tcpdump` | Live Interceptor | `brew install tcpdump` / `apt install tcpdump` |
+| `arpspoof` | MITM Engine | `brew install dsniff` / `apt install dsniff` |
+| `msfvenom` | Metasploit Bridge, Shell Forge | [metasploit.com](https://metasploit.com) |
+| `ollama` | AI Console, God Mode | [ollama.ai](https://ollama.ai) |
 
 ---
 
 ## Legal
 
-Davoid is for **authorized penetration testing and security research only**. You must have written permission before testing any system you do not own. The author assumes no liability for misuse. Violations of the Computer Fraud and Abuse Act (CFAA) or equivalent law in your jurisdiction are your responsibility.
+Davoid is for **authorized penetration testing and security research only**. You must have written permission before testing any system you do not own. The author assumes no liability for misuse.
 
 ---
 

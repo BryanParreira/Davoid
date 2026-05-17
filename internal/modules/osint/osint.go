@@ -56,33 +56,22 @@ func domainIntel() error {
 	ui.Info("DNS Records")
 	ui.Divider()
 
-	recordTypes := []string{"A", "AAAA", "MX", "NS", "TXT", "CNAME"}
-	for _, rt := range recordTypes {
-		recs, err := net.LookupHost(domain)
-		switch rt {
-		case "A":
-			addrs, _ := net.LookupHost(domain)
-			if len(addrs) > 0 {
-				fmt.Printf("  %s  %s\n", ui.Cyan.Render(fmt.Sprintf("%-6s", rt)), strings.Join(addrs, ", "))
-			}
-		case "MX":
-			mxs, _ := net.LookupMX(domain)
-			for _, mx := range mxs {
-				fmt.Printf("  %s  %s (pref %d)\n", ui.Cyan.Render(fmt.Sprintf("%-6s", rt)), mx.Host, mx.Pref)
-			}
-		case "NS":
-			nss, _ := net.LookupNS(domain)
-			for _, ns := range nss {
-				fmt.Printf("  %s  %s\n", ui.Cyan.Render(fmt.Sprintf("%-6s", rt)), ns.Host)
-			}
-		case "TXT":
-			txts, _ := net.LookupTXT(domain)
-			for _, t := range txts {
-				fmt.Printf("  %s  %s\n", ui.Cyan.Render(fmt.Sprintf("%-6s", rt)), t)
-			}
-		default:
-			_ = recs
-			_ = err
+	if addrs, _ := net.LookupHost(domain); len(addrs) > 0 {
+		fmt.Printf("  %s  %s\n", ui.Cyan.Render("A     "), strings.Join(addrs, ", "))
+	}
+	if mxs, _ := net.LookupMX(domain); len(mxs) > 0 {
+		for _, mx := range mxs {
+			fmt.Printf("  %s  %s (pref %d)\n", ui.Cyan.Render("MX    "), mx.Host, mx.Pref)
+		}
+	}
+	if nss, _ := net.LookupNS(domain); len(nss) > 0 {
+		for _, ns := range nss {
+			fmt.Printf("  %s  %s\n", ui.Cyan.Render("NS    "), ns.Host)
+		}
+	}
+	if txts, _ := net.LookupTXT(domain); len(txts) > 0 {
+		for _, t := range txts {
+			fmt.Printf("  %s  %s\n", ui.Cyan.Render("TXT   "), t)
 		}
 	}
 

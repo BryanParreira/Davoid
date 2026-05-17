@@ -185,14 +185,20 @@ func checkOllama(baseURL string) bool {
 // ── Tool implementations ─────────────────────────────────────────────────────
 
 func toolPing(args string) string {
-	host := strings.Fields(args)[0]
-	out, _ := exec.Command("ping", "-c", "3", host).CombinedOutput()
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return "usage: ping <host>"
+	}
+	out, _ := exec.Command("ping", "-c", "3", parts[0]).CombinedOutput()
 	return string(out)
 }
 
 func toolNmap(args string) string {
-	host := strings.Fields(args)[0]
-	out, _ := exec.Command("nmap", "-sV", "-T4", "--top-ports", "100", host).CombinedOutput()
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return "usage: nmap <host>"
+	}
+	out, _ := exec.Command("nmap", "-sV", "-T4", "--top-ports", "100", parts[0]).CombinedOutput()
 	return string(out)
 }
 
@@ -206,7 +212,11 @@ func toolDig(args string) string {
 }
 
 func toolWhois(args string) string {
-	host := strings.Fields(args)[0]
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return "usage: whois <domain/IP>"
+	}
+	host := parts[0]
 	out, _ := exec.Command("whois", host).CombinedOutput()
 	if len(out) > 2000 {
 		out = out[:2000]

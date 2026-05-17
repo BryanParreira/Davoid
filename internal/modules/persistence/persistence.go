@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/bryanparreira/davoid/internal/modules/ui"
 )
@@ -286,6 +285,3 @@ func registryRun(payload string) error {
 	return nil
 }
 
-func init() {
-	_ = time.Now // suppress unused import warning
-}

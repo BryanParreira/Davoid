@@ -30,6 +30,10 @@ plugins/__pycache__/
 core/__pycache__/
 modules/__pycache__/
 
+# Go build artifacts
+/davoid
+/dist/
+
 # Environments
 .env
 .venv

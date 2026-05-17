@@ -9,7 +9,13 @@ build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/davoid/
 
 install: build
-	sudo mv $(BINARY) /usr/local/bin/$(BINARY)
+	@if [ "$$(uname -s)" = "Darwin" ] && [ -d /opt/homebrew/bin ]; then \
+		mv $(BINARY) /opt/homebrew/bin/$(BINARY); \
+		echo "Installed: /opt/homebrew/bin/$(BINARY)"; \
+	else \
+		sudo mv $(BINARY) /usr/local/bin/$(BINARY); \
+		echo "Installed: /usr/local/bin/$(BINARY)"; \
+	fi
 
 clean:
 	rm -rf $(BUILD_DIR) $(BINARY)

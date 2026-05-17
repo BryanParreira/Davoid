@@ -34,14 +34,55 @@ jobs:
           body: |
             ## Davoid ${{ github.ref_name }}
 
-            **Single-binary red team engagement platform.**
+            **Single-binary, pure-Go red team engagement platform. No Python, no Docker, no dependencies.**
 
-            ### Installation
+            ---
 
+            ### Quick Install
+
+            #### macOS (Apple Silicon)
             ```bash
-            # Linux x86_64
-            curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/download/${{ github.ref_name }}/davoid-linux-amd64
+            curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/download/${{ github.ref_name }}/davoid-darwin-arm64
             chmod +x davoid && sudo mv davoid /usr/local/bin/
+            davoid
             ```
 
-            See [README](https://github.com/BryanParreira/Davoid#readme) for full instructions.
+            #### macOS (Intel)
+            ```bash
+            curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/download/${{ github.ref_name }}/davoid-darwin-amd64
+            chmod +x davoid && sudo mv davoid /usr/local/bin/
+            davoid
+            ```
+
+            #### Linux x86_64
+            ```bash
+            curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/download/${{ github.ref_name }}/davoid-linux-amd64
+            chmod +x davoid && sudo mv davoid /usr/local/bin/
+            davoid
+            ```
+
+            #### Linux ARM64 (Raspberry Pi, cloud VMs)
+            ```bash
+            curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/download/${{ github.ref_name }}/davoid-linux-arm64
+            chmod +x davoid && sudo mv davoid /usr/local/bin/
+            davoid
+            ```
+
+            #### Build from source
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh | sudo bash
+            ```
+
+            ---
+
+            ### First run
+            ```bash
+            davoid                                    # open TUI
+            davoid new "Corp Pentest" --target 10.0.0.0/24
+            davoid run auditor                        # pre-flight check
+            davoid modules                            # list all 20 modules
+            ```
+
+            > **For authorized penetration testing and security research only.**
+
+            See [README](https://github.com/BryanParreira/Davoid#readme) for full documentation.

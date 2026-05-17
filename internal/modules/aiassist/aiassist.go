@@ -64,14 +64,20 @@ func Run() error {
 	}
 	ui.Success("Ollama connected.")
 
-	// List available models
+	// List available models and let user pick from a menu
 	models := listModels(ollamaURL)
-	defaultModel := "llama3"
-	if len(models) > 0 {
-		defaultModel = models[0]
-		ui.Info("Available models: " + strings.Join(models, ", "))
+	if len(models) == 0 {
+		ui.Fail("No models installed. Run: ollama pull llama3")
+		ui.Info("See https://ollama.ai/library for available models.")
+		return nil
 	}
-	model := ui.PromptDefault("Model", defaultModel)
+
+	modelIdx := ui.Select("Select Model", models)
+	if modelIdx < 0 {
+		return nil
+	}
+	model := models[modelIdx]
+	ui.Info(fmt.Sprintf("Using model: %s", model))
 
 	fmt.Println()
 	ui.Info("Tools: " + toolList())
@@ -164,6 +170,10 @@ func executeTools(response string) string {
 		for _, t := range tools {
 			if t.name == toolName {
 				fmt.Printf("\n  %s  %s %s\n", ui.Yellow.Render("[TOOL]"), toolName, args)
+				if !ui.Confirm(fmt.Sprintf("Execute: %s %s", toolName, args)) {
+					feedback.WriteString(fmt.Sprintf("[%s(%s)]: user declined execution\n\n", toolName, args))
+					break
+				}
 				out := t.fn(args)
 				display := truncate(out, 500)
 				fmt.Printf("  %s\n", ui.Dim.Render(display))
@@ -181,13 +191,25 @@ func queryOllama(baseURL, model, prompt string) string {
 
 	resp, err := client.Post(baseURL+"/api/generate", "application/json", bytes.NewReader(body))
 	if err != nil {
+		ui.Warn(fmt.Sprintf("Ollama request failed: %v", err))
 		return ""
 	}
 	defer resp.Body.Close()
 
 	data, _ := io.ReadAll(resp.Body)
+
+	// Surface Ollama errors (e.g. model not found)
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(data, &errResp) == nil && errResp.Error != "" {
+		ui.Fail(fmt.Sprintf("Ollama error: %s", errResp.Error))
+		return ""
+	}
+
 	var or ollamaResp
 	if err := json.Unmarshal(data, &or); err != nil {
+		ui.Warn(fmt.Sprintf("Unexpected Ollama response: %s", truncate(string(data), 200)))
 		return ""
 	}
 	return or.Response

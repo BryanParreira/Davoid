@@ -70,7 +70,16 @@ if [ -z "$GO_BIN" ]; then
             *)        echo "Unsupported architecture: $ARCH"; exit 1 ;;
         esac
         GO_ARCHIVE="go1.24.0.linux-${GO_ARCH}.tar.gz"
+        declare -A GO_SHA256=(
+            ["amd64"]="dea9ca38a0b852a74e81c26134671af7c0fbe65d81b0dc1c5afcf9386f0da0a7"
+            ["arm64"]="c694dce20e9d8399a04b893c20e0b16561a4afa79671ed2bde1f7e9ef79200e6"
+        )
         curl -sLO "https://go.dev/dl/${GO_ARCHIVE}"
+        echo "${GO_SHA256[$GO_ARCH]}  ${GO_ARCHIVE}" | sha256sum -c - || {
+            echo -e "\033[1;31m[-] Go archive checksum FAILED — download may be tampered.\033[0m"
+            rm -f "${GO_ARCHIVE}"
+            exit 1
+        }
         rm -rf /usr/local/go
         tar -C /usr/local -xzf "${GO_ARCHIVE}"
         rm "${GO_ARCHIVE}"

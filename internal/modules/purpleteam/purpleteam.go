@@ -279,7 +279,7 @@ func exportNavigator() {
 	}
 	data, _ := json.MarshalIndent(layer, "", "  ")
 	fname := fmt.Sprintf("attack_navigator_%d.json", time.Now().Unix())
-	os.WriteFile(fname, data, 0644)
+	os.WriteFile(fname, data, 0600)
 	ui.Success(fmt.Sprintf("ATT&CK Navigator layer exported: %s", fname))
 	ui.PressEnter()
 }
@@ -299,7 +299,7 @@ func generateMarkdown(eng *engagement.Engagement) {
 	}
 
 	fname := fmt.Sprintf("purple_team_report_%d.md", time.Now().Unix())
-	os.WriteFile(fname, []byte(sb.String()), 0644)
+	os.WriteFile(fname, []byte(sb.String()), 0600)
 	ui.Success(fmt.Sprintf("Purple team report: %s", fname))
 	ui.PressEnter()
 }

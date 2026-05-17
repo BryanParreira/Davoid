@@ -54,7 +54,7 @@ func Run() error {
 
 	// Save to disk
 	outFile := fmt.Sprintf("phishing_%d.html", time.Now().Unix())
-	os.WriteFile(outFile, clonedPage, 0644)
+	os.WriteFile(outFile, clonedPage, 0600)
 	ui.Success(fmt.Sprintf("Page cloned → %s", outFile))
 
 	// Set up HTTP server

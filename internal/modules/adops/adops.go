@@ -349,7 +349,7 @@ func exportBloodHound(conn *ldap.Conn, baseDN string) {
 	}
 	data, _ := json.MarshalIndent(out, "", "  ")
 	fname := "bloodhound_users.json"
-	os.WriteFile(fname, data, 0644)
+	os.WriteFile(fname, data, 0600)
 	ui.Success(fmt.Sprintf("BloodHound JSON exported: %s (%d users)", fname, len(nodes)))
 	ui.PressEnter()
 }

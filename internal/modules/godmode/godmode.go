@@ -266,7 +266,7 @@ func writeReport(fname, content string) {
 	if len(parts) > 1 {
 		os.MkdirAll(strings.Join(parts[:len(parts)-1], "/"), 0755)
 	}
-	os.WriteFile(fname, []byte(content), 0644)
+	os.WriteFile(fname, []byte(content), 0600)
 }
 
 func truncate(s string, max int) string {

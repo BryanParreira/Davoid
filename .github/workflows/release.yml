@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build release binaries
+        run: make release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/davoid-linux-amd64
+            dist/davoid-linux-arm64
+            dist/davoid-darwin-amd64
+            dist/davoid-darwin-arm64
+          generate_release_notes: true
+          body: |
+            ## Davoid ${{ github.ref_name }}
+
+            **Single-binary red team engagement platform.**
+
+            ### Installation
+
+            ```bash
+            # Linux x86_64
+            curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/download/${{ github.ref_name }}/davoid-linux-amd64
+            chmod +x davoid && sudo mv davoid /usr/local/bin/
+            ```
+
+            See [README](https://github.com/BryanParreira/Davoid#readme) for full instructions.

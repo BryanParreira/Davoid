@@ -1,7 +1,12 @@
 package tui
 
 import (
+	"encoding/hex"
 	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -39,6 +44,7 @@ type (
 	engLoadedMsg   struct{ eng *engagement.Engagement }
 	findingsMsg    struct{ findings []*engagement.Finding }
 	engListMsg     struct{ list []*engagement.Engagement }
+	netInfoMsg     struct{ ip, gateway string }
 	reportReadyMsg struct {
 		content string
 		path    string
@@ -82,6 +88,8 @@ type Model struct {
 	state          state
 	width          int
 	height         int
+	localIP        string
+	gateway        string
 	activeEng      *engagement.Engagement
 	engList        []*engagement.Engagement
 	findings       []*engagement.Finding
@@ -147,8 +155,67 @@ func NewModel() Model {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		loadActiveEng(),
+		loadNetInfo(),
 		tickCmd(),
 	)
+}
+
+func loadNetInfo() tea.Cmd {
+	return func() tea.Msg {
+		return netInfoMsg{ip: getLocalIP(), gateway: getGateway()}
+	}
+}
+
+func getLocalIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "unavailable"
+	}
+	defer conn.Close()
+	return conn.LocalAddr().(*net.UDPAddr).IP.String()
+}
+
+func getGateway() string {
+	if runtime.GOOS == "linux" {
+		return gatewayLinux()
+	}
+	return gatewayDarwin()
+}
+
+func gatewayLinux() string {
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return "unavailable"
+	}
+	for _, line := range strings.Split(string(data), "\n")[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[1] == "00000000" { // default route
+			b, err := hex.DecodeString(fields[2])
+			if err != nil || len(b) < 4 {
+				continue
+			}
+			ip := net.IP([]byte{b[3], b[2], b[1], b[0]})
+			return ip.String()
+		}
+	}
+	return "unavailable"
+}
+
+func gatewayDarwin() string {
+	out, err := exec.Command("route", "-n", "get", "default").Output()
+	if err != nil {
+		return "unavailable"
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "gateway:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "gateway:"))
+		}
+	}
+	return "unavailable"
 }
 
 func loadActiveEng() tea.Cmd {
@@ -195,6 +262,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engLoadedMsg:
 		m.activeEng = msg.eng
+		return m, nil
+
+	case netInfoMsg:
+		m.localIP = msg.ip
+		m.gateway = msg.gateway
 		return m, nil
 
 	case findingsMsg:
@@ -526,7 +598,15 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleBanner.Render(banner))
 	sb.WriteString("\n")
 	sb.WriteString(StyleSubtitle.Render("  ghost in the net  ·  operator-grade red team engagement platform") + "\n")
-	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n\n")
+	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n")
+
+	// Network info
+	sb.WriteString("  ")
+	sb.WriteString(StyleLabel.Render("IP  "))
+	sb.WriteString(StyleValue.Render(m.localIP))
+	sb.WriteString(StyleLabel.Render("   GW  "))
+	sb.WriteString(StyleValue.Render(m.gateway))
+	sb.WriteString("\n\n")
 
 	// Engagement status
 	sb.WriteString("  ")

@@ -41,7 +41,7 @@ Most offensive tools do one thing. You end up juggling a terminal full of separa
 ## Installation
 
 ```bash
-curl -sSL https://github.com/BryanParreira/Davoid/releases/latest/download/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh | bash
 ```
 
 That's it. Works on macOS and Linux, any architecture. The script:

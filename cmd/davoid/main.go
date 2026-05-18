@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"text/tabwriter"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -191,6 +193,58 @@ var runCmd = &cobra.Command{
 	},
 }
 
+var doctorCmd = &cobra.Command{
+	Use:   "doctor",
+	Short: "Check required tool dependencies",
+	Run: func(cmd *cobra.Command, args []string) {
+		type dep struct {
+			tool    string
+			purpose string
+			install string
+		}
+		deps := []dep{
+			{"nmap", "Net-Mapper scanner", "brew install nmap / apt install nmap"},
+			{"airmon-ng", "WiFi monitor mode", "apt install aircrack-ng"},
+			{"airodump-ng", "WiFi scanning", "apt install aircrack-ng"},
+			{"aireplay-ng", "WiFi deauth", "apt install aircrack-ng"},
+			{"aircrack-ng", "WPA cracking", "apt install aircrack-ng"},
+			{"hostapd", "Evil twin AP", "apt install hostapd"},
+			{"dnsmasq", "Evil twin DHCP", "apt install dnsmasq"},
+			{"pandoc", "PDF reports", "brew install pandoc / apt install pandoc"},
+			{"msfconsole", "Metasploit bridge", "https://metasploit.com/download"},
+			{"tcpdump", "Traffic capture", "brew install tcpdump / apt install tcpdump"},
+		}
+
+		fmt.Println()
+		fmt.Printf("  %-14s  %-8s  %-28s  %s\n", "TOOL", "STATUS", "PURPOSE", "INSTALL")
+		fmt.Printf("  %s\n", strings.Repeat("─", 76))
+
+		ok, missing := 0, 0
+		for _, d := range deps {
+			_, err := exec.LookPath(d.tool)
+			status := "\033[32m✓ found  \033[0m"
+			install := ""
+			if err != nil {
+				status = "\033[31m✗ missing\033[0m"
+				install = d.install
+				missing++
+			} else {
+				ok++
+			}
+			fmt.Printf("  %-14s  %s  %-28s  %s\n", d.tool, status, d.purpose, install)
+		}
+
+		fmt.Println()
+		fmt.Printf("  %d/%d tools available", ok, len(deps))
+		if missing > 0 {
+			fmt.Printf("  —  %d missing (WiFi tools require Linux + compatible adapter)\n", missing)
+		} else {
+			fmt.Printf("  — all good\n")
+		}
+		fmt.Println()
+	},
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version",
@@ -227,7 +281,7 @@ func init() {
 	findingCmd.Flags().String("target", "", "Affected target")
 	findingCmd.Flags().String("evidence", "", "Supporting evidence")
 
-	rootCmd.AddCommand(newCmd, listCmd, reportCmd, findingCmd, versionCmd, modulesCmd, runCmd)
+	rootCmd.AddCommand(newCmd, listCmd, reportCmd, findingCmd, versionCmd, modulesCmd, runCmd, doctorCmd)
 }
 
 func main() {

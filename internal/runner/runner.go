@@ -8,6 +8,7 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/aiassist"
 	"github.com/bryanparreira/davoid/internal/modules/auditor"
 	"github.com/bryanparreira/davoid/internal/modules/bruteforce"
+	"github.com/bryanparreira/davoid/internal/modules/catcher"
 	"github.com/bryanparreira/davoid/internal/modules/cloudops"
 	"github.com/bryanparreira/davoid/internal/modules/credtester"
 	"github.com/bryanparreira/davoid/internal/modules/cryptkeeper"
@@ -66,6 +67,7 @@ var Registry = []Module{
 	{Key: "payloads", Name: "Shell Forge", Description: "Multi-language payload generator (Bash, Python, PHP, PS, MSF)", Category: "Exploitation"},
 	{Key: "crypt_keeper", Name: "Crypt-Keeper", Description: "Payload encryption + self-decrypting AES loaders", Category: "Exploitation"},
 	{Key: "msf_engine", Name: "Metasploit Bridge", Description: "MSF RPC client — auto exploit selection & execution", Category: "Exploitation"},
+	{Key: "catcher", Name: "Shell Catcher", Description: "TCP reverse shell listener — logs connections as CRITICAL findings", Category: "Exploitation"},
 
 	// ── [5] Post-Exploitation ─────────────────────────────────────────────
 	{Key: "looter", Name: "Looter", Description: "Privilege escalation discovery, SSH key harvest, loot collection", Category: "Post-Exploitation"},
@@ -125,6 +127,7 @@ func RunModule(key string) error {
 	case "auditor": return auditor.Run()
 	case "god_mode": return godmode.Run()
 	case "payloads": return payloads.Run()
+	case "catcher": return catcher.Run()
 	case "wifi_monitor": return wifi.RunMonitor()
 	case "wifi_scan": return wifi.RunScan()
 	case "wifi_deauth": return wifi.RunDeauth()

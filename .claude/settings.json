@@ -8,7 +8,24 @@
       "Bash(git commit -m ' *)",
       "Bash(curl -s http://localhost:11434/api/tags)",
       "Bash(python3 -m json.tool)",
-      "Bash(bash -n /Volumes/Davoid/Coding/Projects/Davoid/install.sh)"
+      "Bash(bash -n /Volumes/Davoid/Coding/Projects/Davoid/install.sh)",
+      "Bash(git branch *)",
+      "Bash(command -v git-filter-repo)",
+      "Bash(git filter-repo --message-callback ' *)",
+      "Bash(git remote *)",
+      "Bash(git config *)",
+      "Bash(git filter-repo --commit-callback ' *)",
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(make install *)",
+      "Bash(sudo cp davoid /usr/local/bin/davoid)",
+      "Bash(cp davoid *)",
+      "Bash(davoid doctor *)",
+      "Bash(/opt/homebrew/bin/davoid doctor *)",
+      "Bash(./davoid doctor *)"
+    ],
+    "additionalDirectories": [
+      "/opt/homebrew/bin"
     ]
   }
 }

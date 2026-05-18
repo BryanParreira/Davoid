@@ -30,7 +30,7 @@ const (
 	stateMenu state = iota
 	stateEngagementNew
 	stateEngagementList
-	stateEngagementSwitch
+	stateEngagementHub
 	stateFindings
 	stateModuleList
 	stateModuleConfirm
@@ -40,6 +40,7 @@ const (
 	stateTargets
 	stateNotes
 	stateNoteAdd
+	stateTimeline
 )
 
 // --------------------------------------------------------------------------
@@ -56,17 +57,18 @@ type (
 	engLoadedMsg      struct{ eng *engagement.Engagement }
 	findingsMsg       struct{ findings []*engagement.Finding }
 	engListMsg        struct{ list []*engagement.Engagement }
-	netInfoMsg        struct{ ip, gateway string }
+	netInfoMsg        struct{ ip, gateway, vpn string }
 	updateCheckMsg    struct{ latest string }
 	updateProgressMsg struct{ line string }
 	reportReadyMsg    struct {
 		content string
 		path    string
 	}
-	vaultMsg   struct{ creds []*vault.Credential }
-	targetsMsg struct{ hosts []*targets.Host; netmap string }
-	notesMsg   struct{ notes []engNote }
-	errMsg     struct{ err error }
+	vaultMsg    struct{ creds []*vault.Credential }
+	targetsMsg  struct{ hosts []*targets.Host; netmap string }
+	notesMsg    struct{ notes []engNote }
+	timelineMsg struct{ events []engagement.TimelineEvent }
+	errMsg      struct{ err error }
 )
 
 func tickCmd() tea.Cmd {
@@ -108,6 +110,7 @@ type Model struct {
 	version        string
 	localIP        string
 	gateway        string
+	vpn            string
 	latestVersion  string
 	updating       bool
 	updateStatus   string
@@ -141,6 +144,9 @@ type Model struct {
 	notesList   []engNote
 	noteInput   inputField
 	noteScroll  int
+	// timeline
+	timelineItems []engagement.TimelineEvent
+	timelineScroll int
 }
 
 // PendingModule returns the module key that should be run after the TUI exits,
@@ -165,12 +171,7 @@ func buildMainMenu() []menuItem {
 		{key: "7", label: "WiFi & Wireless"},
 		{key: "8", label: "Advanced"},
 		{key: "", label: ""},
-		{key: "E", label: "Engagement Manager"},
-		{key: "F", label: "View Findings"},
-		{key: "R", label: "Generate Report"},
-		{key: "V", label: "Credential Vault"},
-		{key: "T", label: "Target Map"},
-		{key: "N", label: "Notes"},
+		{key: "E", label: "Engagement ▸"},
 		{key: "", label: ""},
 		{key: "?", label: "Help"},
 		{key: "Q", label: "Quit"},
@@ -202,8 +203,28 @@ func (m Model) Init() tea.Cmd {
 
 func loadNetInfo() tea.Cmd {
 	return func() tea.Msg {
-		return netInfoMsg{ip: getLocalIP(), gateway: getGateway()}
+		return netInfoMsg{ip: getLocalIP(), gateway: getGateway(), vpn: getVPN()}
 	}
+}
+
+func getVPN() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		name := iface.Name
+		if strings.HasPrefix(name, "tun") || strings.HasPrefix(name, "tap") || strings.HasPrefix(name, "wg") {
+			addrs, _ := iface.Addrs()
+			if len(addrs) > 0 {
+				return name
+			}
+		}
+	}
+	if os.Getenv("PROXYCHAINS_CONF_FILE") != "" || os.Getenv("PROXYCHAINS4_CONF_FILE") != "" {
+		return "proxychains"
+	}
+	return ""
 }
 
 func getLocalIP() string {
@@ -325,6 +346,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case netInfoMsg:
 		m.localIP = msg.ip
 		m.gateway = msg.gateway
+		m.vpn = msg.vpn
+		return m, nil
+
+	case timelineMsg:
+		m.timelineItems = msg.events
+		m.state = stateTimeline
+		m.timelineScroll = 0
 		return m, nil
 
 	case updateCheckMsg:
@@ -431,43 +459,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "8":
 			return m.openCategoryMenu("Advanced")
 		case "e", "E":
-			m.state = stateEngagementList
-			return m, loadEngList()
-		case "f", "F":
-			m.state = stateFindings
-			engID := ""
-			if m.activeEng != nil {
-				engID = m.activeEng.ID
-			}
-			return m, loadFindings(engID)
-		case "r", "R":
-			if m.activeEng == nil {
-				m.statusMsg = "No active engagement. Create one with [E]."
-				m.statusIsError = true
-				return m, nil
-			}
-			return m, generateReport(m.activeEng.ID)
-		case "v", "V":
-			if m.activeEng == nil {
-				m.statusMsg = "No active engagement. Create one with [E]."
-				m.statusIsError = true
-				return m, nil
-			}
-			return m, loadVault(m.activeEng.ID)
-		case "t", "T":
-			if m.activeEng == nil {
-				m.statusMsg = "No active engagement. Create one with [E]."
-				m.statusIsError = true
-				return m, nil
-			}
-			return m, loadTargets(m.activeEng.ID)
-		case "n", "N":
-			if m.activeEng == nil {
-				m.statusMsg = "No active engagement. Create one with [E]."
-				m.statusIsError = true
-				return m, nil
-			}
-			return m, loadNotes(m.activeEng.ID)
+			m.state = stateEngagementHub
+			return m, nil
 		case "?":
 			m.state = stateHelp
 		case "u", "U":
@@ -543,7 +536,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.state = stateMenu
 			}
 		case "esc", "q":
-			m.state = stateMenu
+			m.state = stateEngagementHub
 		}
 
 	// ── New Engagement form ───────────────────────────────────────────────
@@ -596,7 +589,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			m.findingScroll++
 		case "esc", "q":
-			m.state = stateMenu
+			m.state = stateEngagementHub
 		}
 
 	// ── Report viewer ────────────────────────────────────────────────────
@@ -609,7 +602,75 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			m.reportScroll++
 		case "esc", "q":
+			m.state = stateEngagementHub
+		}
+
+	// ── Engagement Hub ────────────────────────────────────────────────────
+	case stateEngagementHub:
+		noEng := func() bool {
+			if m.activeEng == nil {
+				m.statusMsg = "No active engagement — press [N] to create one."
+				m.statusIsError = true
+				return true
+			}
+			return false
+		}
+		switch key {
+		case "n", "N":
+			m.state = stateEngagementNew
+			m.engFieldCursor = 0
+			for i := range m.engFields {
+				m.engFields[i].value = ""
+			}
+		case "s", "S":
+			m.state = stateEngagementList
+			return m, loadEngList()
+		case "f", "F":
+			if noEng() {
+				return m, nil
+			}
+			m.state = stateFindings
+			return m, loadFindings(m.activeEng.ID)
+		case "l", "L":
+			if noEng() {
+				return m, nil
+			}
+			return m, loadTimeline(m.activeEng.ID)
+		case "r", "R":
+			if noEng() {
+				return m, nil
+			}
+			return m, generateReport(m.activeEng.ID)
+		case "v", "V":
+			if noEng() {
+				return m, nil
+			}
+			return m, loadVault(m.activeEng.ID)
+		case "m", "M":
+			if noEng() {
+				return m, nil
+			}
+			return m, loadTargets(m.activeEng.ID)
+		case "o", "O":
+			if noEng() {
+				return m, nil
+			}
+			return m, loadNotes(m.activeEng.ID)
+		case "esc", "q", "Q":
 			m.state = stateMenu
+		}
+
+	// ── Timeline ──────────────────────────────────────────────────────────
+	case stateTimeline:
+		switch key {
+		case "up", "k":
+			if m.timelineScroll > 0 {
+				m.timelineScroll--
+			}
+		case "down", "j":
+			m.timelineScroll++
+		case "esc", "q":
+			m.state = stateEngagementHub
 		}
 
 	// ── Help ──────────────────────────────────────────────────────────────
@@ -628,7 +689,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			m.vaultScroll++
 		case "esc", "q":
-			m.state = stateMenu
+			m.state = stateEngagementHub
 		}
 
 	// ── Target Map ────────────────────────────────────────────────────────
@@ -641,7 +702,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			m.targetScroll++
 		case "esc", "q":
-			m.state = stateMenu
+			m.state = stateEngagementHub
 		}
 
 	// ── Notes list ────────────────────────────────────────────────────────
@@ -657,7 +718,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateNoteAdd
 			m.noteInput = inputField{label: "Note"}
 		case "esc", "q":
-			m.state = stateMenu
+			m.state = stateEngagementHub
 		}
 
 	// ── Note add form ─────────────────────────────────────────────────────
@@ -699,43 +760,8 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 	case "8":
 		return m.openCategoryMenu("Advanced")
 	case "E":
-		m.state = stateEngagementList
-		return m, loadEngList()
-	case "F":
-		m.state = stateFindings
-		engID := ""
-		if m.activeEng != nil {
-			engID = m.activeEng.ID
-		}
-		return m, loadFindings(engID)
-	case "R":
-		if m.activeEng == nil {
-			m.statusMsg = "No active engagement. Create one with [E]."
-			m.statusIsError = true
-			return m, nil
-		}
-		return m, generateReport(m.activeEng.ID)
-	case "V":
-		if m.activeEng == nil {
-			m.statusMsg = "No active engagement. Create one with [E]."
-			m.statusIsError = true
-			return m, nil
-		}
-		return m, loadVault(m.activeEng.ID)
-	case "T":
-		if m.activeEng == nil {
-			m.statusMsg = "No active engagement. Create one with [E]."
-			m.statusIsError = true
-			return m, nil
-		}
-		return m, loadTargets(m.activeEng.ID)
-	case "N":
-		if m.activeEng == nil {
-			m.statusMsg = "No active engagement. Create one with [E]."
-			m.statusIsError = true
-			return m, nil
-		}
-		return m, loadNotes(m.activeEng.ID)
+		m.state = stateEngagementHub
+		return m, nil
 	case "Q":
 		return m, tea.Quit
 	}
@@ -761,6 +787,13 @@ func generateReport(engID string) tea.Cmd {
 			return errMsg{err: err}
 		}
 		return reportReadyMsg{content: content, path: path}
+	}
+}
+
+func loadTimeline(engID string) tea.Cmd {
+	return func() tea.Msg {
+		events, _ := engagement.Timeline(engID)
+		return timelineMsg{events: events}
 	}
 }
 
@@ -810,6 +843,10 @@ func (m Model) View() string {
 		return m.viewReport()
 	case stateHelp:
 		return m.viewHelp()
+	case stateEngagementHub:
+		return m.viewEngagementHub()
+	case stateTimeline:
+		return m.viewTimeline()
 	case stateVault:
 		return m.viewVault()
 	case stateTargets:
@@ -864,8 +901,11 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleValue.Render(gateway))
 	sb.WriteString(StyleLabel.Render("   v"))
 	sb.WriteString(StyleValue.Render(m.version))
+	if m.vpn != "" {
+		sb.WriteString("  " + StyleSuccess.Render("VPN "+m.vpn))
+	}
 	if m.latestVersion != "" {
-		sb.WriteString("  " + StyleWarning.Render("↑ "+m.latestVersion+" available [U] to update"))
+		sb.WriteString("  " + StyleWarning.Render("↑ "+m.latestVersion+" [U]"))
 	}
 	sb.WriteString("\n")
 
@@ -934,12 +974,7 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 40)) + "\n")
 
 	engagementItems := []struct{ k, label string }{
-		{"E", "Engagement Manager"},
-		{"F", "View Findings"},
-		{"R", "Generate Report"},
-		{"V", "Credential Vault"},
-		{"T", "Target Map"},
-		{"N", "Notes"},
+		{"E", "Engagement ▸"},
 	}
 	systemItems := []struct{ k, label string }{
 		{"?", "Help"},
@@ -1023,7 +1058,11 @@ func (m Model) viewModuleConfirm() string {
 	sb.WriteString("  " + StyleMenuItem.Render(m.selectedModule.Description) + "\n\n")
 
 	if m.activeEng != nil {
-		sb.WriteString("  " + StyleLabel.Render("Engagement: ") + StyleEngagementActive.Render(m.activeEng.Name) + "\n\n")
+		sb.WriteString("  " + StyleLabel.Render("Engagement: ") + StyleEngagementActive.Render(m.activeEng.Name) + "\n")
+		if m.activeEng.Scope != "" {
+			sb.WriteString("  " + StyleLabel.Render("Scope:      ") + StyleHelp.Render(m.activeEng.Scope) + "\n")
+		}
+		sb.WriteString("\n")
 	} else {
 		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement — findings won't be tracked.\n\n"))
 	}
@@ -1207,6 +1246,108 @@ func (m Model) viewHelp() string {
 		sb.WriteString("  " + StyleMenuKey.Render(fmt.Sprintf("%-28s", h.k)) + StyleMenuItem.Render(h.d) + "\n")
 	}
 	sb.WriteString("\n" + StyleHelp.Render("  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewEngagementHub() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(StyleMenuTitle.Render("  Engagement Hub") + "\n")
+
+	if m.activeEng != nil {
+		sb.WriteString("  " + StyleLabel.Render("Active: ") + StyleEngagementActive.Render(m.activeEng.Name))
+		if m.activeEng.Target != "" {
+			sb.WriteString(StyleLabel.Render("  →  ") + StyleValue.Render(m.activeEng.Target))
+		}
+		if m.activeEng.Scope != "" {
+			sb.WriteString(StyleLabel.Render("  scope: ") + StyleHelp.Render(m.activeEng.Scope))
+		}
+	} else {
+		sb.WriteString("  " + StyleEngagementNone.Render("no active engagement"))
+	}
+	sb.WriteString("\n\n")
+
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 44)) + "\n\n")
+
+	rows := []struct{ k, label, desc string }{
+		{"N", "New Engagement", "start a new op"},
+		{"S", "Switch / List", "set active engagement"},
+		{"", "", ""},
+		{"F", "Findings", "view all findings for active engagement"},
+		{"L", "Timeline", "chronological activity log"},
+		{"R", "Report", "generate Markdown / PDF report"},
+		{"", "", ""},
+		{"V", "Credential Vault", "harvested credentials"},
+		{"M", "Target Map", "network topology + discovered hosts"},
+		{"O", "Notes", "engagement notes"},
+	}
+
+	for _, r := range rows {
+		if r.k == "" {
+			sb.WriteString("\n")
+			continue
+		}
+		key := StyleMenuKey.Render(fmt.Sprintf("  [%s]", r.k))
+		label := StyleMenuItem.Render(fmt.Sprintf("  %-20s", r.label))
+		desc := StyleHelp.Render(r.desc)
+		sb.WriteString(key + label + desc + "\n")
+	}
+
+	sb.WriteString("\n" + StyleDivider.Render("  "+strings.Repeat("─", 44)) + "\n")
+
+	if m.statusMsg != "" {
+		if m.statusIsError {
+			sb.WriteString("  " + StyleError.Render("✗ "+m.statusMsg) + "\n")
+		} else {
+			sb.WriteString("  " + StyleSuccess.Render("✓ "+m.statusMsg) + "\n")
+		}
+	}
+
+	sb.WriteString("\n" + StyleHelp.Render("  key to select  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewTimeline() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+
+	title := "  Timeline"
+	if m.activeEng != nil {
+		title = fmt.Sprintf("  Timeline — %s", m.activeEng.Name)
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+
+	if len(m.timelineItems) == 0 {
+		sb.WriteString(StyleLabel.Render("  No activity recorded yet.\n"))
+	} else {
+		start := m.timelineScroll
+		if start > len(m.timelineItems)-1 {
+			start = 0
+		}
+		maxLines := m.height - 10
+		count := 0
+		for _, ev := range m.timelineItems[start:] {
+			if count >= maxLines {
+				break
+			}
+			ts := StyleHelp.Render(ev.Time.Format("01-02 15:04"))
+			var kindBadge string
+			if ev.Kind == "finding" {
+				kindBadge = SeverityStyle(ev.Severity).Render(fmt.Sprintf("%-8s", ev.Severity))
+			} else {
+				kindBadge = StyleLabel.Render("NOTE    ")
+			}
+			sb.WriteString(fmt.Sprintf("  %s  %s  %s\n", ts, kindBadge, StyleMenuItem.Render(truncate(ev.Title, 55))))
+			if ev.Detail != "" {
+				sb.WriteString(StyleHelp.Render(fmt.Sprintf("              %s", truncate(ev.Detail, 60))) + "\n")
+				count++
+			}
+			count++
+		}
+		sb.WriteString(StyleHelp.Render(fmt.Sprintf("\n  %d event(s) total", len(m.timelineItems))))
+	}
+
+	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
 	return sb.String()
 }
 

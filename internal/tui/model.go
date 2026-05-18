@@ -627,7 +627,7 @@ func (m Model) View() string {
 	}
 }
 
-const banner = `
+const bannerWide = `
 ██████╗  █████╗ ██╗   ██╗ ██████╗ ██╗██████╗
 ██╔══██╗██╔══██╗██║   ██║██╔═══██╗██║██╔══██╗
 ██║  ██║███████║██║   ██║██║   ██║██║██║  ██║
@@ -635,11 +635,24 @@ const banner = `
 ██████╔╝██║  ██║ ╚████╔╝ ╚██████╔╝██║██████╔╝
 ╚═════╝ ╚═╝  ╚═╝  ╚═══╝   ╚═════╝ ╚═╝╚═════╝`
 
+const bannerSmall = `
+ ___   _   _   _  ___  ___ ___
+|   \ /_\ | | | |/ _ \|_ _|   \
+| |) / _ \| |_| | (_) || || |) |
+|___/_/ \_|\___/ \___/|___|___/`
+
+func (m Model) banner() string {
+	if m.width > 0 && m.width < 55 {
+		return bannerSmall
+	}
+	return bannerWide
+}
+
 func (m Model) viewMainMenu() string {
 	var sb strings.Builder
 
 	// Banner
-	sb.WriteString(StyleBanner.Render(banner))
+	sb.WriteString(StyleBanner.Render(m.banner()))
 	sb.WriteString("\n")
 	sb.WriteString(StyleSubtitle.Render("  ghost in the net  ·  operator-grade red team engagement platform") + "\n")
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n")
@@ -777,7 +790,7 @@ func (m Model) viewMainMenu() string {
 
 func (m Model) viewModuleList() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(banner) + "\n\n")
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 
 	if len(m.subMenuItems) == 0 {
 		sb.WriteString(StyleError.Render("  No modules in this category.\n"))
@@ -798,7 +811,7 @@ func (m Model) viewModuleList() string {
 
 func (m Model) viewModuleConfirm() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(banner) + "\n\n")
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 	sb.WriteString(StyleMenuTitle.Render("  Launch Module") + "\n\n")
 	sb.WriteString("  " + StyleLabel.Render("Module:  ") + StyleValue.Render(m.selectedModule.Name) + "\n")
 	sb.WriteString("  " + StyleLabel.Render("Category: ") + StyleValue.Render(m.selectedModule.Category) + "\n\n")
@@ -817,7 +830,7 @@ func (m Model) viewModuleConfirm() string {
 
 func (m Model) viewNewEngagement() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(banner) + "\n\n")
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 	sb.WriteString(StyleMenuTitle.Render("  New Engagement") + "\n\n")
 
 	for i, f := range m.engFields {
@@ -845,7 +858,7 @@ func (m Model) viewNewEngagement() string {
 
 func (m Model) viewEngagementList() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(banner) + "\n\n")
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 	sb.WriteString(StyleMenuTitle.Render("  Engagement Manager") + "\n\n")
 
 	if len(m.allEngagements) == 0 {
@@ -884,7 +897,7 @@ func (m Model) viewEngagementList() string {
 
 func (m Model) viewFindings() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(banner) + "\n\n")
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 
 	title := "  Recent Findings"
 	if m.activeEng != nil {
@@ -927,7 +940,7 @@ func (m Model) viewFindings() string {
 
 func (m Model) viewReport() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(banner) + "\n\n")
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 	sb.WriteString(StyleSuccess.Render("  ✓ Report Generated") + "\n")
 	if m.reportPath != "" {
 		sb.WriteString(StyleLabel.Render("  Saved to: ") + StyleValue.Render(m.reportPath) + "\n\n")
@@ -961,7 +974,7 @@ func (m Model) viewReport() string {
 
 func (m Model) viewHelp() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(banner) + "\n\n")
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 	sb.WriteString(StyleMenuTitle.Render("  Keyboard Reference") + "\n\n")
 
 	help := []struct{ k, d string }{

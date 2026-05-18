@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Davoid — two profiles:
 #
 #   docker compose --profile safe up    → OSINT, web, AI, phishing, auditor

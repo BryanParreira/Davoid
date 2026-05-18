@@ -642,10 +642,10 @@ const bannerSmall = `
 |___/_/ \_|\___/ \___/|___|___/`
 
 func (m Model) banner() string {
-	if m.width > 0 && m.width < 55 {
-		return bannerSmall
+	if m.width == 0 || m.width >= 90 {
+		return bannerWide
 	}
-	return bannerWide
+	return bannerSmall
 }
 
 func (m Model) viewMainMenu() string {
@@ -658,11 +658,19 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n")
 
 	// Network info + version
+	localIP := m.localIP
+	if localIP == "" {
+		localIP = "..."
+	}
+	gateway := m.gateway
+	if gateway == "" {
+		gateway = "..."
+	}
 	sb.WriteString("  ")
 	sb.WriteString(StyleLabel.Render("IP  "))
-	sb.WriteString(StyleValue.Render(m.localIP))
+	sb.WriteString(StyleValue.Render(localIP))
 	sb.WriteString(StyleLabel.Render("   GW  "))
-	sb.WriteString(StyleValue.Render(m.gateway))
+	sb.WriteString(StyleValue.Render(gateway))
 	sb.WriteString(StyleLabel.Render("   v"))
 	sb.WriteString(StyleValue.Render(m.version))
 	if m.latestVersion != "" {

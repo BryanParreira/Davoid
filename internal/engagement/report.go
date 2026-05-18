@@ -150,6 +150,26 @@ func GeneratePDF(engID string) (string, error) {
 	return pdfPath, nil
 }
 
+// PrependAISummary rewrites the report file inserting an AI-generated section
+// right after the Executive Summary header.
+func PrependAISummary(reportPath, summary string) error {
+	data, err := os.ReadFile(reportPath)
+	if err != nil {
+		return err
+	}
+	content := string(data)
+	marker := "## Executive Summary\n"
+	idx := strings.Index(content, marker)
+	if idx == -1 {
+		// Just prepend to the top
+		content = "## AI Executive Summary\n\n" + summary + "\n\n---\n\n" + content
+	} else {
+		insert := "\n### AI-Generated Executive Summary\n\n" + summary + "\n\n"
+		content = content[:idx+len(marker)] + insert + content[idx+len(marker):]
+	}
+	return os.WriteFile(reportPath, []byte(content), 0600)
+}
+
 // SaveNote adds a free-form note to an engagement.
 func SaveNote(engID, content string) error {
 	_, err := db.Exec(`INSERT INTO notes (id, engagement_id, content, created_at) VALUES (?,?,?,?)`,

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bryanparreira/davoid/internal/engagement"
+	"github.com/bryanparreira/davoid/internal/modules/playbook"
 	"github.com/bryanparreira/davoid/internal/runner"
 	"github.com/bryanparreira/davoid/internal/targets"
 	"github.com/bryanparreira/davoid/internal/updater"
@@ -41,6 +42,8 @@ const (
 	stateNotes
 	stateNoteAdd
 	stateTimeline
+	statePlaybooks
+	statePlaybookConfirm
 )
 
 // --------------------------------------------------------------------------
@@ -145,8 +148,11 @@ type Model struct {
 	noteInput   inputField
 	noteScroll  int
 	// timeline
-	timelineItems []engagement.TimelineEvent
+	timelineItems  []engagement.TimelineEvent
 	timelineScroll int
+	// playbooks
+	playbookCursor   int
+	selectedPlaybook playbook.Playbook
 }
 
 // PendingModule returns the module key that should be run after the TUI exits,
@@ -171,6 +177,7 @@ func buildMainMenu() []menuItem {
 		{key: "7", label: "WiFi & Wireless"},
 		{key: "8", label: "Advanced"},
 		{key: "", label: ""},
+		{key: "P", label: "Playbooks ▸"},
 		{key: "E", label: "Engagement ▸"},
 		{key: "", label: ""},
 		{key: "?", label: "Help"},
@@ -458,6 +465,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.openCategoryMenu("WiFi & Wireless")
 		case "8":
 			return m.openCategoryMenu("Advanced")
+		case "p", "P":
+			m.state = statePlaybooks
+			m.playbookCursor = 0
+			return m, nil
 		case "e", "E":
 			m.state = stateEngagementHub
 			return m, nil
@@ -673,6 +684,36 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateEngagementHub
 		}
 
+	// ── Playbook list ─────────────────────────────────────────────────────
+	case statePlaybooks:
+		switch key {
+		case "up", "k":
+			if m.playbookCursor > 0 {
+				m.playbookCursor--
+			}
+		case "down", "j":
+			if m.playbookCursor < len(playbook.Registry)-1 {
+				m.playbookCursor++
+			}
+		case "enter", " ":
+			if m.playbookCursor < len(playbook.Registry) {
+				m.selectedPlaybook = playbook.Registry[m.playbookCursor]
+				m.state = statePlaybookConfirm
+			}
+		case "esc", "q":
+			m.state = stateMenu
+		}
+
+	// ── Playbook confirm ──────────────────────────────────────────────────
+	case statePlaybookConfirm:
+		switch key {
+		case "y", "Y", "enter":
+			m.pendingModule = "playbook:" + m.selectedPlaybook.Key
+			return m, tea.Quit
+		case "n", "N", "esc":
+			m.state = statePlaybooks
+		}
+
 	// ── Help ──────────────────────────────────────────────────────────────
 	case stateHelp:
 		if key == "esc" || key == "q" {
@@ -759,6 +800,10 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 		return m.openCategoryMenu("WiFi & Wireless")
 	case "8":
 		return m.openCategoryMenu("Advanced")
+	case "P":
+		m.state = statePlaybooks
+		m.playbookCursor = 0
+		return m, nil
 	case "E":
 		m.state = stateEngagementHub
 		return m, nil
@@ -853,6 +898,10 @@ func (m Model) View() string {
 		return m.viewTargets()
 	case stateNotes, stateNoteAdd:
 		return m.viewNotes()
+	case statePlaybooks:
+		return m.viewPlaybooks()
+	case statePlaybookConfirm:
+		return m.viewPlaybookConfirm()
 	default:
 		return m.viewMainMenu()
 	}
@@ -974,6 +1023,7 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 40)) + "\n")
 
 	engagementItems := []struct{ k, label string }{
+		{"P", "Playbooks ▸"},
 		{"E", "Engagement ▸"},
 	}
 	systemItems := []struct{ k, label string }{
@@ -1481,6 +1531,60 @@ func (m Model) viewNotes() string {
 	}
 
 	sb.WriteString(StyleHelp.Render("  [A] add note  ·  ↑/↓ scroll  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewPlaybooks() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(StyleMenuTitle.Render("  Attack Playbooks") + "\n")
+	sb.WriteString(StyleHelp.Render("  Pre-built module chains — one key launches a full kill chain") + "\n\n")
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n\n")
+
+	for i, pb := range playbook.Registry {
+		cat := StyleHelp.Render(fmt.Sprintf("[%s]", pb.Category))
+		label := fmt.Sprintf("  %-22s %s", pb.Name, cat)
+		desc := StyleHelp.Render(truncate(pb.Description, 55))
+
+		if i == m.playbookCursor {
+			sb.WriteString(StyleMenuItemSelected.Render(label) + "\n")
+			sb.WriteString("  " + desc + "\n\n")
+		} else {
+			sb.WriteString(StyleMenuItem.Render(label) + "\n")
+		}
+	}
+
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewPlaybookConfirm() string {
+	var sb strings.Builder
+	pb := m.selectedPlaybook
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(StyleMenuTitle.Render("  Launch Playbook") + "\n\n")
+	sb.WriteString("  " + StyleLabel.Render("Name:      ") + StyleValue.Render(pb.Name) + "\n")
+	sb.WriteString("  " + StyleLabel.Render("Category:  ") + StyleValue.Render(pb.Category) + "\n")
+	sb.WriteString("  " + StyleLabel.Render("Modules:   ") + StyleValue.Render(fmt.Sprintf("%d steps", len(pb.Modules))) + "\n\n")
+	sb.WriteString("  " + StyleMenuItem.Render(pb.Description) + "\n\n")
+
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 40)) + "\n\n")
+	for i, key := range pb.Modules {
+		icon := "  ├──"
+		if i == len(pb.Modules)-1 {
+			icon = "  └──"
+		}
+		sb.WriteString(StyleHelp.Render(fmt.Sprintf("%s [%d] %s", icon, i+1, key)) + "\n")
+	}
+	sb.WriteString("\n")
+
+	if m.activeEng != nil {
+		sb.WriteString("  " + StyleLabel.Render("Engagement: ") + StyleEngagementActive.Render(m.activeEng.Name) + "\n\n")
+	} else {
+		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement — findings won't be tracked.") + "\n\n")
+	}
+
+	sb.WriteString("  " + StylePrompt.Render("Launch? [y/N]  ") + StyleHelp.Render("· esc back"))
 	return sb.String()
 }
 

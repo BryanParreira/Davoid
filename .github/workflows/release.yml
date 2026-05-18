@@ -31,45 +31,39 @@ jobs:
             dist/davoid-darwin-amd64
             dist/davoid-darwin-arm64
             dist/checksums.txt
+            install.sh
           generate_release_notes: true
           body: |
             ## Davoid ${{ github.ref_name }}
 
-            **Operator-grade red team engagement platform. 20 modules. One Docker command.**
+            **Operator-grade red team engagement platform. 20 modules. One command.**
 
             ---
 
             ### Install
 
-            Only requirement: [Docker](https://docs.docker.com/get-docker/)
-
             ```bash
-            git clone https://github.com/BryanParreira/Davoid.git
-            cd Davoid
+            curl -sSL https://github.com/BryanParreira/Davoid/releases/latest/download/install.sh | bash
             ```
 
-            **Safe mode** — OSINT, web recon, AI console, phishing, auditor:
-            ```bash
-            docker compose --profile safe up
-            ```
+            Works on macOS (Apple Silicon + Intel) and Linux (x86_64 + ARM64).
+            Downloads the correct binary for your platform, verifies the checksum, installs to PATH.
 
-            **Full mode** — all modules including sniff, mitm, scanner (raw network access):
-            ```bash
-            docker compose --profile full up
-            ```
+            Then just run:
 
-            Davoid opens in your terminal. Engagement data and reports persist via Docker volumes across restarts.
+            ```bash
+            davoid
+            ```
 
             ---
 
             ### First run
             ```bash
-            # TUI launches automatically — navigate with arrow keys
-            # Or run modules directly from a second terminal:
-            docker compose --profile safe run davoid-safe davoid new "Corp Pentest" --target 10.0.0.0/24
-            docker compose --profile safe run davoid-safe davoid run auditor
-            docker compose --profile safe run davoid-safe davoid modules
-            docker compose --profile safe run davoid-safe davoid report
+            davoid                                         # open TUI
+            davoid new "Corp Pentest" --target 10.0.0.0/24
+            davoid run auditor                             # pre-flight check
+            davoid modules                                 # list all 20 modules
+            davoid report                                  # generate report
             ```
 
             > **For authorized penetration testing and security research only.**

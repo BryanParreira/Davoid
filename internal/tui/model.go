@@ -642,10 +642,7 @@ const bannerSmall = `
 |___/_/ \_|\___/ \___/|___|___/`
 
 func (m Model) banner() string {
-	if m.width == 0 || m.width >= 90 {
-		return bannerWide
-	}
-	return bannerSmall
+	return bannerWide
 }
 
 func (m Model) viewMainMenu() string {

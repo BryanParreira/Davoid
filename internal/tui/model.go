@@ -156,12 +156,14 @@ type menuItem struct {
 
 func buildMainMenu() []menuItem {
 	return []menuItem{
-		{key: "1", label: "Intelligence & OSINT"},
-		{key: "2", label: "Offensive Operations"},
-		{key: "3", label: "Post-Exploitation"},
-		{key: "4", label: "Active Directory"},
-		{key: "5", label: "Advanced Modules"},
-		{key: "6", label: "WiFi & Wireless"},
+		{key: "1", label: "Recon & OSINT"},
+		{key: "2", label: "Network Attacks"},
+		{key: "3", label: "Social Engineering"},
+		{key: "4", label: "Exploitation"},
+		{key: "5", label: "Post-Exploitation"},
+		{key: "6", label: "Active Directory"},
+		{key: "7", label: "WiFi & Wireless"},
+		{key: "8", label: "Advanced"},
 		{key: "", label: ""},
 		{key: "E", label: "Engagement Manager"},
 		{key: "F", label: "View Findings"},
@@ -413,17 +415,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.activateMenuItem(m.menuItems[m.menuCursor].key)
 			}
 		case "1":
-			return m.openCategoryMenu("Intelligence & OSINT")
+			return m.openCategoryMenu("Recon & OSINT")
 		case "2":
-			return m.openCategoryMenu("Offensive Operations")
+			return m.openCategoryMenu("Network Attacks")
 		case "3":
-			return m.openCategoryMenu("Post-Exploitation")
+			return m.openCategoryMenu("Social Engineering")
 		case "4":
-			return m.openCategoryMenu("Active Directory")
+			return m.openCategoryMenu("Exploitation")
 		case "5":
-			return m.openCategoryMenu("Advanced")
+			return m.openCategoryMenu("Post-Exploitation")
 		case "6":
+			return m.openCategoryMenu("Active Directory")
+		case "7":
 			return m.openCategoryMenu("WiFi & Wireless")
+		case "8":
+			return m.openCategoryMenu("Advanced")
 		case "e", "E":
 			m.state = stateEngagementList
 			return m, loadEngList()
@@ -677,17 +683,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "1":
-		return m.openCategoryMenu("Intelligence & OSINT")
+		return m.openCategoryMenu("Recon & OSINT")
 	case "2":
-		return m.openCategoryMenu("Offensive Operations")
+		return m.openCategoryMenu("Network Attacks")
 	case "3":
-		return m.openCategoryMenu("Post-Exploitation")
+		return m.openCategoryMenu("Social Engineering")
 	case "4":
-		return m.openCategoryMenu("Active Directory")
+		return m.openCategoryMenu("Exploitation")
 	case "5":
-		return m.openCategoryMenu("Advanced")
+		return m.openCategoryMenu("Post-Exploitation")
 	case "6":
+		return m.openCategoryMenu("Active Directory")
+	case "7":
 		return m.openCategoryMenu("WiFi & Wireless")
+	case "8":
+		return m.openCategoryMenu("Advanced")
 	case "E":
 		m.state = stateEngagementList
 		return m, loadEngList()
@@ -896,12 +906,14 @@ func (m Model) viewMainMenu() string {
 
 	// Menu categories
 	catKeys := []struct{ k, label string }{
-		{"1", "Intelligence & OSINT"},
-		{"2", "Offensive Operations"},
-		{"3", "Post-Exploitation"},
-		{"4", "Active Directory"},
-		{"5", "Advanced Modules"},
-		{"6", "WiFi & Wireless"},
+		{"1", "Recon & OSINT"},
+		{"2", "Network Attacks"},
+		{"3", "Social Engineering"},
+		{"4", "Exploitation"},
+		{"5", "Post-Exploitation"},
+		{"6", "Active Directory"},
+		{"7", "WiFi & Wireless"},
+		{"8", "Advanced"},
 	}
 
 	for i, item := range catKeys {
@@ -1171,7 +1183,7 @@ func (m Model) viewHelp() string {
 	sb.WriteString(StyleMenuTitle.Render("  Keyboard Reference") + "\n\n")
 
 	help := []struct{ k, d string }{
-		{"1-6", "Open module category (6 = WiFi & Wireless)"},
+		{"1-8", "Open module category  (7=WiFi  8=Advanced)"},
 		{"↑ / ↓  or  j / k", "Navigate"},
 		{"enter", "Select / confirm"},
 		{"esc", "Back"},

@@ -35,39 +35,53 @@ type Module struct {
 	Category    string
 }
 
-// Categories in display order
+// Categories in display order (follows kill chain)
 var Categories = []string{
-	"Intelligence & OSINT",
-	"Offensive Operations",
+	"Recon & OSINT",
+	"Network Attacks",
+	"Social Engineering",
+	"Exploitation",
 	"Post-Exploitation",
 	"Active Directory",
-	"Advanced",
 	"WiFi & Wireless",
-	"System",
+	"Advanced",
 }
 
 // Registry is the full list of available modules.
 var Registry = []Module{
-	{Key: "scanner", Name: "Net-Mapper", Description: "Nmap orchestration with live CVE lookup (NVD)", Category: "Intelligence & OSINT"},
-	{Key: "sniff", Name: "Live Interceptor", Description: "Real-time traffic capture, DNS tracking, credential extraction", Category: "Intelligence & OSINT"},
-	{Key: "osint", Name: "Holmes Engine", Description: "Username OSINT across 14 platforms, phone intel, subdomain brute", Category: "Intelligence & OSINT"},
-	{Key: "web_recon", Name: "Web Recon", Description: "robots.txt scrape, domain reputation, Google Dorks, CT logs", Category: "Intelligence & OSINT"},
-	{Key: "mitm", Name: "MITM Engine", Description: "ARP poisoning + automatic IP forwarding (Linux/macOS)", Category: "Offensive Operations"},
-	{Key: "phishing", Name: "Phantom Cloner", Description: "Dynamic page cloning with JS credential harvesting portal", Category: "Offensive Operations"},
-	{Key: "ghost_hub", Name: "GHOST-HUB C2", Description: "AES-encrypted async HTTP command & control server", Category: "Offensive Operations"},
-	{Key: "payloads", Name: "Shell Forge", Description: "Multi-language payload generator (Bash, Python, PHP, PS, MSF)", Category: "Post-Exploitation"},
-	{Key: "crypt_keeper", Name: "Crypt-Keeper", Description: "Payload encryption + self-decrypting AES loaders", Category: "Post-Exploitation"},
-	{Key: "persistence", Name: "Persistence Engine", Description: "systemd, crontab (Linux), LaunchAgent (macOS), registry (Windows)", Category: "Post-Exploitation"},
-	{Key: "bruteforce", Name: "Hash Cracker", Description: "Multi-threaded dictionary/brute MD5, SHA256, NTLM", Category: "Post-Exploitation"},
+	// ── [1] Recon & OSINT ────────────────────────────────────────────────
+	{Key: "scanner", Name: "Net-Mapper", Description: "Nmap orchestration with live CVE lookup (NVD)", Category: "Recon & OSINT"},
+	{Key: "osint", Name: "Holmes Engine", Description: "Username OSINT across 14 platforms, phone intel, subdomain brute", Category: "Recon & OSINT"},
+	{Key: "web_recon", Name: "Web Recon", Description: "robots.txt, domain reputation, Google Dorks, CT logs", Category: "Recon & OSINT"},
+
+	// ── [2] Network Attacks ───────────────────────────────────────────────
+	{Key: "mitm", Name: "MITM Engine", Description: "ARP poisoning + automatic IP forwarding (Linux/macOS)", Category: "Network Attacks"},
+	{Key: "sniff", Name: "Live Interceptor", Description: "Real-time traffic capture, DNS tracking, credential extraction", Category: "Network Attacks"},
+
+	// ── [3] Social Engineering ────────────────────────────────────────────
+	{Key: "phishing", Name: "Phantom Cloner", Description: "Dynamic page cloning with JS credential harvesting portal", Category: "Social Engineering"},
+	{Key: "ghost_hub", Name: "GHOST-HUB C2", Description: "AES-encrypted async HTTP command & control server", Category: "Social Engineering"},
+
+	// ── [4] Exploitation ──────────────────────────────────────────────────
+	{Key: "payloads", Name: "Shell Forge", Description: "Multi-language payload generator (Bash, Python, PHP, PS, MSF)", Category: "Exploitation"},
+	{Key: "crypt_keeper", Name: "Crypt-Keeper", Description: "Payload encryption + self-decrypting AES loaders", Category: "Exploitation"},
+	{Key: "msf_engine", Name: "Metasploit Bridge", Description: "MSF RPC client — auto exploit selection & execution", Category: "Exploitation"},
+
+	// ── [5] Post-Exploitation ─────────────────────────────────────────────
 	{Key: "looter", Name: "Looter", Description: "Privilege escalation discovery, SSH key harvest, loot collection", Category: "Post-Exploitation"},
 	{Key: "cred_tester", Name: "Credential Tester", Description: "Credential re-use testing across SSH, FTP, HTTP", Category: "Post-Exploitation"},
+	{Key: "bruteforce", Name: "Hash Cracker", Description: "Multi-threaded dictionary/brute MD5, SHA256, NTLM", Category: "Post-Exploitation"},
+	{Key: "persistence", Name: "Persistence Engine", Description: "systemd, crontab (Linux), LaunchAgent (macOS), registry (Windows)", Category: "Post-Exploitation"},
+
+	// ── [6] Active Directory ──────────────────────────────────────────────
 	{Key: "ad_ops", Name: "AD Ops", Description: "LDAP enum, Kerberoasting, DCSync detection, BloodHound export", Category: "Active Directory"},
-	{Key: "msf_engine", Name: "Metasploit Bridge", Description: "MSF RPC client — auto exploit selection & execution", Category: "Advanced"},
+
+	// ── [8] Advanced ──────────────────────────────────────────────────────
 	{Key: "ai_assist", Name: "AI Console", Description: "LangChain + Ollama AI-assisted attack strategy & payload mutation", Category: "Advanced"},
 	{Key: "cloud_ops", Name: "Cloud Ops", Description: "Cloud-specific attack modules (AWS, GCP, Azure)", Category: "Advanced"},
 	{Key: "purple_team", Name: "Purple Team", Description: "Defensive scenario simulation and blue team reporting", Category: "Advanced"},
-	{Key: "auditor", Name: "Setup Auditor", Description: "Pre-flight check: dependencies, network interface capabilities", Category: "System"},
-	{Key: "god_mode", Name: "God Mode", Description: "Advanced exploitation chains", Category: "System"},
+	{Key: "god_mode", Name: "God Mode", Description: "Advanced exploitation chains", Category: "Advanced"},
+	{Key: "auditor", Name: "Setup Auditor", Description: "Pre-flight check: dependencies, network interface capabilities", Category: "Advanced"},
 
 	{Key: "wifi_monitor", Name: "Monitor Mode", Description: "Toggle monitor mode on wireless interfaces (airmon-ng)", Category: "WiFi & Wireless"},
 	{Key: "wifi_scan", Name: "WiFi Scanner", Description: "Discover nearby networks, channels, encryption, clients (airodump-ng)", Category: "WiFi & Wireless"},

@@ -12,6 +12,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/vault"
 )
 
 type credential struct {
@@ -57,13 +58,26 @@ func Run() error {
 		return nil
 	}
 
-	// Collect credentials
+	// Collect credentials — offer vault first
 	fmt.Println()
-	ui.Info("Enter credentials (one per line, format: user:pass)")
-	ui.Info("Leave blank and press Enter when done.")
-	fmt.Println()
-
 	var creds []credential
+
+	eng, _ := engagement.Active()
+	if eng != nil {
+		users, secrets := vault.Pairs(eng.ID)
+		if len(users) > 0 {
+			ui.Success(fmt.Sprintf("Vault has %d saved credential(s) for this engagement.", len(users)))
+			if ui.Confirm("Load credentials from vault?") {
+				for i := range users {
+					creds = append(creds, credential{user: users[i], pass: secrets[i]})
+				}
+				ui.Info(fmt.Sprintf("Loaded %d credential(s) from vault.", len(creds)))
+			}
+		}
+	}
+
+	ui.Info("Enter additional credentials (user:pass). Leave blank when done.")
+	fmt.Println()
 	for {
 		line := ui.Prompt(fmt.Sprintf("Cred %d", len(creds)+1))
 		if line == "" {
@@ -127,13 +141,13 @@ func Run() error {
 		ui.Warn("No valid credentials found.")
 	} else {
 		ui.Success(fmt.Sprintf("%d credential(s) verified!", len(allHits)))
-		eng, _ := engagement.Active()
 		if eng != nil {
 			for _, h := range allHits {
 				engagement.LogFinding(eng.ID, "cred_tester", h.target.host,
 					fmt.Sprintf("Valid credential: %s@%s (%s)", h.cred.user, h.target.host, h.target.proto),
 					fmt.Sprintf("%s:%s", h.cred.user, h.cred.pass),
 					"CRITICAL", fmt.Sprintf("%s:%s", h.cred.user, h.cred.pass))
+				vault.Save(eng.ID, "cred_tester", h.target.host, h.cred.user, h.cred.pass, "password")
 			}
 		}
 	}

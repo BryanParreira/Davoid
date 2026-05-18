@@ -13,6 +13,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/targets"
 )
 
 type nmapRun struct {
@@ -233,11 +234,47 @@ loop:
 		}
 	}
 
+	// Save discovered hosts to target inventory
+	if eng != nil {
+		for _, host := range run.Hosts {
+			if host.Status.State != "up" {
+				continue
+			}
+			ip := ""
+			hostname := ""
+			osName := ""
+			for _, a := range host.Addresses {
+				if a.AddrType == "ipv4" || a.AddrType == "ipv6" {
+					ip = a.Addr
+				}
+				if a.AddrType == "mac" {
+					hostname = a.Addr
+				}
+			}
+			if len(host.OS.Matches) > 0 {
+				osName = host.OS.Matches[0].Name
+			}
+			var ports []string
+			for _, p := range host.Ports.Ports {
+				if p.State.State == "open" {
+					ports = append(ports, fmt.Sprintf("%d/%s", p.PortID, p.Protocol))
+				}
+			}
+			if ip != "" {
+				targets.Save(eng.ID, ip, hostname, osName, ports)
+			}
+		}
+
+		// Show network map
+		fmt.Println()
+		fmt.Print(targets.NetworkMap(eng.ID))
+	}
+
 	fmt.Println()
 	ui.Divider()
 	ui.Success("Scan complete.")
 	if eng != nil {
-		ui.Info("Findings logged to active engagement.")
+		ui.Info(fmt.Sprintf("Hosts saved to target inventory (%d total). Findings logged.", targets.Count(eng.ID)))
 	}
 	ui.PressEnter()
 	return nil

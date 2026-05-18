@@ -51,6 +51,35 @@ func migrate() {
 		created_at    TEXT NOT NULL,
 		FOREIGN KEY(engagement_id) REFERENCES engagements(id)
 	)`)
+
+	db.Exec(`CREATE TABLE IF NOT EXISTS credentials (
+		id            TEXT PRIMARY KEY,
+		engagement_id TEXT NOT NULL,
+		source        TEXT NOT NULL DEFAULT '',
+		host          TEXT NOT NULL DEFAULT '',
+		username      TEXT NOT NULL DEFAULT '',
+		secret        TEXT NOT NULL DEFAULT '',
+		kind          TEXT NOT NULL DEFAULT 'password',
+		captured_at   TEXT NOT NULL
+	)`)
+
+	db.Exec(`CREATE TABLE IF NOT EXISTS hosts (
+		id            TEXT PRIMARY KEY,
+		engagement_id TEXT NOT NULL,
+		ip            TEXT NOT NULL,
+		hostname      TEXT NOT NULL DEFAULT '',
+		os            TEXT NOT NULL DEFAULT '',
+		ports         TEXT NOT NULL DEFAULT '',
+		discovered_at TEXT NOT NULL,
+		UNIQUE(engagement_id, ip)
+	)`)
+
+	db.Exec(`CREATE TABLE IF NOT EXISTS notes (
+		id            TEXT PRIMARY KEY,
+		engagement_id TEXT NOT NULL,
+		content       TEXT NOT NULL DEFAULT '',
+		created_at    TEXT NOT NULL
+	)`)
 }
 
 // Engagement represents a red team engagement.

@@ -15,7 +15,9 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/runner"
+	"github.com/bryanparreira/davoid/internal/targets"
 	"github.com/bryanparreira/davoid/internal/updater"
+	"github.com/bryanparreira/davoid/internal/vault"
 )
 
 // --------------------------------------------------------------------------
@@ -34,25 +36,37 @@ const (
 	stateModuleConfirm
 	stateReport
 	stateHelp
+	stateVault
+	stateTargets
+	stateNotes
+	stateNoteAdd
 )
 
 // --------------------------------------------------------------------------
 // Messages
 // --------------------------------------------------------------------------
 
+type engNote struct {
+	Content   string
+	CreatedAt time.Time
+}
+
 type (
-	tickMsg          time.Time
-	engLoadedMsg     struct{ eng *engagement.Engagement }
-	findingsMsg      struct{ findings []*engagement.Finding }
-	engListMsg       struct{ list []*engagement.Engagement }
-	netInfoMsg       struct{ ip, gateway string }
-	updateCheckMsg   struct{ latest string }
+	tickMsg           time.Time
+	engLoadedMsg      struct{ eng *engagement.Engagement }
+	findingsMsg       struct{ findings []*engagement.Finding }
+	engListMsg        struct{ list []*engagement.Engagement }
+	netInfoMsg        struct{ ip, gateway string }
+	updateCheckMsg    struct{ latest string }
 	updateProgressMsg struct{ line string }
-	reportReadyMsg   struct {
+	reportReadyMsg    struct {
 		content string
 		path    string
 	}
-	errMsg struct{ err error }
+	vaultMsg   struct{ creds []*vault.Credential }
+	targetsMsg struct{ hosts []*targets.Host; netmap string }
+	notesMsg   struct{ notes []engNote }
+	errMsg     struct{ err error }
 )
 
 func tickCmd() tea.Cmd {
@@ -116,6 +130,17 @@ type Model struct {
 	findingScroll  int
 	reportScroll   int
 	engListCursor  int
+	// vault
+	vaultCreds  []*vault.Credential
+	vaultScroll int
+	// targets
+	targetHosts  []*targets.Host
+	targetNetmap string
+	targetScroll int
+	// notes
+	notesList   []engNote
+	noteInput   inputField
+	noteScroll  int
 }
 
 // PendingModule returns the module key that should be run after the TUI exits,
@@ -140,6 +165,9 @@ func buildMainMenu() []menuItem {
 		{key: "E", label: "Engagement Manager"},
 		{key: "F", label: "View Findings"},
 		{key: "R", label: "Generate Report"},
+		{key: "V", label: "Credential Vault"},
+		{key: "T", label: "Target Map"},
+		{key: "N", label: "Notes"},
 		{key: "", label: ""},
 		{key: "?", label: "Help"},
 		{key: "Q", label: "Quit"},
@@ -322,6 +350,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reportScroll = 0
 		return m, nil
 
+	case vaultMsg:
+		m.vaultCreds = msg.creds
+		m.state = stateVault
+		m.vaultScroll = 0
+		return m, nil
+
+	case targetsMsg:
+		m.targetHosts = msg.hosts
+		m.targetNetmap = msg.netmap
+		m.state = stateTargets
+		m.targetScroll = 0
+		return m, nil
+
+	case notesMsg:
+		m.notesList = msg.notes
+		m.state = stateNotes
+		m.noteScroll = 0
+		return m, nil
+
 	case errMsg:
 		m.statusMsg = msg.err.Error()
 		m.statusIsError = true
@@ -391,6 +438,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, generateReport(m.activeEng.ID)
+		case "v", "V":
+			if m.activeEng == nil {
+				m.statusMsg = "No active engagement. Create one with [E]."
+				m.statusIsError = true
+				return m, nil
+			}
+			return m, loadVault(m.activeEng.ID)
+		case "t", "T":
+			if m.activeEng == nil {
+				m.statusMsg = "No active engagement. Create one with [E]."
+				m.statusIsError = true
+				return m, nil
+			}
+			return m, loadTargets(m.activeEng.ID)
+		case "n", "N":
+			if m.activeEng == nil {
+				m.statusMsg = "No active engagement. Create one with [E]."
+				m.statusIsError = true
+				return m, nil
+			}
+			return m, loadNotes(m.activeEng.ID)
 		case "?":
 			m.state = stateHelp
 		case "u", "U":
@@ -540,6 +608,64 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if key == "esc" || key == "q" {
 			m.state = stateMenu
 		}
+
+	// ── Credential Vault ─────────────────────────────────────────────────
+	case stateVault:
+		switch key {
+		case "up", "k":
+			if m.vaultScroll > 0 {
+				m.vaultScroll--
+			}
+		case "down", "j":
+			m.vaultScroll++
+		case "esc", "q":
+			m.state = stateMenu
+		}
+
+	// ── Target Map ────────────────────────────────────────────────────────
+	case stateTargets:
+		switch key {
+		case "up", "k":
+			if m.targetScroll > 0 {
+				m.targetScroll--
+			}
+		case "down", "j":
+			m.targetScroll++
+		case "esc", "q":
+			m.state = stateMenu
+		}
+
+	// ── Notes list ────────────────────────────────────────────────────────
+	case stateNotes:
+		switch key {
+		case "up", "k":
+			if m.noteScroll > 0 {
+				m.noteScroll--
+			}
+		case "down", "j":
+			m.noteScroll++
+		case "a", "A":
+			m.state = stateNoteAdd
+			m.noteInput = inputField{label: "Note"}
+		case "esc", "q":
+			m.state = stateMenu
+		}
+
+	// ── Note add form ─────────────────────────────────────────────────────
+	case stateNoteAdd:
+		switch key {
+		case "enter":
+			content := strings.TrimSpace(m.noteInput.value)
+			if content != "" && m.activeEng != nil {
+				engagement.SaveNote(m.activeEng.ID, content)
+				return m, loadNotes(m.activeEng.ID)
+			}
+			m.state = stateNotes
+		case "esc":
+			m.state = stateNotes
+		default:
+			m.noteInput.handleKey(key)
+		}
 	}
 
 	return m, nil
@@ -574,6 +700,27 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, generateReport(m.activeEng.ID)
+	case "V":
+		if m.activeEng == nil {
+			m.statusMsg = "No active engagement. Create one with [E]."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadVault(m.activeEng.ID)
+	case "T":
+		if m.activeEng == nil {
+			m.statusMsg = "No active engagement. Create one with [E]."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadTargets(m.activeEng.ID)
+	case "N":
+		if m.activeEng == nil {
+			m.statusMsg = "No active engagement. Create one with [E]."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadNotes(m.activeEng.ID)
 	case "Q":
 		return m, tea.Quit
 	}
@@ -602,6 +749,32 @@ func generateReport(engID string) tea.Cmd {
 	}
 }
 
+func loadVault(engID string) tea.Cmd {
+	return func() tea.Msg {
+		creds, _ := vault.List(engID)
+		return vaultMsg{creds: creds}
+	}
+}
+
+func loadTargets(engID string) tea.Cmd {
+	return func() tea.Msg {
+		hosts, _ := targets.List(engID)
+		netmap := targets.NetworkMap(engID)
+		return targetsMsg{hosts: hosts, netmap: netmap}
+	}
+}
+
+func loadNotes(engID string) tea.Cmd {
+	return func() tea.Msg {
+		raw, _ := engagement.Notes(engID)
+		notes := make([]engNote, len(raw))
+		for i, n := range raw {
+			notes[i] = engNote{Content: n.Content, CreatedAt: n.CreatedAt}
+		}
+		return notesMsg{notes: notes}
+	}
+}
+
 // --------------------------------------------------------------------------
 // View
 // --------------------------------------------------------------------------
@@ -622,6 +795,12 @@ func (m Model) View() string {
 		return m.viewReport()
 	case stateHelp:
 		return m.viewHelp()
+	case stateVault:
+		return m.viewVault()
+	case stateTargets:
+		return m.viewTargets()
+	case stateNotes, stateNoteAdd:
+		return m.viewNotes()
 	default:
 		return m.viewMainMenu()
 	}
@@ -740,6 +919,9 @@ func (m Model) viewMainMenu() string {
 		{"E", "Engagement Manager"},
 		{"F", "View Findings"},
 		{"R", "Generate Report"},
+		{"V", "Credential Vault"},
+		{"T", "Target Map"},
+		{"N", "Notes"},
 	}
 	systemItems := []struct{ k, label string }{
 		{"?", "Help"},
@@ -990,6 +1172,9 @@ func (m Model) viewHelp() string {
 		{"E", "Engagement Manager — create & switch engagements"},
 		{"F", "View findings for the active engagement"},
 		{"R", "Generate Markdown report for active engagement"},
+		{"V", "Credential Vault — harvested creds from all modules"},
+		{"T", "Target Map — discovered hosts & network topology"},
+		{"N", "Notes — add/view engagement notes"},
 		{"Q / ctrl+c", "Quit"},
 		{"", ""},
 		{"davoid new <name>", "Create engagement from CLI"},
@@ -1004,6 +1189,139 @@ func (m Model) viewHelp() string {
 		sb.WriteString("  " + StyleMenuKey.Render(fmt.Sprintf("%-28s", h.k)) + StyleMenuItem.Render(h.d) + "\n")
 	}
 	sb.WriteString("\n" + StyleHelp.Render("  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewVault() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+
+	title := "  Credential Vault"
+	if m.activeEng != nil {
+		title = fmt.Sprintf("  Credential Vault — %s", m.activeEng.Name)
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+
+	if len(m.vaultCreds) == 0 {
+		sb.WriteString(StyleLabel.Render("  No credentials captured yet.\n"))
+		sb.WriteString(StyleHelp.Render("  Run modules (phishing, sniff, looter) to harvest creds.\n"))
+	} else {
+		sb.WriteString(StyleTableHeader.Render(
+			fmt.Sprintf("  %-12s  %-18s  %-20s  %-20s  %-8s\n",
+				"Source", "Host", "Username", "Secret", "Kind"),
+		))
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 80)) + "\n")
+
+		visible := m.vaultCreds
+		start := m.vaultScroll
+		if start > len(visible)-1 {
+			start = 0
+		}
+		maxLines := m.height - 12
+		count := 0
+		for _, c := range visible[start:] {
+			if count >= maxLines {
+				break
+			}
+			secret := strings.Repeat("*", min(len(c.Secret), 8))
+			line := fmt.Sprintf("  %-12s  %-18s  %-20s  %-20s  %-8s",
+				truncate(c.Source, 10),
+				truncate(c.Host, 16),
+				truncate(c.Username, 18),
+				truncate(secret, 18),
+				c.Kind,
+			)
+			sb.WriteString(StyleTableRow.Render(line) + "\n")
+			count++
+		}
+		sb.WriteString(StyleHelp.Render(fmt.Sprintf("\n  %d credential(s) total", len(m.vaultCreds))))
+	}
+
+	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewTargets() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+
+	title := "  Target Inventory"
+	if m.activeEng != nil {
+		title = fmt.Sprintf("  Target Inventory — %s", m.activeEng.Name)
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+
+	if len(m.targetHosts) == 0 {
+		sb.WriteString(StyleLabel.Render("  No hosts discovered yet.\n"))
+		sb.WriteString(StyleHelp.Render("  Run Net-Mapper to populate the target inventory.\n"))
+	} else {
+		netmapLines := strings.Split(m.targetNetmap, "\n")
+		start := m.targetScroll
+		if start > len(netmapLines)-1 {
+			start = 0
+		}
+		maxLines := m.height - 10
+		end := start + maxLines
+		if end > len(netmapLines) {
+			end = len(netmapLines)
+		}
+		for _, line := range netmapLines[start:end] {
+			if strings.Contains(line, "NETWORK MAP") || strings.Contains(line, "──") {
+				sb.WriteString(StyleDivider.Render(line) + "\n")
+			} else if strings.Contains(line, "[") {
+				sb.WriteString(StyleMenuKey.Render(line) + "\n")
+			} else if strings.Contains(line, "OS:") || strings.Contains(line, "Ports:") {
+				sb.WriteString(StyleHelp.Render(line) + "\n")
+			} else {
+				sb.WriteString(StyleValue.Render(line) + "\n")
+			}
+		}
+		sb.WriteString(StyleHelp.Render(fmt.Sprintf("\n  %d host(s) discovered", len(m.targetHosts))))
+	}
+
+	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewNotes() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+
+	title := "  Engagement Notes"
+	if m.activeEng != nil {
+		title = fmt.Sprintf("  Notes — %s", m.activeEng.Name)
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+
+	if m.state == stateNoteAdd {
+		sb.WriteString(StyleLabel.Render("  New Note\n\n"))
+		sb.WriteString("  " + StyleLabel.Render(m.noteInput.label+":") + "\n")
+		sb.WriteString("  " + StyleInput.Render(m.noteInput.value+"█") + "\n\n")
+		sb.WriteString(StyleHelp.Render("  enter save  ·  esc cancel"))
+		return sb.String()
+	}
+
+	if len(m.notesList) == 0 {
+		sb.WriteString(StyleLabel.Render("  No notes yet.\n\n"))
+	} else {
+		start := m.noteScroll
+		if start > len(m.notesList)-1 {
+			start = 0
+		}
+		maxLines := m.height - 12
+		count := 0
+		for _, n := range m.notesList[start:] {
+			if count >= maxLines {
+				break
+			}
+			ts := StyleHelp.Render(n.CreatedAt.Format("2006-01-02 15:04"))
+			sb.WriteString("  " + ts + "\n")
+			sb.WriteString("  " + StyleMenuItem.Render(truncate(n.Content, 76)) + "\n\n")
+			count += 3
+		}
+	}
+
+	sb.WriteString(StyleHelp.Render("  [A] add note  ·  ↑/↓ scroll  ·  esc back"))
 	return sb.String()
 }
 
@@ -1024,5 +1342,12 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 

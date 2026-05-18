@@ -3,6 +3,7 @@ package engagement
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -122,6 +123,73 @@ func GenerateMarkdown(engID string) (string, string, error) {
 	}
 
 	return content, outPath, nil
+}
+
+// GeneratePDF converts the Markdown report to PDF using pandoc if available.
+// Returns the PDF path or an error if pandoc is not installed.
+func GeneratePDF(engID string) (string, error) {
+	if _, err := exec.LookPath("pandoc"); err != nil {
+		return "", fmt.Errorf("pandoc not found — install with: brew install pandoc")
+	}
+	_, mdPath, err := GenerateMarkdown(engID)
+	if err != nil {
+		return "", err
+	}
+	pdfPath := strings.TrimSuffix(mdPath, ".md") + ".pdf"
+	cmd := exec.Command("pandoc", mdPath, "-o", pdfPath,
+		"--pdf-engine=wkhtmltopdf",
+		"--metadata", "title=Davoid Red Team Report",
+	)
+	if err := cmd.Run(); err != nil {
+		// Fallback: try without pdf-engine flag
+		cmd2 := exec.Command("pandoc", mdPath, "-o", pdfPath)
+		if err2 := cmd2.Run(); err2 != nil {
+			return "", fmt.Errorf("pandoc failed: %v", err2)
+		}
+	}
+	return pdfPath, nil
+}
+
+// SaveNote adds a free-form note to an engagement.
+func SaveNote(engID, content string) error {
+	_, err := db.Exec(`INSERT INTO notes (id, engagement_id, content, created_at) VALUES (?,?,?,?)`,
+		newID(), engID, content, now())
+	return err
+}
+
+// Notes returns all notes for an engagement.
+func Notes(engID string) ([]struct {
+	Content   string
+	CreatedAt time.Time
+}, error) {
+	rows, err := db.Query(`SELECT content, created_at FROM notes WHERE engagement_id = ? ORDER BY created_at DESC`, engID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var notes []struct {
+		Content   string
+		CreatedAt time.Time
+	}
+	for rows.Next() {
+		var n struct {
+			Content   string
+			CreatedAt time.Time
+		}
+		var ts string
+		rows.Scan(&n.Content, &ts)
+		n.CreatedAt, _ = time.Parse(time.RFC3339, ts)
+		notes = append(notes, n)
+	}
+	return notes, nil
+}
+
+func newID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func now() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }
 
 func valueOrNA(s string) string {

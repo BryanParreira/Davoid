@@ -13,6 +13,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/vault"
 )
 
 func Run() error {
@@ -107,6 +108,7 @@ func Run() error {
 					engagement.LogFinding(eng.ID, "sniff", "network",
 						"Cleartext credential intercepted",
 						cred, "HIGH", line)
+					vault.Save(eng.ID, "sniff", "network", "", cred, "cleartext")
 				}
 			}
 		}

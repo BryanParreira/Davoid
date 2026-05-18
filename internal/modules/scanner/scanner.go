@@ -118,7 +118,7 @@ func Run() error {
 		4: {"-sV", "--script=vuln", "--open"},
 	}
 
-	ui.Info(fmt.Sprintf("Scanning %s ...", target))
+	ui.Info(fmt.Sprintf("Scanning %s — this may take a while...", target))
 	fmt.Println()
 
 	tmpFile := fmt.Sprintf("/tmp/davoid_scan_%d.xml", time.Now().Unix())
@@ -126,11 +126,28 @@ func Run() error {
 
 	cmdArgs := append(args[scanType], "-oX", tmpFile, target)
 	cmd := exec.Command("nmap", cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		ui.Fail(fmt.Sprintf("nmap error: %v", err))
-		return nil
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Run() }()
+
+	spin := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	i := 0
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+loop:
+	for {
+		select {
+		case err := <-done:
+			fmt.Print("\r\033[K")
+			if err != nil {
+				ui.Fail(fmt.Sprintf("nmap error: %v", err))
+				return nil
+			}
+			break loop
+		case <-ticker.C:
+			fmt.Printf("\r  %s  Scanning %s...", spin[i%len(spin)], target)
+			i++
+		}
 	}
 
 	data, err := os.ReadFile(tmpFile)

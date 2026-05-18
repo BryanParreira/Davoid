@@ -79,7 +79,7 @@ func Run() error {
 		ui.Fail(fmt.Sprintf("tcpdump pipe error: %v", err))
 		return nil
 	}
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
 		ui.Fail(fmt.Sprintf("tcpdump start error: %v (try sudo)", err))

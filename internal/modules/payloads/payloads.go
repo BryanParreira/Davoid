@@ -190,9 +190,10 @@ func generateMsfvenom(lhost, lport string) (string, string) {
 	}
 	ui.Info("Running msfvenom...")
 	cmd := exec.Command("msfvenom", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Run()
+	if err := cmd.Run(); err != nil {
+		ui.Fail(fmt.Sprintf("msfvenom error: %v", err))
+		return "", "txt"
+	}
 	ui.Success(fmt.Sprintf("Saved: %s", outFile))
 	return fmt.Sprintf("msfvenom %s", strings.Join(args, " ")), extMap[pidx]
 }

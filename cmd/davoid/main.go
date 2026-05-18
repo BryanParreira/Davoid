@@ -16,7 +16,7 @@ import (
 
 func launchTUI() error {
 	for {
-		m := tui.NewModel()
+		m := tui.NewModel(version)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		finalModel, err := p.Run()
 		if err != nil {
@@ -35,7 +35,7 @@ func launchTUI() error {
 	return nil
 }
 
-const version = "2.0.0"
+var version = "2.0.1" // overridden by -ldflags "-X main.version=..."
 
 var rootCmd = &cobra.Command{
 	Use:   "davoid",

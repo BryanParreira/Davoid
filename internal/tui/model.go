@@ -15,6 +15,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/runner"
+	"github.com/bryanparreira/davoid/internal/updater"
 )
 
 // --------------------------------------------------------------------------
@@ -40,12 +41,14 @@ const (
 // --------------------------------------------------------------------------
 
 type (
-	tickMsg        time.Time
-	engLoadedMsg   struct{ eng *engagement.Engagement }
-	findingsMsg    struct{ findings []*engagement.Finding }
-	engListMsg     struct{ list []*engagement.Engagement }
-	netInfoMsg     struct{ ip, gateway string }
-	reportReadyMsg struct {
+	tickMsg          time.Time
+	engLoadedMsg     struct{ eng *engagement.Engagement }
+	findingsMsg      struct{ findings []*engagement.Finding }
+	engListMsg       struct{ list []*engagement.Engagement }
+	netInfoMsg       struct{ ip, gateway string }
+	updateCheckMsg   struct{ latest string }
+	updateProgressMsg struct{ line string }
+	reportReadyMsg   struct {
 		content string
 		path    string
 	}
@@ -88,8 +91,12 @@ type Model struct {
 	state          state
 	width          int
 	height         int
+	version        string
 	localIP        string
 	gateway        string
+	latestVersion  string
+	updating       bool
+	updateStatus   string
 	activeEng      *engagement.Engagement
 	engList        []*engagement.Engagement
 	findings       []*engagement.Finding
@@ -139,9 +146,10 @@ func buildMainMenu() []menuItem {
 	}
 }
 
-func NewModel() Model {
+func NewModel(version string) Model {
 	m := Model{
 		state:     stateMenu,
+		version:   version,
 		menuItems: buildMainMenu(),
 		engFields: [3]inputField{
 			{label: "Engagement Name"},
@@ -156,6 +164,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		loadActiveEng(),
 		loadNetInfo(),
+		checkUpdate(),
 		tickCmd(),
 	)
 }
@@ -218,6 +227,24 @@ func gatewayDarwin() string {
 	return "unavailable"
 }
 
+func checkUpdate() tea.Cmd {
+	return func() tea.Msg {
+		latest := updater.CheckLatest()
+		return updateCheckMsg{latest: latest}
+	}
+}
+
+func runUpdate(latest string) tea.Cmd {
+	return func() tea.Msg {
+		ch := updater.Update(latest)
+		var last string
+		for line := range ch {
+			last = line
+		}
+		return updateProgressMsg{line: last}
+	}
+}
+
 func loadActiveEng() tea.Cmd {
 	return func() tea.Msg {
 		eng, _ := engagement.Active()
@@ -267,6 +294,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case netInfoMsg:
 		m.localIP = msg.ip
 		m.gateway = msg.gateway
+		return m, nil
+
+	case updateCheckMsg:
+		if updater.IsNewer(m.version, msg.latest) {
+			m.latestVersion = msg.latest
+		}
+		return m, nil
+
+	case updateProgressMsg:
+		m.updating = false
+		m.updateStatus = msg.line
 		return m, nil
 
 	case findingsMsg:
@@ -355,6 +393,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, generateReport(m.activeEng.ID)
 		case "?":
 			m.state = stateHelp
+		case "u", "U":
+			if m.latestVersion != "" && !m.updating {
+				m.updating = true
+				m.updateStatus = "Downloading update..."
+				return m, runUpdate(m.latestVersion)
+			}
 		case "q", "Q":
 			return m, tea.Quit
 		}
@@ -600,13 +644,30 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleSubtitle.Render("  ghost in the net  ·  operator-grade red team engagement platform") + "\n")
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n")
 
-	// Network info
+	// Network info + version
 	sb.WriteString("  ")
 	sb.WriteString(StyleLabel.Render("IP  "))
 	sb.WriteString(StyleValue.Render(m.localIP))
 	sb.WriteString(StyleLabel.Render("   GW  "))
 	sb.WriteString(StyleValue.Render(m.gateway))
-	sb.WriteString("\n\n")
+	sb.WriteString(StyleLabel.Render("   v"))
+	sb.WriteString(StyleValue.Render(m.version))
+	if m.latestVersion != "" {
+		sb.WriteString("  " + StyleWarning.Render("↑ "+m.latestVersion+" available [U] to update"))
+	}
+	sb.WriteString("\n")
+
+	// Update status
+	if m.updateStatus != "" {
+		if strings.HasPrefix(m.updateStatus, "Error") {
+			sb.WriteString("  " + StyleError.Render(m.updateStatus) + "\n")
+		} else {
+			sb.WriteString("  " + StyleSuccess.Render(m.updateStatus) + "\n")
+		}
+	} else if m.updating {
+		sb.WriteString("  " + StyleLabel.Render("Updating...") + "\n")
+	}
+	sb.WriteString("\n")
 
 	// Engagement status
 	sb.WriteString("  ")

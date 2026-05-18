@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,11 +36,31 @@ func CheckLatest() string {
 	return r.TagName
 }
 
-// IsNewer returns true if latest tag is newer than current version string.
+// IsNewer returns true if latest tag is semver-newer than current.
 func IsNewer(current, latest string) bool {
-	cur := strings.TrimPrefix(current, "v")
-	lat := strings.TrimPrefix(latest, "v")
-	return lat != "" && lat != cur
+	cur := parseSemver(strings.TrimPrefix(current, "v"))
+	lat := parseSemver(strings.TrimPrefix(latest, "v"))
+	if lat[0] != cur[0] {
+		return lat[0] > cur[0]
+	}
+	if lat[1] != cur[1] {
+		return lat[1] > cur[1]
+	}
+	return lat[2] > cur[2]
+}
+
+func parseSemver(v string) [3]int {
+	parts := strings.SplitN(v, ".", 3)
+	var out [3]int
+	for i, p := range parts {
+		if i >= 3 {
+			break
+		}
+		// strip any pre-release suffix (e.g. "1-beta" → 1)
+		p = strings.FieldsFunc(p, func(r rune) bool { return r == '-' })[0]
+		out[i], _ = strconv.Atoi(p)
+	}
+	return out
 }
 
 // Update downloads the latest binary for the current platform, verifies the

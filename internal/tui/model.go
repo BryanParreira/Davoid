@@ -62,7 +62,11 @@ type (
 	engListMsg        struct{ list []*engagement.Engagement }
 	netInfoMsg        struct{ ip, gateway, vpn string }
 	updateCheckMsg    struct{ latest string }
-	updateProgressMsg struct{ line string }
+	updateProgressMsg struct {
+		line string
+		done bool
+		ch   <-chan string
+	}
 	reportReadyMsg    struct {
 		content string
 		path    string
@@ -117,6 +121,7 @@ type Model struct {
 	latestVersion  string
 	updating       bool
 	updateStatus   string
+	updateCh       <-chan string
 	activeEng      *engagement.Engagement
 	engList        []*engagement.Engagement
 	findings       []*engagement.Finding
@@ -293,14 +298,21 @@ func checkUpdate() tea.Cmd {
 	}
 }
 
-func runUpdate(latest string) tea.Cmd {
+func startUpdate(latest string) tea.Cmd {
 	return func() tea.Msg {
 		ch := updater.Update(latest)
-		var last string
-		for line := range ch {
-			last = line
+		return updateProgressMsg{line: "Starting update...", done: false, ch: ch}
+	}
+}
+
+// readUpdateStep reads one line from the update channel and schedules the next.
+func readUpdateStep(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		line, ok := <-ch
+		if !ok {
+			return updateProgressMsg{line: "", done: true}
 		}
-		return updateProgressMsg{line: last}
+		return updateProgressMsg{line: line, done: false, ch: ch}
 	}
 }
 
@@ -369,8 +381,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case updateProgressMsg:
-		m.updating = false
-		m.updateStatus = msg.line
+		if msg.done {
+			m.updating = false
+		} else {
+			if msg.line != "" {
+				m.updateStatus = msg.line
+			}
+			if msg.ch != nil {
+				return m, readUpdateStep(msg.ch)
+			}
+		}
 		return m, nil
 
 	case findingsMsg:
@@ -477,8 +497,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "u", "U":
 			if m.latestVersion != "" && !m.updating {
 				m.updating = true
-				m.updateStatus = "Downloading update..."
-				return m, runUpdate(m.latestVersion)
+				m.updateStatus = "Connecting..."
+				return m, startUpdate(m.latestVersion)
 			}
 		case "q", "Q":
 			return m, tea.Quit

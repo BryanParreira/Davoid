@@ -1,40 +1,27 @@
 package vault
 
 import (
-	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+
+	"github.com/bryanparreira/davoid/internal/engagement"
 )
 
-var db *sql.DB
-
-func init() {
-	home, _ := os.UserHomeDir()
-	dbPath := filepath.Join(home, ".davoid", "engagements.db")
-	var err error
-	db, err = sql.Open("sqlite", dbPath)
-	if err != nil {
-		return
-	}
-}
-
 type Credential struct {
-	ID          string
-	Source      string
-	Host        string
-	Username    string
-	Secret      string
-	Kind        string // "password", "hash", "token"
-	CapturedAt  time.Time
+	ID         string
+	Source     string
+	Host       string
+	Username   string
+	Secret     string
+	Kind       string // "password", "hash", "token"
+	CapturedAt time.Time
 }
 
 // Save persists a captured credential to the vault.
 func Save(engagementID, source, host, username, secret, kind string) error {
+	db := engagement.DB()
 	if db == nil {
 		return fmt.Errorf("vault: db not initialized")
 	}
@@ -52,6 +39,7 @@ func Save(engagementID, source, host, username, secret, kind string) error {
 
 // List returns all credentials for an engagement.
 func List(engagementID string) ([]*Credential, error) {
+	db := engagement.DB()
 	if db == nil {
 		return nil, fmt.Errorf("vault: db not initialized")
 	}
@@ -96,6 +84,7 @@ func Pairs(engagementID string) (usernames, secrets []string) {
 
 // Count returns how many creds are saved for an engagement.
 func Count(engagementID string) int {
+	db := engagement.DB()
 	if db == nil {
 		return 0
 	}

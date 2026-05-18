@@ -1,28 +1,14 @@
 package targets
 
 import (
-	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+
+	"github.com/bryanparreira/davoid/internal/engagement"
 )
-
-var db *sql.DB
-
-func init() {
-	home, _ := os.UserHomeDir()
-	dbPath := filepath.Join(home, ".davoid", "engagements.db")
-	var err error
-	db, err = sql.Open("sqlite", dbPath)
-	if err != nil {
-		return
-	}
-}
 
 type Host struct {
 	ID           string
@@ -35,6 +21,7 @@ type Host struct {
 
 // Save persists a discovered host. Upserts on (engagement_id, ip).
 func Save(engagementID, ip, hostname, osName string, ports []string) error {
+	db := engagement.DB()
 	if db == nil {
 		return fmt.Errorf("targets: db not initialized")
 	}
@@ -54,6 +41,7 @@ func Save(engagementID, ip, hostname, osName string, ports []string) error {
 
 // List returns all hosts for an engagement.
 func List(engagementID string) ([]*Host, error) {
+	db := engagement.DB()
 	if db == nil {
 		return nil, fmt.Errorf("targets: db not initialized")
 	}
@@ -99,6 +87,7 @@ func IPs(engagementID string) []string {
 
 // Count returns how many hosts are saved for an engagement.
 func Count(engagementID string) int {
+	db := engagement.DB()
 	if db == nil {
 		return 0
 	}
@@ -156,11 +145,4 @@ func NetworkMap(engagementID string) string {
 	}
 	sb.WriteString("\n")
 	return sb.String()
-}
-
-// notes helpers
-func SaveNote(db *sql.DB, engagementID, content string) error {
-	_, err := db.Exec(`INSERT INTO notes (id, engagement_id, content, created_at) VALUES (?,?,?,?)`,
-		uuid.New().String(), engagementID, content, time.Now().UTC().Format(time.RFC3339))
-	return err
 }

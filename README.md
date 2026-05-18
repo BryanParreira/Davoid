@@ -84,6 +84,26 @@ davoid
 davoid doctor
 ```
 
+### Uninstall
+
+Remove the binary:
+
+```bash
+# macOS Apple Silicon
+rm /opt/homebrew/bin/davoid
+
+# macOS Intel / Linux
+sudo rm /usr/local/bin/davoid
+```
+
+Remove all data (engagements, findings, credentials, reports):
+
+```bash
+rm -rf ~/.davoid
+```
+
+That's everything. No system services, no background processes, nothing else left behind.
+
 ---
 
 ## Quick Start

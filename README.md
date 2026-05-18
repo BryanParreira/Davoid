@@ -40,34 +40,48 @@ Most offensive tools do one thing. You end up juggling a terminal full of separa
 
 ## Installation
 
-Requires [Docker](https://docs.docker.com/get-docker/) — nothing else.
+The only requirement is [Docker](https://docs.docker.com/get-docker/). No Go, no Python, no system dependencies.
+
+### 1. Clone the repo
 
 ```bash
 git clone https://github.com/BryanParreira/Davoid.git
 cd Davoid
+```
+
+### 2. Pick a profile and run
+
+**Safe mode** — OSINT, web recon, AI console, phishing, auditor (no raw network access required):
+
+```bash
 docker compose --profile safe up
 ```
 
-Two profiles:
+**Full mode** — every module including sniff, mitm, scanner (uses host network + packet capture):
 
-| Profile | Command | Use for |
-|---------|---------|---------|
-| `safe` | `docker compose --profile safe up` | OSINT, web recon, AI, phishing, auditor |
-| `full` | `docker compose --profile full up` | All modules — sniff, mitm, scanner (needs host network) |
+```bash
+docker compose --profile full up
+```
 
-Your engagement database and reports persist across runs via Docker volumes.
+That's it. Davoid opens in your terminal. Your engagement database and reports persist automatically via Docker volumes — nothing is lost when the container stops.
+
+> **Which profile should I use?**
+> Start with `safe`. Switch to `full` only when you need live packet capture or ARP poisoning — those require raw socket access to the host network.
 
 ---
 
 ## Quick Start
 
 ```bash
-davoid                                         # open TUI
-davoid new "Corp Internal" --target 10.0.0.0/8 --scope "Internal, no OT"
-davoid run auditor                             # pre-flight check
-davoid run scanner                             # run any module directly
-davoid modules                                 # list all 20 modules
-davoid report                                  # generate Markdown report
+# 1. Start Davoid
+git clone https://github.com/BryanParreira/Davoid.git && cd Davoid
+docker compose --profile safe up
+
+# 2. Inside the TUI — navigate with arrow keys, Enter to launch a module
+#    Or run a module directly from a second terminal:
+docker compose --profile safe run davoid-safe davoid run auditor
+docker compose --profile safe run davoid-safe davoid modules
+docker compose --profile safe run davoid-safe davoid report
 ```
 
 ---

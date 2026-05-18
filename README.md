@@ -46,11 +46,31 @@ Davoid is a **single-binary red team engagement platform** built entirely in Go.
 
 ## Installation
 
+### One-liner (recommended)
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh | bash
 ```
 
-The installer auto-detects OS + architecture, downloads the correct binary, verifies SHA256, and places `davoid` in your PATH.
+Auto-detects OS + architecture, downloads the correct binary, verifies SHA256, installs to PATH.
+
+### Manual download
+
+Grab the binary for your platform from the [latest release](https://github.com/BryanParreira/Davoid/releases/latest):
+
+| Platform | Download |
+|----------|----------|
+| macOS Apple Silicon | [davoid-darwin-arm64](https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-darwin-arm64) |
+| macOS Intel | [davoid-darwin-amd64](https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-darwin-amd64) |
+| Linux x86_64 | [davoid-linux-amd64](https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-linux-amd64) |
+| Linux ARM64 | [davoid-linux-arm64](https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-linux-arm64) |
+
+Then:
+
+```bash
+chmod +x davoid-*
+sudo mv davoid-* /usr/local/bin/davoid
+```
 
 Then just run:
 

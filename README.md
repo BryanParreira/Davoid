@@ -40,76 +40,22 @@ Most offensive tools do one thing. You end up juggling a terminal full of separa
 
 ## Installation
 
-### Option 1 — Docker (recommended)
-
-Inspect the [`Dockerfile`](Dockerfile) before running. No unknown scripts, no root required for OSINT/web/AI modules.
-
-```bash
-# Safe mode — OSINT, web recon, AI, phishing, auditor (no raw network access)
-docker run -it --rm \
-  -v davoid-data:/root/.davoid \
-  -v $(pwd)/reports:/app/reports \
-  ghcr.io/bryanparreira/davoid:latest
-
-# Full mode — all modules including sniff & mitm (requires host network)
-docker run -it --rm --net=host \
-  --cap-add NET_RAW --cap-add NET_ADMIN \
-  -v davoid-data:/root/.davoid \
-  ghcr.io/bryanparreira/davoid:latest
-```
-
-Or with Compose:
-
-```bash
-git clone https://github.com/BryanParreira/Davoid.git && cd Davoid
-
-docker compose --profile safe up    # OSINT / web / AI
-docker compose --profile full up    # all modules + packet capture
-```
-
----
-
-### Option 2 — Pre-built binary
-
-Download from the [releases page](https://github.com/BryanParreira/Davoid/releases/latest). **Always verify the checksum.**
-
-```bash
-# macOS Apple Silicon
-curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-darwin-arm64
-curl -Lo checksums.txt https://github.com/BryanParreira/Davoid/releases/latest/download/checksums.txt
-grep davoid-darwin-arm64 checksums.txt | shasum -a 256 -c -
-chmod +x davoid && sudo mv davoid /usr/local/bin/
-
-# macOS Intel
-curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-darwin-amd64
-curl -Lo checksums.txt https://github.com/BryanParreira/Davoid/releases/latest/download/checksums.txt
-grep davoid-darwin-amd64 checksums.txt | shasum -a 256 -c -
-chmod +x davoid && sudo mv davoid /usr/local/bin/
-
-# Linux x86_64
-curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-linux-amd64
-curl -Lo checksums.txt https://github.com/BryanParreira/Davoid/releases/latest/download/checksums.txt
-grep davoid-linux-amd64 checksums.txt | sha256sum -c -
-chmod +x davoid && sudo mv davoid /usr/local/bin/
-
-# Linux ARM64 (Raspberry Pi, cloud VMs)
-curl -Lo davoid https://github.com/BryanParreira/Davoid/releases/latest/download/davoid-linux-arm64
-curl -Lo checksums.txt https://github.com/BryanParreira/Davoid/releases/latest/download/checksums.txt
-grep davoid-linux-arm64 checksums.txt | sha256sum -c -
-chmod +x davoid && sudo mv davoid /usr/local/bin/
-```
-
----
-
-### Option 3 — Build from source
-
-Requires Go 1.25+.
+Requires [Docker](https://docs.docker.com/get-docker/) — nothing else.
 
 ```bash
 git clone https://github.com/BryanParreira/Davoid.git
 cd Davoid
-make install   # builds + installs to /opt/homebrew/bin or /usr/local/bin
+docker compose --profile safe up
 ```
+
+Two profiles:
+
+| Profile | Command | Use for |
+|---------|---------|---------|
+| `safe` | `docker compose --profile safe up` | OSINT, web recon, AI, phishing, auditor |
+| `full` | `docker compose --profile full up` | All modules — sniff, mitm, scanner (needs host network) |
+
+Your engagement database and reports persist across runs via Docker volumes.
 
 ---
 

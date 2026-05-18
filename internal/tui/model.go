@@ -161,6 +161,7 @@ func buildMainMenu() []menuItem {
 		{key: "3", label: "Post-Exploitation"},
 		{key: "4", label: "Active Directory"},
 		{key: "5", label: "Advanced Modules"},
+		{key: "6", label: "WiFi & Wireless"},
 		{key: "", label: ""},
 		{key: "E", label: "Engagement Manager"},
 		{key: "F", label: "View Findings"},
@@ -421,6 +422,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.openCategoryMenu("Active Directory")
 		case "5":
 			return m.openCategoryMenu("Advanced")
+		case "6":
+			return m.openCategoryMenu("WiFi & Wireless")
 		case "e", "E":
 			m.state = stateEngagementList
 			return m, loadEngList()
@@ -683,6 +686,8 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 		return m.openCategoryMenu("Active Directory")
 	case "5":
 		return m.openCategoryMenu("Advanced")
+	case "6":
+		return m.openCategoryMenu("WiFi & Wireless")
 	case "E":
 		m.state = stateEngagementList
 		return m, loadEngList()
@@ -896,6 +901,7 @@ func (m Model) viewMainMenu() string {
 		{"3", "Post-Exploitation"},
 		{"4", "Active Directory"},
 		{"5", "Advanced Modules"},
+		{"6", "WiFi & Wireless"},
 	}
 
 	for i, item := range catKeys {
@@ -1165,7 +1171,7 @@ func (m Model) viewHelp() string {
 	sb.WriteString(StyleMenuTitle.Render("  Keyboard Reference") + "\n\n")
 
 	help := []struct{ k, d string }{
-		{"1-5", "Open module category"},
+		{"1-6", "Open module category (6 = WiFi & Wireless)"},
 		{"↑ / ↓  or  j / k", "Navigate"},
 		{"enter", "Select / confirm"},
 		{"esc", "Back"},

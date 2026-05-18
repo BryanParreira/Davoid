@@ -24,6 +24,7 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/scanner"
 	"github.com/bryanparreira/davoid/internal/modules/sniff"
 	"github.com/bryanparreira/davoid/internal/modules/webrecon"
+	"github.com/bryanparreira/davoid/internal/modules/wifi"
 )
 
 // Module represents a Davoid module that can be invoked.
@@ -41,6 +42,7 @@ var Categories = []string{
 	"Post-Exploitation",
 	"Active Directory",
 	"Advanced",
+	"WiFi & Wireless",
 	"System",
 }
 
@@ -66,6 +68,13 @@ var Registry = []Module{
 	{Key: "purple_team", Name: "Purple Team", Description: "Defensive scenario simulation and blue team reporting", Category: "Advanced"},
 	{Key: "auditor", Name: "Setup Auditor", Description: "Pre-flight check: dependencies, network interface capabilities", Category: "System"},
 	{Key: "god_mode", Name: "God Mode", Description: "Advanced exploitation chains", Category: "System"},
+
+	{Key: "wifi_monitor", Name: "Monitor Mode", Description: "Toggle monitor mode on wireless interfaces (airmon-ng)", Category: "WiFi & Wireless"},
+	{Key: "wifi_scan", Name: "WiFi Scanner", Description: "Discover nearby networks, channels, encryption, clients (airodump-ng)", Category: "WiFi & Wireless"},
+	{Key: "wifi_deauth", Name: "Deauth Attack", Description: "Broadcast or targeted 802.11 deauthentication frames (aireplay-ng)", Category: "WiFi & Wireless"},
+	{Key: "wifi_handshake", Name: "Handshake Capture", Description: "Capture WPA/WPA2 4-way handshake for offline cracking", Category: "WiFi & Wireless"},
+	{Key: "wifi_crack", Name: "WPA Cracker", Description: "Dictionary attack against captured handshake (aircrack-ng)", Category: "WiFi & Wireless"},
+	{Key: "wifi_eviltwin", Name: "Evil Twin AP", Description: "Deploy rogue access point cloning a target SSID (hostapd + dnsmasq)", Category: "WiFi & Wireless"},
 }
 
 // ByCategory returns modules filtered by category.
@@ -102,6 +111,12 @@ func RunModule(key string) error {
 	case "auditor": return auditor.Run()
 	case "god_mode": return godmode.Run()
 	case "payloads": return payloads.Run()
+	case "wifi_monitor": return wifi.RunMonitor()
+	case "wifi_scan": return wifi.RunScan()
+	case "wifi_deauth": return wifi.RunDeauth()
+	case "wifi_handshake": return wifi.RunHandshake()
+	case "wifi_crack": return wifi.RunCrack()
+	case "wifi_eviltwin": return wifi.RunEvilTwin()
 	default:
 		return fmt.Errorf("module not found: %s", key)
 	}

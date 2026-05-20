@@ -412,12 +412,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updating = false
 		} else {
 			if msg.line != "" {
-				// Replace last line if it's a progress percentage update
+				// Replace last line if it's a rolling percentage update
 				if len(m.updateLines) > 0 && strings.HasPrefix(msg.line, "Downloading...") &&
 					strings.HasPrefix(m.updateLines[len(m.updateLines)-1], "Downloading...") {
 					m.updateLines[len(m.updateLines)-1] = msg.line
 				} else {
 					m.updateLines = append(m.updateLines, msg.line)
+				}
+				// Auto-quit 1.5s after successful install so new binary loads
+				if strings.HasPrefix(msg.line, "✓ Updated to") {
+					return m, tea.Tick(1500*time.Millisecond, func(t time.Time) tea.Msg {
+						return tea.Quit()
+					})
 				}
 			}
 			if msg.ch != nil {

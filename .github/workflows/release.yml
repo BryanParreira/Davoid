@@ -43,7 +43,7 @@ jobs:
             ### Install
 
             ```bash
-            curl -sSL https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh | bash
             ```
 
             Works on macOS (Apple Silicon + Intel) and Linux (x86_64 + ARM64).

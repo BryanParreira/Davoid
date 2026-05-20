@@ -493,6 +493,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// Global home key — back to main menu from any sub-screen
+	if (key == "h" || key == "H") && m.state != stateMenu &&
+		m.state != stateEngagementNew && m.state != stateNoteAdd {
+		m.state = stateMenu
+		return m, nil
+	}
+
 	switch m.state {
 
 	// ── Main Menu ─────────────────────────────────────────────────────────
@@ -616,9 +623,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				eng := m.allEngagements[m.engListCursor]
 				engagement.SetActive(eng.ID)
 				m.activeEng = eng
-				m.statusMsg = fmt.Sprintf("Active engagement set: %s", eng.Name)
+				m.statusMsg = fmt.Sprintf("Active: %s", eng.Name)
 				m.statusIsError = false
-				m.state = stateMenu
+				m.state = stateEngagementHub
+			}
+		case "x", "X":
+			if m.activeEng != nil {
+				engagement.ClearActive()
+				m.activeEng = nil
+				m.statusMsg = "Engagement deactivated."
+				m.statusIsError = false
 			}
 		case "esc", "q":
 			m.state = stateEngagementHub
@@ -741,6 +755,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, loadNotes(m.activeEng.ID)
+		case "x", "X":
+			if m.activeEng != nil {
+				engagement.ClearActive()
+				m.activeEng = nil
+				m.statusMsg = "Engagement deactivated — no active engagement."
+				m.statusIsError = false
+			}
 		case "esc", "q", "Q":
 			m.state = stateMenu
 		}
@@ -888,6 +909,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.subMenuItems = items
 			m.subMenuCursor = 0
 			m.state = stateModuleList
+		case "1", "2", "3", "4", "5", "6":
+			if m.activeEng == nil {
+				return m, nil
+			}
+			idx := int(key[0]-'1')
+			if idx < len(m.campaignSuggestions) {
+				m.pendingModule = m.campaignSuggestions[idx].ModuleKey
+				m.fromCampaign = true
+				return m, tea.Quit
+			}
 		case "r", "R":
 			if m.activeEng != nil {
 				return m, loadCampaignData(m.activeEng.ID)
@@ -1206,7 +1237,7 @@ func (m Model) viewMainMenu() string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  number keys for quick access  ·  ctrl+c quit"))
+	sb.WriteString(StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  number keys for quick access  ·  [?] help  ·  ctrl+c quit"))
 	sb.WriteString("\n")
 
 	return sb.String()
@@ -1220,16 +1251,35 @@ func (m Model) viewModuleList() string {
 		sb.WriteString(StyleError.Render("  No modules in this category.\n"))
 	} else {
 		sb.WriteString(StyleMenuTitle.Render("  Select Module") + "\n\n")
-		for i, item := range m.subMenuItems {
+		maxVisible := m.height - 14
+		if maxVisible < 4 {
+			maxVisible = 4
+		}
+		start := 0
+		if m.subMenuCursor >= maxVisible {
+			start = m.subMenuCursor - maxVisible + 1
+		}
+		end := start + maxVisible
+		if end > len(m.subMenuItems) {
+			end = len(m.subMenuItems)
+		}
+		if start > 0 {
+			sb.WriteString(StyleHelp.Render(fmt.Sprintf("  ↑ %d more above\n", start)))
+		}
+		for i := start; i < end; i++ {
+			item := m.subMenuItems[i]
 			if i == m.subMenuCursor {
 				sb.WriteString("  " + StyleMenuItemSelected.Render(" "+item.label+" ") + "\n")
 			} else {
 				sb.WriteString("  " + StyleMenuKey.Render("  ") + StyleMenuItem.Render(item.label) + "\n")
 			}
 		}
+		if end < len(m.subMenuItems) {
+			sb.WriteString(StyleHelp.Render(fmt.Sprintf("  ↓ %d more below\n", len(m.subMenuItems)-end)))
+		}
 	}
 
-	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1319,7 +1369,7 @@ func (m Model) viewEngagementList() string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(StyleHelp.Render("  [N] new engagement  ·  enter/[S] set active  ·  ↑/↓ navigate  ·  esc back"))
+	sb.WriteString(StyleHelp.Render("  [N] new  ·  enter/[S] set active  ·  [X] deactivate  ·  ↑/↓ navigate  ·  esc back"))
 	return sb.String()
 }
 
@@ -1362,7 +1412,7 @@ func (m Model) viewFindings() string {
 		}
 	}
 
-	sb.WriteString(StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
+	sb.WriteString(StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1396,7 +1446,7 @@ func (m Model) viewReport() string {
 		}
 	}
 
-	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1414,8 +1464,14 @@ func (m Model) viewHelp() string {
 		{"", ""},
 		{"↑ / ↓  or  j / k", "Navigate menus and lists"},
 		{"enter", "Select / confirm / launch"},
+		{"H", "Home — back to main menu from anywhere"},
 		{"esc", "Back to previous screen"},
 		{"Q / ctrl+c", "Quit"},
+		{"", ""},
+		{"In Engagement Hub", ""},
+		{"X", "Deactivate current engagement (start fresh)"},
+		{"N", "New engagement"},
+		{"S", "Switch to a different engagement"},
 		{"", ""},
 		{"In Campaign Mode", ""},
 		{"↑ / ↓", "Navigate suggested modules"},
@@ -1438,7 +1494,7 @@ func (m Model) viewHelp() string {
 		}
 		sb.WriteString("  " + StyleMenuKey.Render(fmt.Sprintf("%-28s", h.k)) + StyleMenuItem.Render(h.d) + "\n")
 	}
-	sb.WriteString("\n" + StyleHelp.Render("  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1464,9 +1520,10 @@ func (m Model) viewEngagementHub() string {
 
 	rows := []struct{ k, label, desc string }{
 		{"N", "New Engagement", "start a new op"},
-		{"S", "Switch / List", "set active engagement"},
+		{"S", "Switch / List", "pick from all engagements"},
+		{"X", "Deactivate", "clear active — start fresh"},
 		{"", "", ""},
-		{"F", "Findings", "view all findings for active engagement"},
+		{"F", "Findings", "all findings for active engagement"},
 		{"L", "Timeline", "chronological activity log"},
 		{"R", "Report", "generate Markdown / PDF report"},
 		{"", "", ""},
@@ -1496,7 +1553,7 @@ func (m Model) viewEngagementHub() string {
 		}
 	}
 
-	sb.WriteString("\n" + StyleHelp.Render("  key to select  ·  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  key to select  ·  [X] deactivate engagement  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1540,7 +1597,7 @@ func (m Model) viewTimeline() string {
 		sb.WriteString(StyleHelp.Render(fmt.Sprintf("\n  %d event(s) total", len(m.timelineItems))))
 	}
 
-	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
+	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1589,7 +1646,7 @@ func (m Model) viewVault() string {
 		sb.WriteString(StyleHelp.Render(fmt.Sprintf("\n  %d credential(s) total", len(m.vaultCreds))))
 	}
 
-	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
+	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1631,7 +1688,7 @@ func (m Model) viewTargets() string {
 		sb.WriteString(StyleHelp.Render(fmt.Sprintf("\n  %d host(s) discovered", len(m.targetHosts))))
 	}
 
-	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  esc back"))
+	sb.WriteString("\n\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1673,7 +1730,7 @@ func (m Model) viewNotes() string {
 		}
 	}
 
-	sb.WriteString(StyleHelp.Render("  [A] add note  ·  ↑/↓ scroll  ·  esc back"))
+	sb.WriteString(StyleHelp.Render("  [A] add note  ·  ↑/↓ scroll  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1697,7 +1754,7 @@ func (m Model) viewPlaybooks() string {
 		}
 	}
 
-	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -1831,7 +1888,7 @@ func (m Model) viewCampaign() string {
 	// Footer keys
 	sb.WriteString("\n")
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n")
-	sb.WriteString("  " + StyleHelp.Render("[↑↓] navigate  [enter] launch  [M] all modules  [R] refresh  [E] engagement  [esc] menu") + "\n")
+	sb.WriteString("  " + StyleHelp.Render("[↑↓/1-6] navigate  [enter] launch  [M] all modules  [R] refresh  [E] engagement  [H] home  [esc] menu") + "\n")
 
 	return sb.String()
 }

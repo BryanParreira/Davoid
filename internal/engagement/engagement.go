@@ -213,6 +213,13 @@ func SetActive(id string) error {
 	return nil
 }
 
+// ClearActive deactivates the current engagement without deleting it.
+func ClearActive() {
+	home, _ := os.UserHomeDir()
+	activeFile := filepath.Join(home, ".davoid", "active_engagement")
+	os.WriteFile(activeFile, []byte(""), 0600)
+}
+
 // Close marks an engagement as closed.
 func Close(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)

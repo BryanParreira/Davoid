@@ -42,6 +42,9 @@ func CheckLatest() string {
 
 // IsNewer returns true if latest tag is semver-newer than current.
 func IsNewer(current, latest string) bool {
+	if latest == "" {
+		return false
+	}
 	cur := parseSemver(strings.TrimPrefix(current, "v"))
 	lat := parseSemver(strings.TrimPrefix(latest, "v"))
 	if lat[0] != cur[0] {
@@ -60,7 +63,11 @@ func parseSemver(v string) [3]int {
 		if i >= 3 {
 			break
 		}
-		p = strings.FieldsFunc(p, func(r rune) bool { return r == '-' })[0]
+		if fields := strings.FieldsFunc(p, func(r rune) bool { return r == '-' }); len(fields) > 0 {
+			p = fields[0]
+		} else {
+			continue
+		}
 		out[i], _ = strconv.Atoi(p)
 	}
 	return out

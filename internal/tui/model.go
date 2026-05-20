@@ -126,7 +126,7 @@ type Model struct {
 	vpn            string
 	latestVersion  string
 	updating       bool
-	updateStatus   string
+	updateLines    []string // full scrollback of update messages
 	updateCh       <-chan string
 	activeEng      *engagement.Engagement
 	engList        []*engagement.Engagement
@@ -412,7 +412,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updating = false
 		} else {
 			if msg.line != "" {
-				m.updateStatus = msg.line
+				// Replace last line if it's a progress percentage update
+				if len(m.updateLines) > 0 && strings.HasPrefix(msg.line, "Downloading...") &&
+					strings.HasPrefix(m.updateLines[len(m.updateLines)-1], "Downloading...") {
+					m.updateLines[len(m.updateLines)-1] = msg.line
+				} else {
+					m.updateLines = append(m.updateLines, msg.line)
+				}
 			}
 			if msg.ch != nil {
 				return m, readUpdateStep(msg.ch)
@@ -539,7 +545,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "u", "U":
 			if m.latestVersion != "" && !m.updating {
 				m.updating = true
-				m.updateStatus = "Connecting..."
+				m.updateLines = []string{"Connecting..."}
 				return m, startUpdate(m.latestVersion)
 			}
 		case "q", "Q":
@@ -1083,15 +1089,34 @@ func (m Model) viewMainMenu() string {
 	}
 	sb.WriteString("\n")
 
-	// Update status
-	if m.updateStatus != "" {
-		if strings.HasPrefix(m.updateStatus, "Error") {
-			sb.WriteString("  " + StyleError.Render(m.updateStatus) + "\n")
-		} else {
-			sb.WriteString("  " + StyleSuccess.Render(m.updateStatus) + "\n")
+	// Update status panel
+	if len(m.updateLines) > 0 || m.updating {
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 50)) + "\n")
+		// Show last 4 lines so sudo command is always visible
+		lines := m.updateLines
+		if len(lines) > 4 {
+			lines = lines[len(lines)-4:]
 		}
-	} else if m.updating {
-		sb.WriteString("  " + StyleLabel.Render("Updating...") + "\n")
+		for _, line := range lines {
+			switch {
+			case strings.HasPrefix(line, "Error"):
+				sb.WriteString("  " + StyleError.Render("✗ "+line) + "\n")
+			case strings.HasPrefix(line, "✓"):
+				sb.WriteString("  " + StyleSuccess.Render(line) + "\n")
+			case strings.HasPrefix(line, "⚠"):
+				sb.WriteString("  " + StyleWarning.Render(line) + "\n")
+			case strings.HasPrefix(line, "  sudo") || strings.HasPrefix(line, "  Try"):
+				sb.WriteString("  " + StyleMenuKey.Render(line) + "\n")
+			case strings.HasPrefix(line, "Downloading..."):
+				sb.WriteString("  " + StyleLabel.Render("⟳ "+line) + "\n")
+			default:
+				sb.WriteString("  " + StyleValue.Render("  "+line) + "\n")
+			}
+		}
+		if m.updating {
+			sb.WriteString("  " + StyleHelp.Render("  updating — please wait...") + "\n")
+		}
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 50)) + "\n")
 	}
 	sb.WriteString("\n")
 

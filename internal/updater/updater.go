@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -29,6 +30,9 @@ func CheckLatest() string {
 		return ""
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
 	var r Release
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return ""
@@ -56,21 +60,54 @@ func parseSemver(v string) [3]int {
 		if i >= 3 {
 			break
 		}
-		// strip any pre-release suffix (e.g. "1-beta" → 1)
 		p = strings.FieldsFunc(p, func(r rune) bool { return r == '-' })[0]
 		out[i], _ = strconv.Atoi(p)
 	}
 	return out
 }
 
+// canWriteDir returns true if we can create files in the directory containing path.
+func canWriteDir(path string) bool {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".davoid-write-test-*")
+	if err != nil {
+		return false
+	}
+	tmp.Close()
+	os.Remove(tmp.Name())
+	return true
+}
+
+// progressReader wraps an io.Reader and reports download progress.
+type progressReader struct {
+	r        io.Reader
+	total    int64
+	read     int64
+	onUpdate func(pct int)
+	lastPct  int
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	p.read += int64(n)
+	if p.total > 0 {
+		pct := int(p.read * 100 / p.total)
+		if pct != p.lastPct {
+			p.lastPct = pct
+			p.onUpdate(pct)
+		}
+	}
+	return n, err
+}
+
 // Update downloads the latest binary for the current platform, verifies the
 // checksum, and atomically replaces the running executable.
+// If the install path is not writable, downloads to /tmp and prints a sudo command.
 // Progress messages are sent on the returned channel (closed when done).
 func Update(latest string) <-chan string {
-	ch := make(chan string, 8)
+	ch := make(chan string, 16)
 	go func() {
 		defer close(ch)
-
 		send := func(s string) { ch <- s }
 
 		os_ := runtime.GOOS
@@ -78,14 +115,44 @@ func Update(latest string) <-chan string {
 		asset := fmt.Sprintf("davoid-%s-%s", os_, arch)
 		tag := latest
 
-		send(fmt.Sprintf("Downloading %s...", asset))
-
 		binaryURL := fmt.Sprintf("%s/%s/%s", downloadBase, tag, asset)
 		checksumURL := fmt.Sprintf("%s/%s/checksums.txt", downloadBase, tag)
+		client := &http.Client{Timeout: 120 * time.Second}
 
-		client := &http.Client{Timeout: 60 * time.Second}
+		// Resolve install path
+		exePath, err := os.Executable()
+		if err != nil {
+			send("Error: cannot locate current binary: " + err.Error())
+			return
+		}
+		// Resolve any symlinks so we write the real file
+		if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
+			exePath = resolved
+		}
 
-		// Download binary to temp file
+		needsSudo := !canWriteDir(exePath)
+		fallbackPath := filepath.Join(os.TempDir(), "davoid-update")
+
+		if needsSudo {
+			send(fmt.Sprintf("⚠  No write access to %s", exePath))
+			send("   Downloading to temp — will show install command after.")
+		} else {
+			send(fmt.Sprintf("Downloading %s...", asset))
+		}
+
+		// Download binary
+		resp, err := client.Get(binaryURL)
+		if err != nil {
+			send("Error: download failed: " + err.Error())
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			send(fmt.Sprintf("Error: HTTP %d — asset not found for %s", resp.StatusCode, asset))
+			send("  Try: curl -fsSL https://davoid.sh/install | bash")
+			return
+		}
+
 		tmp, err := os.CreateTemp("", "davoid-update-*")
 		if err != nil {
 			send("Error: " + err.Error())
@@ -94,23 +161,19 @@ func Update(latest string) <-chan string {
 		tmpPath := tmp.Name()
 		defer os.Remove(tmpPath)
 
-		resp, err := client.Get(binaryURL)
-		if err != nil {
-			tmp.Close()
-			send("Download failed: " + err.Error())
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			tmp.Close()
-			send(fmt.Sprintf("Download failed: HTTP %d", resp.StatusCode))
-			return
+		contentLength := resp.ContentLength
+		h := sha256.New()
+		pr := &progressReader{
+			r:     resp.Body,
+			total: contentLength,
+			onUpdate: func(pct int) {
+				send(fmt.Sprintf("Downloading... %d%%", pct))
+			},
 		}
 
-		h := sha256.New()
-		if _, err := io.Copy(io.MultiWriter(tmp, h), resp.Body); err != nil {
+		if _, err := io.Copy(io.MultiWriter(tmp, h), pr); err != nil {
 			tmp.Close()
-			send("Download error: " + err.Error())
+			send("Error: download error: " + err.Error())
 			return
 		}
 		tmp.Close()
@@ -118,10 +181,9 @@ func Update(latest string) <-chan string {
 
 		send("Verifying checksum...")
 
-		// Download checksums.txt
 		csResp, err := client.Get(checksumURL)
 		if err != nil {
-			send("Checksum fetch failed: " + err.Error())
+			send("Error: checksum fetch failed: " + err.Error())
 			return
 		}
 		defer csResp.Body.Close()
@@ -139,39 +201,39 @@ func Update(latest string) <-chan string {
 		}
 
 		if expectedSum == "" {
-			send("Error: could not find checksum for " + asset)
+			send("Error: checksum not found for " + asset)
 			return
 		}
 		if actualSum != expectedSum {
-			send("Error: checksum mismatch — update aborted")
+			send("Error: checksum mismatch — update aborted (file may be corrupt)")
 			return
 		}
 
-		send("Installing...")
-
-		// Get current executable path
-		exePath, err := os.Executable()
-		if err != nil {
-			send("Error: cannot locate current binary: " + err.Error())
-			return
-		}
-
-		// Make it executable
 		if err := os.Chmod(tmpPath, 0755); err != nil {
 			send("Error: chmod failed: " + err.Error())
 			return
 		}
 
-		// Atomic replace
-		if err := os.Rename(tmpPath, exePath); err != nil {
-			// Rename may fail across filesystems — fallback to copy
-			if err2 := copyFile(tmpPath, exePath); err2 != nil {
-				send("Error: install failed: " + err2.Error())
+		if needsSudo {
+			// Copy verified binary to fallback path for user to install manually
+			if err := copyFile(tmpPath, fallbackPath); err != nil {
+				send("Error: could not write to temp: " + err.Error())
 				return
 			}
+			os.Chmod(fallbackPath, 0755)
+			send("✓ Download verified. Run this to install:")
+			send(fmt.Sprintf("  sudo mv %s %s", fallbackPath, exePath))
+		} else {
+			send("Installing...")
+			if err := os.Rename(tmpPath, exePath); err != nil {
+				if err2 := copyFile(tmpPath, exePath); err2 != nil {
+					send("Error: install failed: " + err2.Error())
+					send(fmt.Sprintf("  Try manually: sudo mv %s %s", tmpPath, exePath))
+					return
+				}
+			}
+			send(fmt.Sprintf("✓ Updated to %s — restart davoid.", latest))
 		}
-
-		send(fmt.Sprintf("Updated to %s — restart davoid to use the new version.", latest))
 	}()
 	return ch
 }

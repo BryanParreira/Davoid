@@ -94,31 +94,73 @@ func RunMonitor() error {
 				return nil
 			}
 			monName := iface + "mon"
-			ui.Info(fmt.Sprintf("PHY: %s → creating %s (2.4GHz + 5GHz)...", phy, monName))
+			ui.Info(fmt.Sprintf("PHY: %s  interface: %s → %s", phy, iface, monName))
 
+			// Step 1: kill processes holding the interface (NetworkManager, wpa_supplicant)
+			ui.Info("Killing processes that may hold the interface...")
+			exec.Command("rfkill", "unblock", "all").Run()
+			if _, err := exec.LookPath("airmon-ng"); err == nil {
+				exec.Command("airmon-ng", "check", "kill").Run()
+			} else {
+				// manual kill of common offenders
+				for _, proc := range []string{"wpa_supplicant", "NetworkManager", "dhclient", "dhcpcd"} {
+					exec.Command("pkill", "-9", proc).Run()
+				}
+			}
+			time.Sleep(400 * time.Millisecond)
+
+			// Step 2: bring down managed interface
 			exec.Command("ip", "link", "set", iface, "down").Run()
-			exec.Command("iw", "dev", monName, "del").Run() // remove stale mon iface if exists
 
+			// Step 3: DELETE the managed interface — critical for most USB card drivers
+			// (Realtek rtl8812au, Ralink mt76, Atheros ath9k_htc all require this).
+			// Just bringing it down leaves the driver in a state where it rejects
+			// adding a monitor interface on the same PHY (EBUSY / EEXIST).
+			if out, err := exec.Command("iw", "dev", iface, "del").CombinedOutput(); err != nil {
+				ui.Warn(fmt.Sprintf("Could not delete %s: %s (driver may not require it)", iface, strings.TrimSpace(string(out))))
+			} else {
+				ui.Info(fmt.Sprintf("Deleted managed interface %s.", iface))
+			}
+
+			// Step 4: remove stale monitor interface with same name if present
+			exec.Command("iw", "dev", monName, "del").Run()
+			time.Sleep(200 * time.Millisecond)
+
+			// Step 5: create monitor interface on the PHY (hardware-level, all bands)
 			out, err := exec.Command("iw", phy, "interface", "add", monName, "type", "monitor").CombinedOutput()
 			if err != nil {
 				ui.Fail(fmt.Sprintf("iw interface add failed: %v", err))
 				fmt.Println(strings.TrimSpace(string(out)))
-				ui.Info("Hint: run as root. sudo iw " + phy + " interface add " + monName + " type monitor")
+				ui.Info("Run as root. Try: sudo iw " + phy + " interface add " + monName + " type monitor")
+				// Try to restore managed interface before returning
+				exec.Command("iw", phy, "interface", "add", iface, "type", "managed").Run()
+				exec.Command("ip", "link", "set", iface, "up").Run()
 				ui.PressEnter()
 				return nil
 			}
 
+			// Step 6: set interface flags for raw capture (no ACK filtering etc.)
+			exec.Command("iw", "dev", monName, "set", "type", "monitor").Run()
+
+			// Step 7: bring monitor interface up
 			upOut, upErr := exec.Command("ip", "link", "set", monName, "up").CombinedOutput()
 			if upErr != nil {
 				ui.Fail(fmt.Sprintf("ip link set %s up failed: %v — %s", monName, upErr, strings.TrimSpace(string(upOut))))
+				exec.Command("iw", phy, "interface", "add", iface, "type", "managed").Run()
+				exec.Command("ip", "link", "set", iface, "up").Run()
 				ui.PressEnter()
 				return nil
 			}
 
-			ui.Success(fmt.Sprintf("Monitor interface %s created via iw.", monName))
-			ui.Success("Full dual-band: 2.4GHz channels 1-14 AND 5GHz channels 36-165.")
-			ui.Info(fmt.Sprintf("Use %s in WiFi Scanner → band: Both 2.4+5GHz.", monName))
-			ui.Info(fmt.Sprintf("Verify: iw dev %s info", monName))
+			// Verify mode was actually set
+			if mode := getIfaceMode(monName); mode != "monitor" && mode != "unknown" {
+				ui.Warn(fmt.Sprintf("Interface created but mode is '%s' not 'monitor'. Card may need airmon-ng method.", mode))
+			}
+
+			ui.Success(fmt.Sprintf("Monitor interface %s ready — PHY: %s", monName, phy))
+			ui.Success("Covers ALL bands the card supports (2.4GHz + 5GHz if card is dual-band).")
+			ui.Info(fmt.Sprintf("Use %s in WiFi Scanner. Verify: iw dev %s info", monName, monName))
+			ui.Info(fmt.Sprintf("To stop: Monitor Mode → Stop → select %s", monName))
 			ui.PressEnter()
 			return nil
 		}
@@ -129,16 +171,17 @@ func RunMonitor() error {
 			ui.PressEnter()
 			return nil
 		}
-		if ui.Confirm("Kill interfering processes first? (Recommended)") {
-			ui.Info("Running airmon-ng check kill...")
-			killOut, _ := exec.Command("airmon-ng", "check", "kill").CombinedOutput()
-			for _, line := range strings.Split(string(killOut), "\n") {
-				if line = strings.TrimSpace(line); line != "" {
-					fmt.Println("  " + line)
-				}
+		// Always kill interfering processes — asking is a footgun (user says no, airmon-ng fails)
+		ui.Info("Killing processes that interfere with monitor mode...")
+		killOut, _ := exec.Command("airmon-ng", "check", "kill").CombinedOutput()
+		for _, line := range strings.Split(string(killOut), "\n") {
+			if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "Killing") {
+				fmt.Println("  " + line)
 			}
-			fmt.Println()
 		}
+		exec.Command("rfkill", "unblock", "all").Run()
+		fmt.Println()
+
 		ifacesBefore := listAllInterfaces()
 		ui.Info(fmt.Sprintf("Starting monitor mode on %s...", iface))
 		out, err := exec.Command("airmon-ng", "start", iface).CombinedOutput()
@@ -153,9 +196,11 @@ func RunMonitor() error {
 				ui.Success(line)
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(600 * time.Millisecond)
 		ifacesAfter := listAllInterfaces()
-		var newIfaces []string
+
+		// Detect new or renamed monitor interface
+		var monIfaces []string
 		for _, ni := range ifacesAfter {
 			found := false
 			for _, oi := range ifacesBefore {
@@ -165,43 +210,72 @@ func RunMonitor() error {
 				}
 			}
 			if !found {
-				newIfaces = append(newIfaces, ni)
+				monIfaces = append(monIfaces, ni)
 			}
 		}
-		if len(newIfaces) > 0 {
-			ui.Success(fmt.Sprintf("Monitor interface(s) created: %s", strings.Join(newIfaces, ", ")))
-			ui.Info("Tip: for 5GHz coverage use iw method next time.")
+		// Some drivers rename in-place (wlan0 → wlan0mon); catch that too
+		for _, ni := range ifacesAfter {
+			if getIfaceMode(ni) == "monitor" {
+				alreadyCounted := false
+				for _, m := range monIfaces {
+					if m == ni {
+						alreadyCounted = true
+						break
+					}
+				}
+				if !alreadyCounted {
+					monIfaces = append(monIfaces, ni)
+				}
+			}
+		}
+
+		if len(monIfaces) > 0 {
+			ui.Success(fmt.Sprintf("Monitor interface(s): %s", strings.Join(monIfaces, ", ")))
+			ui.Info("Tip: for 5GHz coverage, use the iw method next time.")
 		} else {
-			ui.Info(fmt.Sprintf("Monitor mode started. Interface typically named %smon or mon0.", iface))
-			ui.Info("Verify: iw dev")
+			ui.Info(fmt.Sprintf("Monitor mode started on %s (check: iw dev).", iface))
 		}
 		ui.PressEnter()
 		return nil
 	}
 
-	// Stop monitor mode
+	// ── Stop monitor mode ──────────────────────────────────────────────────────
+	stoppedViaAirmon := false
 	if _, err := exec.LookPath("airmon-ng"); err == nil {
 		ui.Info(fmt.Sprintf("Stopping %s via airmon-ng...", iface))
 		out, err := exec.Command("airmon-ng", "stop", iface).CombinedOutput()
-		if err != nil {
-			ui.Fail(fmt.Sprintf("airmon-ng error: %v\n%s", err, string(out)))
-			ui.PressEnter()
-			return nil
-		}
-		for _, line := range strings.Split(string(out), "\n") {
-			if line = strings.TrimSpace(line); strings.Contains(strings.ToLower(line), "monitor mode") {
-				ui.Success(line)
+		if err == nil {
+			stoppedViaAirmon = true
+			for _, line := range strings.Split(string(out), "\n") {
+				if line = strings.TrimSpace(line); strings.Contains(strings.ToLower(line), "monitor mode") {
+					ui.Success(line)
+				}
 			}
 		}
-	} else {
+	}
+
+	if !stoppedViaAirmon {
+		// iw method: get PHY, delete monitor iface, restore managed iface
+		phy := getPhyForIface(iface)
 		ui.Info(fmt.Sprintf("Removing monitor interface %s via iw...", iface))
+		exec.Command("ip", "link", "set", iface, "down").Run()
 		out, err := exec.Command("iw", "dev", iface, "del").CombinedOutput()
 		if err != nil {
 			ui.Fail(fmt.Sprintf("iw dev del failed: %v — %s", err, strings.TrimSpace(string(out))))
 			ui.PressEnter()
 			return nil
 		}
+		// Restore managed interface so the card is usable again
+		if phy != "" {
+			origName := strings.TrimSuffix(iface, "mon")
+			if origName != iface {
+				exec.Command("iw", phy, "interface", "add", origName, "type", "managed").Run()
+				exec.Command("ip", "link", "set", origName, "up").Run()
+				ui.Info(fmt.Sprintf("Restored managed interface %s.", origName))
+			}
+		}
 	}
+
 	ui.Success(fmt.Sprintf("Monitor mode stopped on %s.", iface))
 	ui.PressEnter()
 	return nil
@@ -392,11 +466,27 @@ func RunDeauth() error {
 		return nil
 	}
 
+	// Pre-check: warn if interface is not in monitor mode
+	if mode := getIfaceMode(monIface); mode != "monitor" && mode != "unknown" {
+		ui.Warn(fmt.Sprintf("Interface %s is in '%s' mode, not monitor. Deauth requires monitor mode.", monIface, mode))
+		ui.Info("Go to WiFi & Wireless → Monitor Mode → Start monitor mode first.")
+		if !ui.Confirm("Continue anyway?") {
+			return nil
+		}
+	}
+
 	// Injection capability test
 	if ui.Confirm("Run injection test first? (Recommended — verifies driver supports packet injection)") {
 		ui.Info(fmt.Sprintf("Testing injection on %s...", monIface))
-		testOut, _ := exec.Command("aireplay-ng", "--test", monIface).CombinedOutput()
-		for _, line := range strings.Split(string(testOut), "\n") {
+		// Try --test (aireplay-ng >= 1.2); fall back to -9 for older builds
+		testOut, testErr := exec.Command("aireplay-ng", "--test", monIface).CombinedOutput()
+		testStr := string(testOut)
+		if testErr != nil && (strings.Contains(testStr, "nknown") || strings.Contains(testStr, "nvalid") || strings.Contains(testStr, "ption")) {
+			ui.Info("Falling back to aireplay-ng -9 (older version detected)...")
+			testOut, _ = exec.Command("aireplay-ng", "-9", monIface).CombinedOutput()
+			testStr = string(testOut)
+		}
+		for _, line := range strings.Split(testStr, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
@@ -1039,7 +1129,12 @@ func pickInterface(label string) string {
 		ui.Fail("No wireless interfaces found.")
 		return ""
 	}
-	idx := ui.Select(label, ifaces)
+	opts := make([]string, len(ifaces))
+	for i, iface := range ifaces {
+		mode := getIfaceMode(iface)
+		opts[i] = fmt.Sprintf("%-16s  [%s]", iface, mode)
+	}
+	idx := ui.Select(label, opts)
 	if idx < 0 {
 		return ""
 	}
@@ -1116,6 +1211,22 @@ func parseAirodumpCSV(path string) ([]wifiNetwork, error) {
 		result = append(result, *n)
 	}
 	return result, nil
+}
+
+// getIfaceMode returns the current mode of a wireless interface ("monitor", "managed", etc.)
+// by parsing `iw dev <iface> info`. Returns "unknown" on failure.
+func getIfaceMode(iface string) string {
+	out, err := exec.Command("iw", "dev", iface, "info").Output()
+	if err != nil {
+		return "unknown"
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "type ") {
+			return strings.TrimPrefix(line, "type ")
+		}
+	}
+	return "unknown"
 }
 
 // getPhyForIface returns the PHY name (e.g. "phy0") for an interface from `iw dev`.

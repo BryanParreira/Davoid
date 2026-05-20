@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -23,9 +24,31 @@ type Release struct {
 }
 
 // CheckLatest returns the latest release tag (e.g. "v2.0.2") or "" on failure.
+// Retries once on transient failure — VM networks can be slow/flaky on first connect.
 func CheckLatest() string {
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get(releaseAPI)
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		tag := fetchLatestTag()
+		if tag != "" {
+			return tag
+		}
+	}
+	return ""
+}
+
+func fetchLatestTag() string {
+	req, err := http.NewRequest("GET", releaseAPI, nil)
+	if err != nil {
+		return ""
+	}
+	// GitHub API requires a User-Agent; without one, shared-IP VMs get rate-limited or 403'd
+	req.Header.Set("User-Agent", "davoid-updater/"+runtime.GOOS+"-"+runtime.GOARCH)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}
@@ -124,7 +147,17 @@ func Update(latest string) <-chan string {
 
 		binaryURL := fmt.Sprintf("%s/%s/%s", downloadBase, tag, asset)
 		checksumURL := fmt.Sprintf("%s/%s/checksums.txt", downloadBase, tag)
-		client := &http.Client{Timeout: 120 * time.Second}
+		ua := "davoid-updater/" + os_ + "-" + arch
+		client := &http.Client{Timeout: 180 * time.Second}
+
+		doGet := func(url string) (*http.Response, error) {
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("User-Agent", ua)
+			return client.Do(req)
+		}
 
 		// Resolve install path
 		exePath, err := os.Executable()
@@ -142,13 +175,13 @@ func Update(latest string) <-chan string {
 
 		if needsSudo {
 			send(fmt.Sprintf("⚠  No write access to %s", exePath))
-			send("   Downloading to temp — will show install command after.")
+			send("   Downloading to temp — will attempt sudo install.")
 		} else {
 			send(fmt.Sprintf("Downloading %s...", asset))
 		}
 
 		// Download binary
-		resp, err := client.Get(binaryURL)
+		resp, err := doGet(binaryURL)
 		if err != nil {
 			send("Error: download failed: " + err.Error())
 			return
@@ -156,7 +189,7 @@ func Update(latest string) <-chan string {
 		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
 			send(fmt.Sprintf("Error: HTTP %d — asset not found for %s", resp.StatusCode, asset))
-			send("  Try: curl -fsSL https://davoid.sh/install | bash")
+			send("  Try: curl -fsSL https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh | bash")
 			return
 		}
 
@@ -188,7 +221,7 @@ func Update(latest string) <-chan string {
 
 		send("Verifying checksum...")
 
-		csResp, err := client.Get(checksumURL)
+		csResp, err := doGet(checksumURL)
 		if err != nil {
 			send("Error: checksum fetch failed: " + err.Error())
 			return
@@ -222,14 +255,30 @@ func Update(latest string) <-chan string {
 		}
 
 		if needsSudo {
-			// Copy verified binary to fallback path for user to install manually
+			// Copy verified binary to fallback path
 			if err := copyFile(tmpPath, fallbackPath); err != nil {
 				send("Error: could not write to temp: " + err.Error())
 				return
 			}
 			os.Chmod(fallbackPath, 0755)
-			send("✓ Download verified. Run this to install:")
+
+			// Try non-interactive sudo (works on Kali and any NOPASSWD sudo config)
+			sudoInstalled := func() bool {
+				_, err := exec.LookPath("sudo")
+				return err == nil
+			}
+			if sudoInstalled() {
+				send("Trying sudo install...")
+				sudoCmd := exec.Command("sudo", "mv", fallbackPath, exePath)
+				if err := sudoCmd.Run(); err == nil {
+					send(fmt.Sprintf("✓ Updated to %s — restart davoid.", latest))
+					return
+				}
+			}
+			// sudo failed or not available — show manual command
+			send("⚠  Sudo required. Run this to finish install:")
 			send(fmt.Sprintf("  sudo mv %s %s", fallbackPath, exePath))
+			send("Then relaunch davoid.")
 		} else {
 			send("Installing...")
 			if err := os.Rename(tmpPath, exePath); err != nil {

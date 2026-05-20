@@ -848,12 +848,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.campaignCursor++
 			}
 		case "enter", " ":
+			if m.activeEng == nil {
+				m.state = stateEngagementNew
+				m.engFieldCursor = 0
+				for i := range m.engFields {
+					m.engFields[i].value = ""
+				}
+				return m, nil
+			}
 			if m.campaignCursor < len(m.campaignSuggestions) {
 				m.pendingModule = m.campaignSuggestions[m.campaignCursor].ModuleKey
 				m.fromCampaign = true
 				return m, tea.Quit
 			}
+		case "n", "N":
+			m.state = stateEngagementNew
+			m.engFieldCursor = 0
+			for i := range m.engFields {
+				m.engFields[i].value = ""
+			}
+		case "e", "E":
+			m.state = stateEngagementHub
 		case "m", "M":
+			if m.activeEng == nil {
+				return m, nil
+			}
 			var items []menuItem
 			for _, mkey := range campaign.AllPhaseModules() {
 				for _, mod := range runner.Registry {
@@ -1149,69 +1168,28 @@ func (m Model) viewMainMenu() string {
 	}
 	sb.WriteString("\n\n")
 
-	// Menu categories
-	catKeys := []struct{ k, label string }{
-		{"1", "Recon & OSINT"},
-		{"2", "Network Attacks"},
-		{"3", "Social Engineering"},
-		{"4", "Exploitation"},
-		{"5", "Post-Exploitation"},
-		{"6", "Active Directory"},
-		{"7", "WiFi & Wireless"},
-		{"8", "Advanced"},
-	}
-
-	for i, item := range catKeys {
-		cursor := "  "
-		sel := m.menuCursor == i
-		keyStr := StyleMenuKey.Render("[" + item.k + "]")
-		labelStr := item.label
-		if sel {
-			cursor = StyleCyan("> ")
-			labelStr = StyleMenuItemSelected.Render(" " + item.label + " ")
-		} else {
-			labelStr = StyleMenuItem.Render(item.label)
+	// Menu items — rendered directly from menuItems so cursor tracking is exact
+	for i, item := range m.menuItems {
+		if item.key == "" {
+			sb.WriteString("\n")
+			continue
 		}
-		sb.WriteString(cursor + keyStr + "  " + labelStr + "\n")
-	}
-
-	sb.WriteString("\n")
-	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 40)) + "\n")
-
-	engagementItems := []struct{ k, label string }{
-		{"P", "Playbooks ▸"},
-		{"E", "Engagement ▸"},
-	}
-	systemItems := []struct{ k, label string }{
-		{"?", "Help"},
-		{"Q", "Quit"},
-	}
-
-	offset := len(catKeys) + 1
-	for i, item := range engagementItems {
-		cursor := "  "
-		sel := m.menuCursor == offset+i
-		keyStr := StyleMenuKey.Render("[" + item.k + "]")
-		var labelStr string
-		if sel {
-			cursor = StyleCyan("> ")
-			labelStr = StyleMenuItemSelected.Render(" " + item.label + " ")
-		} else {
-			labelStr = StyleMenuItem.Render(item.label)
+		if item.key == "P" {
+			sb.WriteString(StyleDivider.Render(strings.Repeat("─", 40)) + "\n")
 		}
-		sb.WriteString(cursor + keyStr + "  " + labelStr + "\n")
-	}
-
-	sb.WriteString("\n")
-	for i, item := range systemItems {
 		cursor := "  "
-		sel := m.menuCursor == offset+len(engagementItems)+1+i
-		keyStr := StyleMenuKey.Render("[" + item.k + "]")
-		var labelStr string
-		if sel {
+		selected := m.menuCursor == i
+		if selected {
 			cursor = StyleCyan("> ")
+		}
+		keyStr := StyleMenuKey.Render("[" + item.key + "]")
+		var labelStr string
+		switch {
+		case selected:
 			labelStr = StyleMenuItemSelected.Render(" " + item.label + " ")
-		} else {
+		case item.key == "C":
+			labelStr = StyleWarning.Render(item.label)
+		default:
 			labelStr = StyleMenuItem.Render(item.label)
 		}
 		sb.WriteString(cursor + keyStr + "  " + labelStr + "\n")
@@ -1428,21 +1406,30 @@ func (m Model) viewHelp() string {
 	sb.WriteString(StyleMenuTitle.Render("  Keyboard Reference") + "\n\n")
 
 	help := []struct{ k, d string }{
+		{"C", "Campaign Mode — guided kill chain with smart suggestions"},
 		{"1-8", "Open module category  (7=WiFi  8=Advanced)"},
-		{"↑ / ↓  or  j / k", "Navigate"},
-		{"enter", "Select / confirm"},
-		{"esc", "Back"},
-		{"E", "Engagement Manager — create & switch engagements"},
-		{"F", "View findings for the active engagement"},
-		{"R", "Generate Markdown report for active engagement"},
-		{"V", "Credential Vault — harvested creds from all modules"},
-		{"T", "Target Map — discovered hosts & network topology"},
-		{"N", "Notes — add/view engagement notes"},
+		{"P", "Attack Playbooks — pre-built module chains"},
+		{"E", "Engagement Hub — create, switch, findings, vault"},
+		{"U", "Install available update"},
+		{"", ""},
+		{"↑ / ↓  or  j / k", "Navigate menus and lists"},
+		{"enter", "Select / confirm / launch"},
+		{"esc", "Back to previous screen"},
 		{"Q / ctrl+c", "Quit"},
 		{"", ""},
+		{"In Campaign Mode", ""},
+		{"↑ / ↓", "Navigate suggested modules"},
+		{"enter", "Launch selected module"},
+		{"M", "Browse all modules by kill chain phase"},
+		{"R", "Refresh suggestions from engagement data"},
+		{"N", "New engagement"},
+		{"E", "Engagement Hub"},
+		{"", ""},
 		{"davoid new <name>", "Create engagement from CLI"},
+		{"davoid run <module>", "Run any module directly"},
 		{"davoid list", "List all engagements"},
 		{"davoid report", "Generate report for active engagement"},
+		{"davoid doctor", "Check tool dependencies"},
 	}
 	for _, h := range help {
 		if h.k == "" {
@@ -1760,9 +1747,13 @@ func (m Model) viewCampaign() string {
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n\n")
 
 	if m.activeEng == nil {
-		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement.") + "\n")
-		sb.WriteString("  " + StyleHelp.Render("Press [E] → New Engagement, then return here.") + "\n\n")
-		sb.WriteString("  " + StyleHelp.Render("[esc] back") + "\n")
+		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement.") + "\n\n")
+		sb.WriteString("  " + StyleMenuItem.Render("Campaign Mode tracks your progress across the kill chain.") + "\n")
+		sb.WriteString("  " + StyleMenuItem.Render("Create an engagement to get started.") + "\n\n")
+		sb.WriteString("  " + StyleMenuKey.Render("[N]") + "  " + StyleMenuItem.Render("New Engagement") + "\n")
+		sb.WriteString("  " + StyleMenuKey.Render("[E]") + "  " + StyleMenuItem.Render("Engagement Hub") + "\n")
+		sb.WriteString("  " + StyleMenuKey.Render("[enter]") + "  " + StyleMenuItem.Render("Quick create") + "\n\n")
+		sb.WriteString("  " + StyleHelp.Render("[esc] back to menu") + "\n")
 		return sb.String()
 	}
 
@@ -1840,7 +1831,7 @@ func (m Model) viewCampaign() string {
 	// Footer keys
 	sb.WriteString("\n")
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n")
-	sb.WriteString("  " + StyleHelp.Render("[↑↓] navigate  [enter] launch  [m] all modules  [r] refresh  [esc] menu") + "\n")
+	sb.WriteString("  " + StyleHelp.Render("[↑↓] navigate  [enter] launch  [M] all modules  [R] refresh  [E] engagement  [esc] menu") + "\n")
 
 	return sb.String()
 }

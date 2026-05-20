@@ -26,10 +26,26 @@ ASSET="${BINARY}-${OS_KEY}-${ARCH_KEY}"
 # ── Install path ─────────────────────────────────────────────────────────────
 if [ "$OS_KEY" = "darwin" ] && [ -d "/opt/homebrew/bin" ]; then
   INSTALL_PATH="/opt/homebrew/bin/${BINARY}"
-  NEEDS_SUDO=0
-else
+elif [ -d "/usr/local/bin" ]; then
   INSTALL_PATH="/usr/local/bin/${BINARY}"
+else
+  INSTALL_PATH="/usr/bin/${BINARY}"
+fi
+
+# Detect whether we actually need sudo by testing write access to the dir
+needs_sudo() {
+  local dir
+  dir="$(dirname "$1")"
+  # Try creating a temp file in the target directory
+  local probe
+  probe="$(mktemp "${dir}/.davoid-probe-XXXXXX" 2>/dev/null)" && rm -f "$probe" && return 1
+  return 0
+}
+
+if needs_sudo "$INSTALL_PATH"; then
   NEEDS_SUDO=1
+else
+  NEEDS_SUDO=0
 fi
 
 # ── Download ─────────────────────────────────────────────────────────────────
@@ -37,12 +53,26 @@ TMP="$(mktemp)"
 TMP_CHECKSUMS="$(mktemp)"
 
 echo "[*] Downloading ${ASSET}..."
-curl -sSL "${BASE_URL}/${ASSET}" -o "$TMP"
-curl -sSL "${BASE_URL}/checksums.txt" -o "$TMP_CHECKSUMS"
+curl -fsSL "${BASE_URL}/${ASSET}" -o "$TMP"
+if [ $? -ne 0 ]; then
+  echo "[-] Download failed. Check your connection or visit:"
+  echo "    https://github.com/${REPO}/releases/latest"
+  rm -f "$TMP" "$TMP_CHECKSUMS"
+  exit 1
+fi
+
+curl -fsSL "${BASE_URL}/checksums.txt" -o "$TMP_CHECKSUMS"
 
 # ── Verify checksum ──────────────────────────────────────────────────────────
 echo "[*] Verifying checksum..."
 EXPECTED="$(grep "${ASSET}" "$TMP_CHECKSUMS" | awk '{print $1}')"
+
+if [ -z "$EXPECTED" ]; then
+  echo "[-] Checksum entry not found for ${ASSET}. Aborting."
+  rm -f "$TMP" "$TMP_CHECKSUMS"
+  exit 1
+fi
+
 if command -v sha256sum &>/dev/null; then
   ACTUAL="$(sha256sum "$TMP" | awk '{print $1}')"
 else
@@ -58,12 +88,14 @@ echo "[+] Checksum OK"
 
 # ── Install ──────────────────────────────────────────────────────────────────
 chmod +x "$TMP"
+rm -f "$TMP_CHECKSUMS"
+
 if [ "$NEEDS_SUDO" = "1" ]; then
+  echo "[*] Installing to ${INSTALL_PATH} (requires sudo)..."
   sudo mv "$TMP" "$INSTALL_PATH"
 else
   mv "$TMP" "$INSTALL_PATH"
 fi
-rm -f "$TMP_CHECKSUMS"
 
 echo "[+] Installed: ${INSTALL_PATH}"
 echo ""

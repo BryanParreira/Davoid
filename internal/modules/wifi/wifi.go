@@ -74,8 +74,57 @@ func RunMonitor() error {
 
 	var cmd *exec.Cmd
 	if action == 0 {
+		if ui.Confirm("Kill interfering processes first? (Recommended — stops NetworkManager/wpa_supplicant)") {
+			ui.Info("Running airmon-ng check kill...")
+			killOut, _ := exec.Command("airmon-ng", "check", "kill").CombinedOutput()
+			for _, line := range strings.Split(string(killOut), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					fmt.Println("  " + line)
+				}
+			}
+			fmt.Println()
+		}
+		ifacesBefore := listAllInterfaces()
 		ui.Info(fmt.Sprintf("Starting monitor mode on %s...", iface))
 		cmd = exec.Command("airmon-ng", "start", iface)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			ui.Fail(fmt.Sprintf("airmon-ng error: %v", err))
+			fmt.Println(string(out))
+			ui.PressEnter()
+			return nil
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.Contains(strings.ToLower(line), "monitor mode") {
+				ui.Success(line)
+			}
+		}
+		// Detect new monitor interface created by airmon-ng
+		time.Sleep(500 * time.Millisecond)
+		ifacesAfter := listAllInterfaces()
+		var newIfaces []string
+		for _, ni := range ifacesAfter {
+			found := false
+			for _, oi := range ifacesBefore {
+				if ni == oi {
+					found = true
+					break
+				}
+			}
+			if !found {
+				newIfaces = append(newIfaces, ni)
+			}
+		}
+		if len(newIfaces) > 0 {
+			ui.Success(fmt.Sprintf("Monitor interface(s) created: %s", strings.Join(newIfaces, ", ")))
+		} else {
+			ui.Info(fmt.Sprintf("Monitor mode started. Interface is typically %smon or mon0.", iface))
+			ui.Info("Run 'iw dev' to confirm the monitor interface name.")
+		}
+		ui.PressEnter()
+		return nil
 	} else {
 		ui.Info(fmt.Sprintf("Stopping monitor mode on %s...", iface))
 		cmd = exec.Command("airmon-ng", "stop", iface)
@@ -96,12 +145,7 @@ func RunMonitor() error {
 		}
 	}
 
-	if action == 0 {
-		ui.Success(fmt.Sprintf("Monitor mode started. New interface is typically %smon or mon0.", iface))
-		ui.Info("Run 'iw dev' to confirm the monitor interface name.")
-	} else {
-		ui.Success(fmt.Sprintf("Monitor mode stopped on %s.", iface))
-	}
+	ui.Success(fmt.Sprintf("Monitor mode stopped on %s.", iface))
 
 	ui.PressEnter()
 	return nil
@@ -630,30 +674,75 @@ func listAllInterfaces() []string {
 				return ifaces
 			}
 		}
-		// fallback
+		// fallback: scan /sys/class/net for wireless interfaces
 		entries, _ := os.ReadDir("/sys/class/net")
 		var ifaces []string
 		for _, e := range entries {
 			name := e.Name()
+			// wlan* = built-in/PCI, wlx* = USB adapters (e.g. Alfa), wlp* = PCI by path, mon* = monitor ifaces
 			if strings.HasPrefix(name, "wlan") || strings.HasPrefix(name, "mon") ||
-				strings.HasPrefix(name, "wlp") || strings.HasPrefix(name, "wlx") {
-				ifaces = append(ifaces, name)
+				strings.HasPrefix(name, "wlp") || strings.HasPrefix(name, "wlx") ||
+				strings.HasPrefix(name, "wl") {
+				// confirm wireless by checking phy80211 symlink exists
+				if _, err := os.Stat("/sys/class/net/" + name + "/phy80211"); err == nil {
+					ifaces = append(ifaces, name)
+				} else if strings.HasPrefix(name, "wlan") || strings.HasPrefix(name, "wlx") ||
+					strings.HasPrefix(name, "mon") {
+					ifaces = append(ifaces, name)
+				}
+			}
+		}
+		if len(ifaces) == 0 {
+			// hint: rfkill may be blocking the adapter
+			if rfkillOut, err := exec.Command("rfkill", "list").Output(); err == nil {
+				if strings.Contains(string(rfkillOut), "yes") {
+					ui.Warn("rfkill may be blocking your adapter. Try: sudo rfkill unblock all")
+				}
 			}
 		}
 		return ifaces
 	}
-	// macOS
+	// macOS: use ifconfig to find 802.11 interfaces (catches external USB WiFi adapters)
+	ifconfigOut, err := exec.Command("ifconfig", "-a").Output()
+	if err == nil {
+		var ifaces []string
+		currentIface := ""
+		for _, line := range strings.Split(string(ifconfigOut), "\n") {
+			// interface header line: "en0: flags=..."
+			if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+				if idx := strings.Index(line, ":"); idx > 0 {
+					currentIface = line[:idx]
+				}
+			}
+			if currentIface != "" && strings.Contains(line, "IEEE 802.11") {
+				ifaces = append(ifaces, currentIface)
+				currentIface = ""
+			}
+		}
+		if len(ifaces) > 0 {
+			return ifaces
+		}
+	}
+	// macOS fallback: networksetup — match Wi-Fi, AirPort, and USB/external wireless
 	out, _ := exec.Command("networksetup", "-listallhardwareports").Output()
 	lines := strings.Split(string(out), "\n")
 	var ifaces []string
-	for i, line := range lines {
-		if strings.Contains(line, "Wi-Fi") || strings.Contains(line, "AirPort") {
-			for j := i + 1; j < len(lines) && j < i+3; j++ {
-				trimmed := strings.TrimSpace(lines[j])
-				if strings.HasPrefix(trimmed, "Device:") {
-					ifaces = append(ifaces, strings.TrimSpace(strings.TrimPrefix(trimmed, "Device:")))
-				}
+	isWireless := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Hardware Port:") {
+			portName := strings.ToLower(strings.TrimPrefix(trimmed, "Hardware Port:"))
+			isWireless = strings.Contains(portName, "wi-fi") ||
+				strings.Contains(portName, "airport") ||
+				strings.Contains(portName, "wireless") ||
+				strings.Contains(portName, "802.11")
+		}
+		if isWireless && strings.HasPrefix(trimmed, "Device:") {
+			dev := strings.TrimSpace(strings.TrimPrefix(trimmed, "Device:"))
+			if dev != "" {
+				ifaces = append(ifaces, dev)
 			}
+			isWireless = false
 		}
 	}
 	return ifaces

@@ -15,7 +15,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"runtime"
+
 	"github.com/bryanparreira/davoid/internal/engagement"
+	"github.com/bryanparreira/davoid/internal/modules/auditor"
 	"github.com/bryanparreira/davoid/internal/modules/playbook"
 	"github.com/bryanparreira/davoid/internal/runner"
 	"github.com/bryanparreira/davoid/internal/targets"
@@ -24,18 +27,26 @@ import (
 )
 
 func launchTUI() error {
+	inCampaign := false
 	for {
-		m := tui.NewModel(version)
+		var m tui.Model
+		if inCampaign {
+			m = tui.NewCampaignModel(version)
+		} else {
+			m = tui.NewModel(version)
+		}
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		finalModel, err := p.Run()
 		if err != nil {
 			return err
 		}
-		pending := finalModel.(tui.Model).PendingModule()
+		fm := finalModel.(tui.Model)
+		pending := fm.PendingModule()
+		inCampaign = fm.PendingCampaign()
+
 		if pending == "" {
 			break
 		}
-		// playbook chains use "playbook:<key>" prefix
 		if strings.HasPrefix(pending, "playbook:") {
 			key := strings.TrimPrefix(pending, "playbook:")
 			if err := playbook.Run(key); err != nil {
@@ -231,48 +242,43 @@ var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check required tool dependencies",
 	Run: func(cmd *cobra.Command, args []string) {
-		type dep struct {
-			tool    string
-			purpose string
-			install string
-		}
-		deps := []dep{
-			{"nmap", "Net-Mapper scanner", "brew install nmap / apt install nmap"},
-			{"airmon-ng", "WiFi monitor mode", "apt install aircrack-ng"},
-			{"airodump-ng", "WiFi scanning", "apt install aircrack-ng"},
-			{"aireplay-ng", "WiFi deauth", "apt install aircrack-ng"},
-			{"aircrack-ng", "WPA cracking", "apt install aircrack-ng"},
-			{"hostapd", "Evil twin AP", "apt install hostapd"},
-			{"dnsmasq", "Evil twin DHCP", "apt install dnsmasq"},
-			{"pandoc", "PDF reports", "brew install pandoc / apt install pandoc"},
-			{"msfconsole", "Metasploit bridge", "https://metasploit.com/download"},
-			{"tcpdump", "Traffic capture", "brew install tcpdump / apt install tcpdump"},
-			{"ollama", "AI console / AI reports", "https://ollama.com"},
+		pm := auditor.DetectPkgMgr()
+		pmLabel := string(pm)
+		if pmLabel == "" {
+			pmLabel = "unknown"
 		}
 
 		fmt.Println()
-		fmt.Printf("  %-14s  %-8s  %-28s  %s\n", "TOOL", "STATUS", "PURPOSE", "INSTALL")
-		fmt.Printf("  %s\n", strings.Repeat("─", 76))
+		fmt.Printf("  Davoid dependency check  (OS: %s  pkg manager: %s)\n", runtime.GOOS, pmLabel)
+		fmt.Printf("  %s\n", strings.Repeat("─", 80))
+		fmt.Printf("  %-20s  %-8s  %-30s  %s\n", "TOOL", "STATUS", "PURPOSE", "INSTALL COMMAND")
+		fmt.Printf("  %s\n", strings.Repeat("─", 80))
 
 		ok, missing := 0, 0
-		for _, d := range deps {
-			_, err := exec.LookPath(d.tool)
+		for _, d := range auditor.AllDeps() {
+			if d.LinuxOnly && runtime.GOOS != "linux" {
+				continue
+			}
+			_, err := exec.LookPath(d.Cmd)
 			status := "\033[32m✓ found  \033[0m"
 			install := ""
 			if err != nil {
 				status = "\033[31m✗ missing\033[0m"
-				install = d.install
+				install = auditor.InstallCmd(d, pm)
 				missing++
 			} else {
 				ok++
 			}
-			fmt.Printf("  %-14s  %s  %-28s  %s\n", d.tool, status, d.purpose, install)
+			fmt.Printf("  %-20s  %s  %-30s  %s\n", d.Name, status, truncate(d.Purpose, 28), install)
 		}
 
 		fmt.Println()
-		fmt.Printf("  %d/%d tools available", ok, len(deps))
+		fmt.Printf("  %d/%d tools available", ok, ok+missing)
 		if missing > 0 {
-			fmt.Printf("  —  %d missing (WiFi tools require Linux + compatible adapter)\n", missing)
+			fmt.Printf("  —  %d missing\n", missing)
+			if runtime.GOOS == "darwin" {
+				fmt.Printf("  Note: WiFi attack tools (aircrack-ng suite, hostapd) require Linux.\n")
+			}
 		} else {
 			fmt.Printf("  — all good\n")
 		}

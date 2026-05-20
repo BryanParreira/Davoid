@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bryanparreira/davoid/internal/campaign"
 	"github.com/bryanparreira/davoid/internal/modules/adops"
 	"github.com/bryanparreira/davoid/internal/modules/aiassist"
 	"github.com/bryanparreira/davoid/internal/modules/auditor"
@@ -134,6 +135,12 @@ func RunModule(key string) error {
 	case "wifi_handshake": return wifi.RunHandshake()
 	case "wifi_crack": return wifi.RunCrack()
 	case "wifi_eviltwin": return wifi.RunEvilTwin()
+	case "campaign":
+		metas := make([]campaign.ModuleMeta, len(Registry))
+		for i, m := range Registry {
+			metas[i] = campaign.ModuleMeta{Key: m.Key, Name: m.Name, Description: m.Description}
+		}
+		return campaign.Run(metas, RunModule)
 	default:
 		return fmt.Errorf("module not found: %s", key)
 	}

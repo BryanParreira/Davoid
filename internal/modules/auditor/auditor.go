@@ -12,28 +12,6 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/ui"
 )
 
-type toolCheck struct {
-	name    string
-	cmd     string
-	install string
-}
-
-var tools = []toolCheck{
-	{"nmap", "nmap", "brew install nmap / apt install nmap"},
-	{"tcpdump", "tcpdump", "brew install tcpdump / apt install tcpdump"},
-	{"arpspoof", "arpspoof", "brew install dsniff / apt install dsniff"},
-	{"msfconsole", "msfconsole", "https://metasploit.com"},
-	{"msfvenom", "msfvenom", "included with Metasploit"},
-	{"nc (netcat)", "nc", "brew install ncat / apt install netcat"},
-	{"curl", "curl", "brew install curl / apt install curl"},
-	{"dig", "dig", "brew install bind / apt install dnsutils"},
-	{"whois", "whois", "brew install whois / apt install whois"},
-	{"git", "git", "https://git-scm.com"},
-	{"ssh", "ssh", "built-in on macOS/Linux"},
-	{"john", "john", "brew install john / apt install john"},
-	{"hashcat", "hashcat", "brew install hashcat / apt install hashcat"},
-	{"ollama", "ollama", "https://ollama.ai"},
-}
 
 var commonPorts = []int{21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 1433, 3306, 3389, 5432, 6379, 8080, 8443}
 
@@ -53,27 +31,36 @@ func Run() error {
 	ui.Divider()
 
 	// Tool checks
+	pm := DetectPkgMgr()
+	pmLabel := string(pm)
+	if pmLabel == "" {
+		pmLabel = "unknown"
+	}
+
 	fmt.Println()
-	ui.Info("Tool Availability")
+	ui.Info(fmt.Sprintf("Tool Availability  (package manager: %s)", pmLabel))
 	ui.Divider()
-	fmt.Printf("  %-20s  %-8s  %s\n", ui.Bold.Render("TOOL"), ui.Bold.Render("STATUS"), ui.Bold.Render("INSTALL"))
+	fmt.Printf("  %-20s  %-8s  %s\n", ui.Bold.Render("TOOL"), ui.Bold.Render("STATUS"), ui.Bold.Render("INSTALL COMMAND"))
 	ui.Divider()
 
 	available := 0
 	missing := 0
-	for _, t := range tools {
-		path, err := exec.LookPath(t.cmd)
+	for _, d := range AllDeps() {
+		if d.LinuxOnly && runtime.GOOS != "linux" {
+			continue
+		}
+		path, err := exec.LookPath(d.Cmd)
 		if err != nil {
 			fmt.Printf("  %-20s  %s  %s\n",
-				t.name,
+				d.Name,
 				ui.Red.Render("MISSING"),
-				ui.Dim.Render(t.install),
+				ui.Dim.Render(InstallCmd(d, pm)),
 			)
 			missing++
 		} else {
-			ver := toolVersion(t.cmd)
+			ver := toolVersion(d.Cmd)
 			fmt.Printf("  %-20s  %s  %s\n",
-				t.name,
+				d.Name,
 				ui.Green.Render("OK     "),
 				ui.Dim.Render(path+" "+ver),
 			)

@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/bryanparreira/davoid/internal/campaign"
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/playbook"
 	"github.com/bryanparreira/davoid/internal/runner"
@@ -44,6 +45,7 @@ const (
 	stateTimeline
 	statePlaybooks
 	statePlaybookConfirm
+	stateCampaign
 )
 
 // --------------------------------------------------------------------------
@@ -76,6 +78,10 @@ type (
 	notesMsg    struct{ notes []engNote }
 	timelineMsg struct{ events []engagement.TimelineEvent }
 	errMsg      struct{ err error }
+	campaignDataMsg struct {
+		phases      []campaign.PhaseInfo
+		suggestions []campaign.Suggestion
+	}
 )
 
 func tickCmd() tea.Cmd {
@@ -158,11 +164,27 @@ type Model struct {
 	// playbooks
 	playbookCursor   int
 	selectedPlaybook playbook.Playbook
+	// campaign
+	campaignPhases      []campaign.PhaseInfo
+	campaignSuggestions []campaign.Suggestion
+	campaignCursor      int
+	fromCampaign        bool // true when a module was launched from campaign view
 }
 
 // PendingModule returns the module key that should be run after the TUI exits,
 // or an empty string if the user quit normally.
 func (m Model) PendingModule() string { return m.pendingModule }
+
+// PendingCampaign returns true if the module was launched from campaign view,
+// so main loop can re-enter campaign state after the module completes.
+func (m Model) PendingCampaign() bool { return m.fromCampaign }
+
+// NewCampaignModel returns a Model that starts directly in campaign view.
+func NewCampaignModel(version string) Model {
+	m := NewModel(version)
+	m.state = stateCampaign
+	return m
+}
 
 type menuItem struct {
 	key   string
@@ -173,6 +195,8 @@ type menuItem struct {
 
 func buildMainMenu() []menuItem {
 	return []menuItem{
+		{key: "C", label: "Campaign Mode ★"},
+		{key: "", label: ""},
 		{key: "1", label: "Recon & OSINT"},
 		{key: "2", label: "Network Attacks"},
 		{key: "3", label: "Social Engineering"},
@@ -360,6 +384,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engLoadedMsg:
 		m.activeEng = msg.eng
+		if msg.eng != nil && m.state == stateCampaign {
+			return m, loadCampaignData(msg.eng.ID)
+		}
 		return m, nil
 
 	case netInfoMsg:
@@ -427,6 +454,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.noteScroll = 0
 		return m, nil
 
+	case campaignDataMsg:
+		m.campaignPhases = msg.phases
+		m.campaignSuggestions = msg.suggestions
+		if m.campaignCursor >= len(msg.suggestions) {
+			m.campaignCursor = 0
+		}
+		return m, nil
+
 	case errMsg:
 		m.statusMsg = msg.err.Error()
 		m.statusIsError = true
@@ -485,6 +520,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.openCategoryMenu("WiFi & Wireless")
 		case "8":
 			return m.openCategoryMenu("Advanced")
+		case "c", "C":
+			m.state = stateCampaign
+			m.campaignCursor = 0
+			if m.activeEng != nil {
+				return m, loadCampaignData(m.activeEng.ID)
+			}
+			return m, nil
 		case "p", "P":
 			m.state = statePlaybooks
 			m.playbookCursor = 0
@@ -782,6 +824,47 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateEngagementHub
 		}
 
+	// ── Campaign view ─────────────────────────────────────────────────────
+	case stateCampaign:
+		switch key {
+		case "up", "k":
+			if m.campaignCursor > 0 {
+				m.campaignCursor--
+			}
+		case "down", "j":
+			if m.campaignCursor < len(m.campaignSuggestions)-1 {
+				m.campaignCursor++
+			}
+		case "enter", " ":
+			if m.campaignCursor < len(m.campaignSuggestions) {
+				m.pendingModule = m.campaignSuggestions[m.campaignCursor].ModuleKey
+				m.fromCampaign = true
+				return m, tea.Quit
+			}
+		case "m", "M":
+			var items []menuItem
+			for _, mkey := range campaign.AllPhaseModules() {
+				for _, mod := range runner.Registry {
+					if mod.Key == mkey {
+						items = append(items, menuItem{
+							key:   mod.Key,
+							label: fmt.Sprintf("%-20s  %s", mod.Name, runner.ShortDesc(mod.Description, 50)),
+						})
+						break
+					}
+				}
+			}
+			m.subMenuItems = items
+			m.subMenuCursor = 0
+			m.state = stateModuleList
+		case "r", "R":
+			if m.activeEng != nil {
+				return m, loadCampaignData(m.activeEng.ID)
+			}
+		case "esc", "q":
+			m.state = stateMenu
+		}
+
 	// ── Note add form ─────────────────────────────────────────────────────
 	case stateNoteAdd:
 		switch key {
@@ -820,6 +903,13 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 		return m.openCategoryMenu("WiFi & Wireless")
 	case "8":
 		return m.openCategoryMenu("Advanced")
+	case "C":
+		m.state = stateCampaign
+		m.campaignCursor = 0
+		if m.activeEng != nil {
+			return m, loadCampaignData(m.activeEng.ID)
+		}
+		return m, nil
 	case "P":
 		m.state = statePlaybooks
 		m.playbookCursor = 0
@@ -877,6 +967,19 @@ func loadTargets(engID string) tea.Cmd {
 	}
 }
 
+func loadCampaignData(engID string) tea.Cmd {
+	return func() tea.Msg {
+		metas := make([]campaign.ModuleMeta, len(runner.Registry))
+		for i, m := range runner.Registry {
+			metas[i] = campaign.ModuleMeta{Key: m.Key, Name: m.Name, Description: m.Description}
+		}
+		return campaignDataMsg{
+			phases:      campaign.GetPhaseProgress(engID),
+			suggestions: campaign.GenerateSuggestions(engID, metas),
+		}
+	}
+}
+
 func loadNotes(engID string) tea.Cmd {
 	return func() tea.Msg {
 		raw, _ := engagement.Notes(engID)
@@ -922,6 +1025,8 @@ func (m Model) View() string {
 		return m.viewPlaybooks()
 	case statePlaybookConfirm:
 		return m.viewPlaybookConfirm()
+	case stateCampaign:
+		return m.viewCampaign()
 	default:
 		return m.viewMainMenu()
 	}
@@ -1605,6 +1710,107 @@ func (m Model) viewPlaybookConfirm() string {
 	}
 
 	sb.WriteString("  " + StylePrompt.Render("Launch? [y/N]  ") + StyleHelp.Render("· esc back"))
+	return sb.String()
+}
+
+func (m Model) viewCampaign() string {
+	var sb strings.Builder
+
+	// Header
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n")
+	title := "  CAMPAIGN MODE"
+	if m.activeEng != nil {
+		title += "  —  " + m.activeEng.Name
+		if m.activeEng.Target != "" {
+			title += "  " + StyleLabel.Render("["+m.activeEng.Target+"]")
+		}
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n")
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n\n")
+
+	if m.activeEng == nil {
+		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement.") + "\n")
+		sb.WriteString("  " + StyleHelp.Render("Press [E] → New Engagement, then return here.") + "\n\n")
+		sb.WriteString("  " + StyleHelp.Render("[esc] back") + "\n")
+		return sb.String()
+	}
+
+	// Kill chain progress
+	sb.WriteString("  " + StyleSectionHeader.Render("Kill Chain Progress") + "\n")
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 40)) + "\n")
+	for _, p := range m.campaignPhases {
+		marker := StyleLabel.Render("○")
+		if p.FindingCount > 0 {
+			marker = StyleSuccess.Render("●")
+		}
+		suffix := ""
+		if p.FindingCount == 1 {
+			suffix = StyleLabel.Render("  (1 finding)")
+		} else if p.FindingCount > 1 {
+			suffix = StyleLabel.Render(fmt.Sprintf("  (%d findings)", p.FindingCount))
+		}
+		sb.WriteString(fmt.Sprintf("  %s  %s  %s%s\n",
+			marker,
+			StyleMenuKey.Render(p.Icon),
+			StyleMenuItem.Render(p.Name),
+			suffix,
+		))
+	}
+
+	// Stats bar
+	if m.activeEng != nil {
+		hosts, _ := targets.List(m.activeEng.ID)
+		creds, _ := vault.List(m.activeEng.ID)
+		stats := engagement.FindingStats(m.activeEng.ID)
+		total := stats["CRITICAL"] + stats["HIGH"] + stats["MEDIUM"] + stats["INFO"]
+		sb.WriteString("\n")
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 40)) + "\n")
+		sb.WriteString(fmt.Sprintf("  %s %s  %s %s  %s %s  %s%s%s\n",
+			StyleLabel.Render("Hosts:"), StyleValue.Render(fmt.Sprintf("%d", len(hosts))),
+			StyleLabel.Render("Creds:"), StyleValue.Render(fmt.Sprintf("%d", len(creds))),
+			StyleLabel.Render("Findings:"), StyleValue.Render(fmt.Sprintf("%d", total)),
+			StyleFindingCritical.Render(fmt.Sprintf("C:%d ", stats["CRITICAL"])),
+			StyleFindingHigh.Render(fmt.Sprintf("H:%d ", stats["HIGH"])),
+			StyleLabel.Render(fmt.Sprintf("M:%d", stats["MEDIUM"])),
+		))
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 40)) + "\n")
+	}
+
+	// Suggestions
+	sb.WriteString("\n  " + StyleSectionHeader.Render("Suggested Next Steps") + "\n")
+	if len(m.campaignSuggestions) == 0 {
+		sb.WriteString("  " + StyleLabel.Render("Loading...") + "\n")
+	} else {
+		limit := m.campaignSuggestions
+		if len(limit) > 6 {
+			limit = m.campaignSuggestions[:6]
+		}
+		for i, s := range limit {
+			cursor := "  "
+			selected := m.campaignCursor == i
+			urgency := StyleLabel.Render("·")
+			switch s.Priority {
+			case 0:
+				urgency = StyleError.Render("!")
+			case 1:
+				urgency = StyleWarning.Render("→")
+			}
+			nameStr := StyleMenuItem.Render(fmt.Sprintf("%-20s", s.ModuleName))
+			reasonStr := StyleLabel.Render(truncate(s.Reason, 42))
+			if selected {
+				cursor = StyleCyan("> ")
+				nameStr = StyleMenuItemSelected.Render(" " + fmt.Sprintf("%-19s", s.ModuleName) + " ")
+			}
+			sb.WriteString(fmt.Sprintf("  %s%s  %s  %s\n",
+				cursor, urgency, nameStr, reasonStr))
+		}
+	}
+
+	// Footer keys
+	sb.WriteString("\n")
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n")
+	sb.WriteString("  " + StyleHelp.Render("[↑↓] navigate  [enter] launch  [m] all modules  [r] refresh  [esc] menu") + "\n")
+
 	return sb.String()
 }
 

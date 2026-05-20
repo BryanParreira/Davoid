@@ -189,25 +189,26 @@ func NewCampaignModel(version string) Model {
 type menuItem struct {
 	key   string
 	label string
-	sub   bool // true = opens submenu, false = direct action
+	hint  string // short dimmed hint shown next to label on main menu
+	sub   bool   // true = opens submenu, false = direct action
 	state state
 }
 
 func buildMainMenu() []menuItem {
 	return []menuItem{
-		{key: "C", label: "Campaign Mode ★"},
+		{key: "C", label: "Campaign Mode ★", hint: "guided kill chain · smart suggestions"},
 		{key: "", label: ""},
-		{key: "1", label: "Recon & OSINT"},
-		{key: "2", label: "Network Attacks"},
-		{key: "3", label: "Social Engineering"},
-		{key: "4", label: "Exploitation"},
-		{key: "5", label: "Post-Exploitation"},
-		{key: "6", label: "Active Directory"},
-		{key: "7", label: "WiFi & Wireless"},
-		{key: "8", label: "Advanced"},
+		{key: "1", label: "Recon & OSINT",      hint: "scanner · OSINT · web recon"},
+		{key: "2", label: "Network Attacks",    hint: "MITM · traffic intercept"},
+		{key: "3", label: "Social Engineering", hint: "phishing · C2 server"},
+		{key: "4", label: "Exploitation",       hint: "payloads · MSF · shell catcher"},
+		{key: "5", label: "Post-Exploitation",  hint: "looter · cred tester · hash crack"},
+		{key: "6", label: "Active Directory",   hint: "LDAP · Kerberoast · DCSync"},
+		{key: "7", label: "WiFi & Wireless",    hint: "monitor · scan · deauth · handshake"},
+		{key: "8", label: "Advanced",           hint: "AI · cloud · purple team · god mode"},
 		{key: "", label: ""},
-		{key: "P", label: "Playbooks ▸"},
-		{key: "E", label: "Engagement ▸"},
+		{key: "P", label: "Playbooks ▸",    hint: "pre-built attack chains"},
+		{key: "E", label: "Engagement ▸",   hint: "findings · vault · targets · notes"},
 		{key: "", label: ""},
 		{key: "?", label: "Help"},
 		{key: "Q", label: "Quit"},
@@ -1217,13 +1218,17 @@ func (m Model) viewMainMenu() string {
 		var labelStr string
 		switch {
 		case selected:
-			labelStr = StyleMenuItemSelected.Render(" " + item.label + " ")
+			labelStr = StyleMenuItemSelected.Render(" " + fmt.Sprintf("%-22s", item.label) + " ")
 		case item.key == "C":
-			labelStr = StyleWarning.Render(item.label)
+			labelStr = StyleWarning.Render(fmt.Sprintf("%-24s", item.label))
 		default:
-			labelStr = StyleMenuItem.Render(item.label)
+			labelStr = StyleMenuItem.Render(fmt.Sprintf("%-24s", item.label))
 		}
-		sb.WriteString(cursor + keyStr + "  " + labelStr + "\n")
+		hintStr := ""
+		if item.hint != "" && !selected {
+			hintStr = StyleHelp.Render("· " + item.hint)
+		}
+		sb.WriteString(cursor + keyStr + "  " + labelStr + hintStr + "\n")
 	}
 
 	// Status bar

@@ -39,11 +39,6 @@ type wifiNetwork struct {
 func RunMonitor() error {
 	ui.Header("Monitor Mode — Wireless Interface Manager")
 
-	if _, err := exec.LookPath("airmon-ng"); err != nil {
-		ui.Fail("airmon-ng not found. Install: sudo apt install aircrack-ng")
-		return nil
-	}
-
 	ifaces := listAllInterfaces()
 	if len(ifaces) == 0 {
 		ui.Fail("No wireless interfaces found. Ensure a wireless adapter is connected.")
@@ -53,15 +48,18 @@ func RunMonitor() error {
 	action := ui.Select("Action", []string{
 		"Start monitor mode",
 		"Stop monitor mode",
-		"Check interfaces (iwconfig)",
+		"Check interfaces (iw dev / iwconfig)",
 	})
 	if action < 0 {
 		return nil
 	}
 
 	if action == 2 {
-		out, _ := exec.Command("iwconfig").CombinedOutput()
-		fmt.Println(string(out))
+		if out, err := exec.Command("iw", "dev").CombinedOutput(); err == nil {
+			fmt.Println(string(out))
+		} else if out2, err2 := exec.Command("iwconfig").CombinedOutput(); err2 == nil {
+			fmt.Println(string(out2))
+		}
 		ui.PressEnter()
 		return nil
 	}
@@ -72,8 +70,70 @@ func RunMonitor() error {
 	}
 	iface := ifaces[idx]
 
-	var cmd *exec.Cmd
 	if action == 0 {
+		// Choose method: airmon-ng (classic) or iw (modern — better for dual-band/5GHz)
+		method := ui.Select("Monitor mode method", []string{
+			"iw  (modern — full dual-band 2.4GHz + 5GHz support)",
+			"airmon-ng  (classic — requires aircrack-ng suite)",
+		})
+		if method < 0 {
+			return nil
+		}
+
+		if method == 0 {
+			// Modern iw method — creates monitor interface that covers all bands the PHY supports
+			if _, err := exec.LookPath("iw"); err != nil {
+				ui.Fail("iw not found. Install: sudo apt install iw  OR choose airmon-ng method.")
+				ui.PressEnter()
+				return nil
+			}
+			phy := getPhyForIface(iface)
+			if phy == "" {
+				ui.Fail(fmt.Sprintf("Could not detect PHY for %s. Try airmon-ng method.", iface))
+				ui.PressEnter()
+				return nil
+			}
+			monName := iface + "mon"
+			ui.Info(fmt.Sprintf("PHY: %s → creating monitor interface %s (covers 2.4GHz + 5GHz)...", phy, monName))
+
+			// Bring down managed interface so driver can switch mode
+			exec.Command("ip", "link", "set", iface, "down").Run()
+
+			// Remove existing monitor interface with same name if present
+			exec.Command("iw", "dev", monName, "del").Run()
+
+			// Create monitor interface on the PHY (hardware) — not tied to a single band
+			createOut, createErr := exec.Command("iw", phy, "interface", "add", monName, "type", "monitor").CombinedOutput()
+			if createErr != nil {
+				ui.Fail(fmt.Sprintf("iw interface add failed: %v", createErr))
+				fmt.Println(strings.TrimSpace(string(createOut)))
+				ui.Info("Hint: may need sudo. Try: sudo iw " + phy + " interface add " + monName + " type monitor")
+				ui.PressEnter()
+				return nil
+			}
+
+			// Bring the monitor interface up
+			upOut, upErr := exec.Command("ip", "link", "set", monName, "up").CombinedOutput()
+			if upErr != nil {
+				ui.Fail(fmt.Sprintf("ip link set up failed: %v — %s", upErr, strings.TrimSpace(string(upOut))))
+				ui.PressEnter()
+				return nil
+			}
+
+			ui.Success(fmt.Sprintf("Monitor interface %s created via iw.", monName))
+			ui.Success("Full dual-band support: 2.4GHz channels 1-14 AND 5GHz channels 36-165.")
+			ui.Info("Use this interface in WiFi Scanner with band = Both (2.4+5GHz).")
+			ui.Info(fmt.Sprintf("Verify with: iw dev %s info", monName))
+			ui.PressEnter()
+			return nil
+		}
+
+		// airmon-ng method
+		if _, err := exec.LookPath("airmon-ng"); err != nil {
+			ui.Fail("airmon-ng not found. Install: sudo apt install aircrack-ng  OR choose iw method.")
+			ui.PressEnter()
+			return nil
+		}
 		if ui.Confirm("Kill interfering processes first? (Recommended — stops NetworkManager/wpa_supplicant)") {
 			ui.Info("Running airmon-ng check kill...")
 			killOut, _ := exec.Command("airmon-ng", "check", "kill").CombinedOutput()
@@ -87,7 +147,7 @@ func RunMonitor() error {
 		}
 		ifacesBefore := listAllInterfaces()
 		ui.Info(fmt.Sprintf("Starting monitor mode on %s...", iface))
-		cmd = exec.Command("airmon-ng", "start", iface)
+		cmd := exec.Command("airmon-ng", "start", iface)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			ui.Fail(fmt.Sprintf("airmon-ng error: %v", err))
@@ -101,7 +161,6 @@ func RunMonitor() error {
 				ui.Success(line)
 			}
 		}
-		// Detect new monitor interface created by airmon-ng
 		time.Sleep(500 * time.Millisecond)
 		ifacesAfter := listAllInterfaces()
 		var newIfaces []string
@@ -119,34 +178,43 @@ func RunMonitor() error {
 		}
 		if len(newIfaces) > 0 {
 			ui.Success(fmt.Sprintf("Monitor interface(s) created: %s", strings.Join(newIfaces, ", ")))
+			ui.Info("Note: for full 5GHz scanning use iw method or pass --band abg in airodump-ng.")
 		} else {
 			ui.Info(fmt.Sprintf("Monitor mode started. Interface is typically %smon or mon0.", iface))
 			ui.Info("Run 'iw dev' to confirm the monitor interface name.")
 		}
 		ui.PressEnter()
 		return nil
+	}
+
+	// Stop monitor mode
+	if _, err := exec.LookPath("airmon-ng"); err == nil {
+		ui.Info(fmt.Sprintf("Stopping monitor mode on %s via airmon-ng...", iface))
+		out, err := exec.Command("airmon-ng", "stop", iface).CombinedOutput()
+		if err != nil {
+			ui.Fail(fmt.Sprintf("airmon-ng error: %v", err))
+			fmt.Println(string(out))
+			ui.PressEnter()
+			return nil
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.Contains(strings.ToLower(line), "monitor mode") {
+				ui.Success(line)
+			}
+		}
 	} else {
-		ui.Info(fmt.Sprintf("Stopping monitor mode on %s...", iface))
-		cmd = exec.Command("airmon-ng", "stop", iface)
-	}
-
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		ui.Fail(fmt.Sprintf("airmon-ng error: %v", err))
-		fmt.Println(string(out))
-		ui.PressEnter()
-		return nil
-	}
-
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.Contains(strings.ToLower(line), "monitor mode") {
-			ui.Success(line)
+		// iw fallback: delete the monitor interface
+		ui.Info(fmt.Sprintf("Removing monitor interface %s via iw...", iface))
+		out, err := exec.Command("iw", "dev", iface, "del").CombinedOutput()
+		if err != nil {
+			ui.Fail(fmt.Sprintf("iw dev del failed: %v — %s", err, strings.TrimSpace(string(out))))
+			ui.PressEnter()
+			return nil
 		}
 	}
 
 	ui.Success(fmt.Sprintf("Monitor mode stopped on %s.", iface))
-
 	ui.PressEnter()
 	return nil
 }
@@ -175,10 +243,26 @@ func RunScan() error {
 	}
 	monIface := ifaces[idx]
 
-	durStr := ui.PromptDefault("Scan duration (seconds)", "15")
+	bandIdx := ui.Select("Band to scan", []string{
+		"Both 2.4GHz + 5GHz  (recommended — full coverage)",
+		"2.4GHz only  (channels 1-14)",
+		"5GHz only  (channels 36-165)",
+	})
+	if bandIdx < 0 {
+		return nil
+	}
+	bandFlag := "abg" // default: all bands
+	switch bandIdx {
+	case 1:
+		bandFlag = "bg"
+	case 2:
+		bandFlag = "a"
+	}
+
+	durStr := ui.PromptDefault("Scan duration (seconds)", "20")
 	dur, _ := strconv.Atoi(durStr)
 	if dur <= 0 {
-		dur = 15
+		dur = 20
 	}
 
 	tmpBase := fmt.Sprintf("/tmp/davoid_scan_%d", time.Now().Unix())
@@ -187,10 +271,12 @@ func RunScan() error {
 	defer os.Remove(tmpBase + "-01.kismet.csv")
 	defer os.Remove(tmpBase + "-01.kismet.netxml")
 
-	ui.Info(fmt.Sprintf("Scanning for %d seconds on %s...", dur, monIface))
+	bandLabel := map[string]string{"abg": "2.4GHz + 5GHz", "bg": "2.4GHz", "a": "5GHz"}[bandFlag]
+	ui.Info(fmt.Sprintf("Scanning %s for %d seconds on %s...", bandLabel, dur, monIface))
 	fmt.Println()
 
 	cmd := exec.Command("airodump-ng",
+		"--band", bandFlag,
 		"--output-format", "csv",
 		"--write", tmpBase,
 		"--write-interval", "2",
@@ -309,11 +395,17 @@ func RunDeauth() error {
 	}
 
 	if channel != "" {
-		exec.Command("iwconfig", monIface, "channel", channel).Run()
+		// Prefer iw (modern) for channel setting; iwconfig fallback for older kernels
+		if err := exec.Command("iw", "dev", monIface, "set", "channel", channel).Run(); err != nil {
+			exec.Command("iwconfig", monIface, "channel", channel).Run()
+		}
 	}
 
 	clientMAC := ui.PromptDefault("Client MAC (blank = broadcast deauth all clients)", "")
 	countStr := ui.PromptDefault("Packet count (0 = continuous)", "0")
+	if countStr == "" {
+		countStr = "0"
+	}
 
 	target := bssid
 	if essid != "" {
@@ -322,6 +414,9 @@ func RunDeauth() error {
 
 	fmt.Println()
 	ui.Info(fmt.Sprintf("Deauthing %s via %s", target, monIface))
+	if channel != "" {
+		ui.Info(fmt.Sprintf("Channel: %s", channel))
+	}
 	ui.Warn("Press Ctrl+C to stop.")
 	ui.Divider()
 
@@ -333,7 +428,7 @@ func RunDeauth() error {
 
 	cmd := exec.Command("aireplay-ng", args...)
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = nil
+	cmd.Stderr = os.Stderr
 
 	eng, _ := engagement.Active()
 	if eng != nil {
@@ -617,10 +712,10 @@ server=8.8.8.8
 
 	hostapdCmd := exec.Command("hostapd", hostapdPath)
 	dnsmasqCmd := exec.Command("dnsmasq", "-C", dnsmasqPath, "--no-daemon")
-	hostapdCmd.Stdout = nil
-	hostapdCmd.Stderr = nil
-	dnsmasqCmd.Stdout = nil
-	dnsmasqCmd.Stderr = nil
+	hostapdCmd.Stdout = os.Stdout
+	hostapdCmd.Stderr = os.Stderr
+	dnsmasqCmd.Stdout = os.Stdout
+	dnsmasqCmd.Stderr = os.Stderr
 
 	if err := hostapdCmd.Start(); err != nil {
 		ui.Fail(fmt.Sprintf("hostapd failed: %v", err))
@@ -861,4 +956,28 @@ func wTrunc(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+// getPhyForIface returns the PHY name (e.g. "phy0") for a given interface using `iw dev`.
+// This is used by the iw monitor mode method to create a monitor interface on the correct PHY,
+// ensuring all bands (2.4GHz + 5GHz) the hardware supports are available.
+func getPhyForIface(iface string) string {
+	out, err := exec.Command("iw", "dev").Output()
+	if err != nil {
+		return ""
+	}
+	currentPhy := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "phy#") {
+			// "phy#0" → "phy0"
+			currentPhy = "phy" + strings.TrimPrefix(trimmed, "phy#")
+		}
+		if strings.HasPrefix(trimmed, "Interface ") {
+			if strings.TrimPrefix(trimmed, "Interface ") == iface {
+				return currentPhy
+			}
+		}
+	}
+	return ""
 }

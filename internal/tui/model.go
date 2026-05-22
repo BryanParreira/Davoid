@@ -90,6 +90,7 @@ type (
 	opsecReadyMsg     struct{ content string }
 	checklistReadyMsg struct{ content string }
 	graphReadyMsg     struct{ content string }
+	playbooksMsg      struct{ list []playbook.Playbook }
 )
 
 func tickCmd() tea.Cmd {
@@ -146,6 +147,7 @@ type Model struct {
 	menuItems      []menuItem
 	subMenuCursor  int
 	subMenuItems   []menuItem
+	hubCursor      int
 	engFields      [3]inputField
 	engFieldCursor int
 	reportContent  string
@@ -170,6 +172,7 @@ type Model struct {
 	timelineItems  []engagement.TimelineEvent
 	timelineScroll int
 	// playbooks
+	playbookList     []playbook.Playbook // built-in + custom
 	playbookCursor   int
 	selectedPlaybook playbook.Playbook
 	// campaign
@@ -218,14 +221,14 @@ func buildMainMenu() []menuItem {
 	return []menuItem{
 		{key: "C", label: "Campaign Mode ★", hint: "guided kill chain · smart suggestions"},
 		{key: "", label: ""},
-		{key: "1", label: "Recon & OSINT",      hint: "scanner · OSINT · web recon"},
-		{key: "2", label: "Network Attacks",    hint: "MITM · traffic intercept"},
-		{key: "3", label: "Social Engineering", hint: "phishing · C2 server"},
-		{key: "4", label: "Exploitation",       hint: "payloads · MSF · shell catcher"},
-		{key: "5", label: "Post-Exploitation",  hint: "looter · cred tester · hash crack"},
-		{key: "6", label: "Active Directory",   hint: "LDAP · Kerberoast · DCSync"},
-		{key: "7", label: "WiFi & Wireless",    hint: "monitor · scan · deauth · handshake"},
-		{key: "8", label: "Advanced",           hint: "AI · cloud · purple team · god mode"},
+		{key: "1", label: fmt.Sprintf("Recon & OSINT  (%d)", len(runner.ByCategory("Recon & OSINT"))),      hint: "scanner · OSINT · web recon"},
+		{key: "2", label: fmt.Sprintf("Network Attacks  (%d)", len(runner.ByCategory("Network Attacks"))),    hint: "MITM · traffic intercept"},
+		{key: "3", label: fmt.Sprintf("Social Engineering  (%d)", len(runner.ByCategory("Social Engineering"))), hint: "phishing · C2 server"},
+		{key: "4", label: fmt.Sprintf("Exploitation  (%d)", len(runner.ByCategory("Exploitation"))),       hint: "payloads · MSF · shell catcher"},
+		{key: "5", label: fmt.Sprintf("Post-Exploitation  (%d)", len(runner.ByCategory("Post-Exploitation"))),  hint: "looter · cred tester · hash crack"},
+		{key: "6", label: fmt.Sprintf("Active Directory  (%d)", len(runner.ByCategory("Active Directory"))),   hint: "LDAP · Kerberoast · DCSync"},
+		{key: "7", label: fmt.Sprintf("WiFi & Wireless  (%d)", len(runner.ByCategory("WiFi & Wireless"))),    hint: "monitor · scan · deauth · handshake"},
+		{key: "8", label: fmt.Sprintf("Advanced  (%d)", len(runner.ByCategory("Advanced"))),           hint: "AI · cloud · purple team · god mode"},
 		{key: "", label: ""},
 		{key: "P", label: "Playbooks ▸",    hint: "pre-built attack chains"},
 		{key: "E", label: "Engagement ▸",   hint: "findings · vault · targets · notes"},
@@ -370,13 +373,11 @@ func loadActiveEng() tea.Cmd {
 
 func loadFindings(engID string) tea.Cmd {
 	return func() tea.Msg {
-		ff, _ := engagement.RecentFindings(50)
 		if engID != "" {
-			ff2, _ := engagement.Findings(engID)
-			if len(ff2) > 0 {
-				ff = ff2
-			}
+			ff, _ := engagement.Findings(engID)
+			return findingsMsg{findings: ff}
 		}
+		ff, _ := engagement.RecentFindings(50)
 		return findingsMsg{findings: ff}
 	}
 }
@@ -385,6 +386,15 @@ func loadEngList() tea.Cmd {
 	return func() tea.Msg {
 		list, _ := engagement.All()
 		return engListMsg{list: list}
+	}
+}
+
+func loadPlaybooks() tea.Cmd {
+	return func() tea.Msg {
+		all := make([]playbook.Playbook, len(playbook.Registry))
+		copy(all, playbook.Registry)
+		all = append(all, playbook.ListCustom()...)
+		return playbooksMsg{list: all}
 	}
 }
 
@@ -522,6 +532,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphScroll = 0
 		return m, nil
 
+	case playbooksMsg:
+		m.playbookList = msg.list
+		m.playbookCursor = 0
+		m.state = statePlaybooks
+		return m, nil
+
 	case errMsg:
 		m.statusMsg = msg.err.Error()
 		m.statusIsError = true
@@ -595,9 +611,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "p", "P":
-			m.state = statePlaybooks
-			m.playbookCursor = 0
-			return m, nil
+			return m, loadPlaybooks()
 		case "e", "E":
 			m.state = stateEngagementHub
 			return m, nil
@@ -754,77 +768,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// ── Engagement Hub ────────────────────────────────────────────────────
 	case stateEngagementHub:
-		noEng := func() bool {
-			if m.activeEng == nil {
-				m.statusMsg = "No active engagement — press [N] to create one."
-				m.statusIsError = true
-				return true
-			}
-			return false
-		}
 		switch key {
-		case "n", "N":
-			m.state = stateEngagementNew
-			m.engFieldCursor = 0
-			for i := range m.engFields {
-				m.engFields[i].value = ""
+		case "up", "k":
+			rows := hubMenuRows()
+			for m.hubCursor > 0 {
+				m.hubCursor--
+				if rows[m.hubCursor].key != "" {
+					break
+				}
 			}
-		case "s", "S":
-			m.state = stateEngagementList
-			return m, loadEngList()
-		case "f", "F":
-			if noEng() {
-				return m, nil
+		case "down", "j":
+			rows := hubMenuRows()
+			for m.hubCursor < len(rows)-1 {
+				m.hubCursor++
+				if rows[m.hubCursor].key != "" {
+					break
+				}
 			}
-			m.state = stateFindings
-			return m, loadFindings(m.activeEng.ID)
-		case "l", "L":
-			if noEng() {
-				return m, nil
+		case "enter", " ":
+			rows := hubMenuRows()
+			if m.hubCursor < len(rows) && rows[m.hubCursor].key != "" {
+				return m.activateHubKey(rows[m.hubCursor].key)
 			}
-			return m, loadTimeline(m.activeEng.ID)
-		case "r", "R":
-			if noEng() {
-				return m, nil
-			}
-			return m, generateReport(m.activeEng.ID)
-		case "v", "V":
-			if noEng() {
-				return m, nil
-			}
-			return m, loadVault(m.activeEng.ID)
-		case "m", "M":
-			if noEng() {
-				return m, nil
-			}
-			return m, loadTargets(m.activeEng.ID)
-		case "o", "O":
-			if noEng() {
-				return m, nil
-			}
-			return m, loadNotes(m.activeEng.ID)
-		case "i", "I":
-			if noEng() {
-				return m, nil
-			}
-			return m, loadOpsecView(m.activeEng.ID)
-		case "k", "K":
-			if noEng() {
-				return m, nil
-			}
-			return m, loadChecklistView(m.activeEng.ID)
-		case "g", "G":
-			if noEng() {
-				return m, nil
-			}
-			return m, loadGraphView(m.activeEng.ID)
-		case "x", "X":
-			if m.activeEng != nil {
-				engagement.ClearActive()
-				m.activeEng = nil
-				m.statusMsg = "Engagement deactivated — no active engagement."
-				m.statusIsError = false
-			}
+		case "n", "N", "s", "S", "f", "F", "l", "L", "r", "R", "v", "V", "m", "M", "o", "O", "i", "I", "K", "g", "G", "x", "X":
+			return m.activateHubKey(key)
 		case "esc", "q", "Q":
 			m.state = stateMenu
 		}
@@ -850,12 +817,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.playbookCursor--
 			}
 		case "down", "j":
-			if m.playbookCursor < len(playbook.Registry)-1 {
+			if m.playbookCursor < len(m.playbookList)-1 {
 				m.playbookCursor++
 			}
 		case "enter", " ":
-			if m.playbookCursor < len(playbook.Registry) {
-				m.selectedPlaybook = playbook.Registry[m.playbookCursor]
+			if m.playbookCursor < len(m.playbookList) {
+				m.selectedPlaybook = m.playbookList[m.playbookCursor]
 				m.state = statePlaybookConfirm
 			}
 		case "esc", "q":
@@ -1075,9 +1042,7 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "P":
-		m.state = statePlaybooks
-		m.playbookCursor = 0
-		return m, nil
+		return m, loadPlaybooks()
 	case "E":
 		m.state = stateEngagementHub
 		return m, nil
@@ -1091,7 +1056,11 @@ func (m Model) openCategoryMenu(category string) (Model, tea.Cmd) {
 	mods := runner.ByCategory(category)
 	items := make([]menuItem, len(mods))
 	for i, mod := range mods {
-		items[i] = menuItem{key: mod.Key, label: fmt.Sprintf("%-20s  %s", mod.Name, runner.ShortDesc(mod.Description, 50))}
+		icon := " "
+		if info, ok := opsec.ModuleNoise[mod.Key]; ok {
+			icon = opsec.NoiseIcon(info.Level)
+		}
+		items[i] = menuItem{key: mod.Key, label: fmt.Sprintf("%s %-20s  %s", icon, mod.Name, runner.ShortDesc(mod.Description, 48))}
 	}
 	m.subMenuItems = items
 	m.subMenuCursor = 0
@@ -1377,7 +1346,76 @@ const bannerSmall = `
 |___/_/ \_|\___/ \___/|___|___/`
 
 func (m Model) banner() string {
+	if m.width > 0 && m.width < 70 {
+		return bannerSmall
+	}
 	return bannerWide
+}
+
+func (m Model) breadcrumb() string {
+	path := []string{}
+	switch m.state {
+	case stateMenu:
+		path = []string{"Main"}
+	case stateCampaign:
+		path = []string{"Main", "Campaign"}
+	case statePlaybooks:
+		path = []string{"Main", "Playbooks"}
+	case statePlaybookConfirm:
+		path = []string{"Main", "Playbooks", m.selectedPlaybook.Name}
+	case stateModuleList:
+		path = []string{"Main", "Modules"}
+	case stateModuleConfirm:
+		path = []string{"Main", "Modules", m.selectedModule.Name}
+	case stateHelp:
+		path = []string{"Main", "Help"}
+	case stateEngagementHub:
+		path = []string{"Main", "Engagement Hub"}
+	case stateEngagementNew:
+		path = []string{"Main", "Engagement Hub", "New"}
+	case stateEngagementList:
+		path = []string{"Main", "Engagement Hub", "Switch"}
+	case stateFindings:
+		path = []string{"Main", "Engagement Hub", "Findings"}
+	case stateTimeline:
+		path = []string{"Main", "Engagement Hub", "Timeline"}
+	case stateReport:
+		path = []string{"Main", "Engagement Hub", "Report"}
+	case stateVault:
+		path = []string{"Main", "Engagement Hub", "Vault"}
+	case stateTargets:
+		path = []string{"Main", "Engagement Hub", "Targets"}
+	case stateNotes, stateNoteAdd:
+		path = []string{"Main", "Engagement Hub", "Notes"}
+	case stateOpsec:
+		path = []string{"Main", "Engagement Hub", "OPSEC Score"}
+	case stateChecklist:
+		path = []string{"Main", "Engagement Hub", "Checklist"}
+	case stateGraph:
+		path = []string{"Main", "Engagement Hub", "Attack Graph"}
+	default:
+		path = []string{"Main"}
+	}
+	parts := make([]string, len(path))
+	for i, p := range path {
+		if i == len(path)-1 {
+			parts[i] = StyleValue.Render(p)
+		} else {
+			parts[i] = StyleHelp.Render(p)
+		}
+	}
+	return "  " + strings.Join(parts, StyleHelp.Render(" ▸ "))
+}
+
+func (m Model) header(title string) string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n")
+	sb.WriteString(m.breadcrumb() + "\n")
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n")
+	if title != "" {
+		sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+	}
+	return sb.String()
 }
 
 func (m Model) viewMainMenu() string {
@@ -1387,6 +1425,7 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleBanner.Render(m.banner()))
 	sb.WriteString("\n")
 	sb.WriteString(StyleSubtitle.Render("  ghost in the net  ·  operator-grade red team engagement platform") + "\n")
+	sb.WriteString(m.breadcrumb() + "\n")
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n")
 
 	// Network info + version
@@ -1529,12 +1568,12 @@ func (m Model) viewMainMenu() string {
 
 func (m Model) viewModuleList() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
 
 	if len(m.subMenuItems) == 0 {
+		sb.WriteString(m.header(""))
 		sb.WriteString(StyleError.Render("  No modules in this category.\n"))
 	} else {
-		sb.WriteString(StyleMenuTitle.Render("  Select Module") + "\n\n")
+		sb.WriteString(m.header("  Select Module"))
 		maxVisible := m.height - 14
 		if maxVisible < 4 {
 			maxVisible = 4
@@ -1569,8 +1608,7 @@ func (m Model) viewModuleList() string {
 
 func (m Model) viewModuleConfirm() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
-	sb.WriteString(StyleMenuTitle.Render("  Launch Module") + "\n\n")
+	sb.WriteString(m.header("  Launch Module"))
 	sb.WriteString("  " + StyleLabel.Render("Module:  ") + StyleValue.Render(m.selectedModule.Name) + "\n")
 	sb.WriteString("  " + StyleLabel.Render("Category: ") + StyleValue.Render(m.selectedModule.Category) + "\n\n")
 	sb.WriteString("  " + StyleMenuItem.Render(m.selectedModule.Description) + "\n\n")
@@ -1592,8 +1630,7 @@ func (m Model) viewModuleConfirm() string {
 
 func (m Model) viewNewEngagement() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
-	sb.WriteString(StyleMenuTitle.Render("  New Engagement") + "\n\n")
+	sb.WriteString(m.header("  New Engagement"))
 
 	for i, f := range m.engFields {
 		selected := i == m.engFieldCursor
@@ -1620,8 +1657,7 @@ func (m Model) viewNewEngagement() string {
 
 func (m Model) viewEngagementList() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
-	sb.WriteString(StyleMenuTitle.Render("  Engagement Manager") + "\n\n")
+	sb.WriteString(m.header("  Engagement Manager"))
 
 	if len(m.allEngagements) == 0 {
 		sb.WriteString(StyleLabel.Render("  No engagements yet.\n\n"))
@@ -1659,13 +1695,13 @@ func (m Model) viewEngagementList() string {
 
 func (m Model) viewFindings() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 
 	title := "  Recent Findings"
 	if m.activeEng != nil {
 		title = fmt.Sprintf("  Findings — %s", m.activeEng.Name)
 	}
-	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+	sb.WriteString(StyleMenuTitle.Render(title) + "  " + fmtScroll(m.findingScroll, len(m.findings)) + "\n\n")
 
 	if len(m.findings) == 0 {
 		sb.WriteString(StyleLabel.Render("  No findings recorded yet.\n"))
@@ -1702,7 +1738,7 @@ func (m Model) viewFindings() string {
 
 func (m Model) viewReport() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 	sb.WriteString(StyleSuccess.Render("  ✓ Report Generated") + "\n")
 	if m.reportPath != "" {
 		sb.WriteString(StyleLabel.Render("  Saved to: ") + StyleValue.Render(m.reportPath) + "\n\n")
@@ -1736,8 +1772,7 @@ func (m Model) viewReport() string {
 
 func (m Model) viewHelp() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
-	sb.WriteString(StyleMenuTitle.Render("  Keyboard Reference") + "\n\n")
+	sb.WriteString(m.header("  Keyboard Reference"))
 
 	help := []struct{ k, d string }{
 		{"C", "Campaign Mode — guided kill chain with smart suggestions"},
@@ -1787,7 +1822,7 @@ func (m Model) viewHelp() string {
 
 func (m Model) viewEngagementHub() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 	sb.WriteString(StyleMenuTitle.Render("  Engagement Hub") + "\n")
 
 	if m.activeEng != nil {
@@ -1802,39 +1837,31 @@ func (m Model) viewEngagementHub() string {
 		sb.WriteString("  " + StyleEngagementNone.Render("no active engagement"))
 	}
 	sb.WriteString("\n\n")
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 50)) + "\n\n")
 
-	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 44)) + "\n\n")
-
-	rows := []struct{ k, label, desc string }{
-		{"N", "New Engagement", "start a new op"},
-		{"S", "Switch / List", "pick from all engagements"},
-		{"X", "Deactivate", "clear active — start fresh"},
-		{"", "", ""},
-		{"F", "Findings", "all findings for active engagement"},
-		{"L", "Timeline", "chronological activity log"},
-		{"R", "Report", "generate Markdown / PDF report"},
-		{"", "", ""},
-		{"V", "Credential Vault", "harvested credentials"},
-		{"M", "Target Map", "network topology + discovered hosts"},
-		{"O", "Notes", "engagement notes"},
-		{"", "", ""},
-		{"I", "OPSEC Score", "module noise rating for this op"},
-		{"K", "PTES Checklist", "methodology progress tracker"},
-		{"G", "Attack Graph", "module execution tree"},
-	}
-
-	for _, r := range rows {
-		if r.k == "" {
+	rows := hubMenuRows()
+	for i, r := range rows {
+		if r.key == "" {
 			sb.WriteString("\n")
 			continue
 		}
-		key := StyleMenuKey.Render(fmt.Sprintf("  [%s]", r.k))
-		label := StyleMenuItem.Render(fmt.Sprintf("  %-20s", r.label))
+		selected := m.hubCursor == i
+		cursor := "  "
+		if selected {
+			cursor = StyleCyan("> ")
+		}
+		key := StyleMenuKey.Render(fmt.Sprintf("  [%s]", r.key))
+		var label string
+		if selected {
+			label = StyleMenuItemSelected.Render(fmt.Sprintf("  %-20s", r.label) + " ")
+		} else {
+			label = StyleMenuItem.Render(fmt.Sprintf("  %-20s", r.label))
+		}
 		desc := StyleHelp.Render(r.desc)
-		sb.WriteString(key + label + desc + "\n")
+		sb.WriteString(cursor + key + label + desc + "\n")
 	}
 
-	sb.WriteString("\n" + StyleDivider.Render("  "+strings.Repeat("─", 44)) + "\n")
+	sb.WriteString("\n" + StyleDivider.Render("  "+strings.Repeat("─", 50)) + "\n")
 
 	if m.statusMsg != "" {
 		if m.statusIsError {
@@ -1844,19 +1871,19 @@ func (m Model) viewEngagementHub() string {
 		}
 	}
 
-	sb.WriteString("\n" + StyleHelp.Render("  key to select  ·  [X] deactivate engagement  ·  [H] home  ·  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  or press key directly  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
 func (m Model) viewTimeline() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 
 	title := "  Timeline"
 	if m.activeEng != nil {
 		title = fmt.Sprintf("  Timeline — %s", m.activeEng.Name)
 	}
-	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+	sb.WriteString(StyleMenuTitle.Render(title) + "  " + fmtScroll(m.timelineScroll, len(m.timelineItems)) + "\n\n")
 
 	if len(m.timelineItems) == 0 {
 		sb.WriteString(StyleLabel.Render("  No activity recorded yet.\n"))
@@ -1894,13 +1921,13 @@ func (m Model) viewTimeline() string {
 
 func (m Model) viewVault() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 
 	title := "  Credential Vault"
 	if m.activeEng != nil {
 		title = fmt.Sprintf("  Credential Vault — %s", m.activeEng.Name)
 	}
-	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+	sb.WriteString(StyleMenuTitle.Render(title) + "  " + fmtScroll(m.vaultScroll, len(m.vaultCreds)) + "\n\n")
 
 	if len(m.vaultCreds) == 0 {
 		sb.WriteString(StyleLabel.Render("  No credentials captured yet.\n"))
@@ -1943,13 +1970,13 @@ func (m Model) viewVault() string {
 
 func (m Model) viewTargets() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 
 	title := "  Target Inventory"
 	if m.activeEng != nil {
 		title = fmt.Sprintf("  Target Inventory — %s", m.activeEng.Name)
 	}
-	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+	sb.WriteString(StyleMenuTitle.Render(title) + "  " + fmtScroll(m.targetScroll, len(m.targetHosts)) + "\n\n")
 
 	if len(m.targetHosts) == 0 {
 		sb.WriteString(StyleLabel.Render("  No hosts discovered yet.\n"))
@@ -1985,7 +2012,7 @@ func (m Model) viewTargets() string {
 
 func (m Model) viewNotes() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 
 	title := "  Engagement Notes"
 	if m.activeEng != nil {
@@ -2027,12 +2054,11 @@ func (m Model) viewNotes() string {
 
 func (m Model) viewPlaybooks() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
-	sb.WriteString(StyleMenuTitle.Render("  Attack Playbooks") + "\n")
+	sb.WriteString(m.header("  Attack Playbooks"))
 	sb.WriteString(StyleHelp.Render("  Pre-built module chains — one key launches a full kill chain") + "\n\n")
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n\n")
 
-	for i, pb := range playbook.Registry {
+	for i, pb := range m.playbookList {
 		cat := StyleHelp.Render(fmt.Sprintf("[%s]", pb.Category))
 		label := fmt.Sprintf("  %-22s %s", pb.Name, cat)
 		desc := StyleHelp.Render(truncate(pb.Description, 55))
@@ -2052,8 +2078,7 @@ func (m Model) viewPlaybooks() string {
 func (m Model) viewPlaybookConfirm() string {
 	var sb strings.Builder
 	pb := m.selectedPlaybook
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
-	sb.WriteString(StyleMenuTitle.Render("  Launch Playbook") + "\n\n")
+	sb.WriteString(m.header("  Launch Playbook"))
 	sb.WriteString("  " + StyleLabel.Render("Name:      ") + StyleValue.Render(pb.Name) + "\n")
 	sb.WriteString("  " + StyleLabel.Render("Category:  ") + StyleValue.Render(pb.Category) + "\n")
 	sb.WriteString("  " + StyleLabel.Render("Modules:   ") + StyleValue.Render(fmt.Sprintf("%d steps", len(pb.Modules))) + "\n\n")
@@ -2083,7 +2108,7 @@ func (m Model) viewCampaign() string {
 	var sb strings.Builder
 
 	// Header
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n")
+	sb.WriteString(m.header(""))
 	title := "  CAMPAIGN MODE"
 	if m.activeEng != nil {
 		title += "  —  " + m.activeEng.Name
@@ -2186,7 +2211,7 @@ func (m Model) viewCampaign() string {
 
 func (m Model) viewOpsec() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 	title := "  OPSEC Score"
 	if m.activeEng != nil {
 		title = fmt.Sprintf("  OPSEC Score — %s", m.activeEng.Name)
@@ -2232,7 +2257,7 @@ func (m Model) viewOpsec() string {
 
 func (m Model) viewChecklist() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 	title := "  PTES Checklist"
 	if m.activeEng != nil {
 		title = fmt.Sprintf("  PTES Checklist — %s", m.activeEng.Name)
@@ -2274,7 +2299,7 @@ func (m Model) viewChecklist() string {
 
 func (m Model) viewGraph() string {
 	var sb strings.Builder
-	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	sb.WriteString(m.header(""))
 	title := "  Attack Graph"
 	if m.activeEng != nil {
 		title = fmt.Sprintf("  Attack Graph — %s", m.activeEng.Name)
@@ -2310,9 +2335,131 @@ func (m Model) viewGraph() string {
 	return sb.String()
 }
 
+func (m Model) activateHubKey(key string) (tea.Model, tea.Cmd) {
+	noEng := func() bool { return m.activeEng == nil }
+	switch strings.ToUpper(key) {
+	case "N":
+		m.state = stateEngagementNew
+		m.engFieldCursor = 0
+		for i := range m.engFields {
+			m.engFields[i].value = ""
+		}
+		return m, nil
+	case "S":
+		m.state = stateEngagementList
+		return m, loadEngList()
+	case "F":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		m.state = stateFindings
+		return m, loadFindings(m.activeEng.ID)
+	case "L":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadTimeline(m.activeEng.ID)
+	case "R":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, generateReport(m.activeEng.ID)
+	case "V":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadVault(m.activeEng.ID)
+	case "M":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadTargets(m.activeEng.ID)
+	case "O":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadNotes(m.activeEng.ID)
+	case "I":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadOpsecView(m.activeEng.ID)
+	case "K":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadChecklistView(m.activeEng.ID)
+	case "G":
+		if noEng() {
+			m.statusMsg = "No active engagement."
+			m.statusIsError = true
+			return m, nil
+		}
+		return m, loadGraphView(m.activeEng.ID)
+	case "X":
+		if m.activeEng != nil {
+			engagement.ClearActive()
+			m.activeEng = nil
+			m.statusMsg = "Engagement deactivated."
+			m.statusIsError = false
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
+
+type hubRow struct {
+	key   string
+	label string
+	desc  string
+}
+
+func hubMenuRows() []hubRow {
+	return []hubRow{
+		{"N", "New Engagement", "start a new op"},
+		{"S", "Switch / List", "pick from all engagements"},
+		{"X", "Deactivate", "clear active — start fresh"},
+		{"", "", ""},
+		{"F", "Findings", "all findings for active engagement"},
+		{"L", "Timeline", "chronological activity log"},
+		{"R", "Report", "generate Markdown / PDF report"},
+		{"", "", ""},
+		{"V", "Credential Vault", "harvested credentials"},
+		{"M", "Target Map", "network topology + discovered hosts"},
+		{"O", "Notes", "engagement notes"},
+		{"", "", ""},
+		{"I", "OPSEC Score", "module noise rating for this op"},
+		{"K", "PTES Checklist", "methodology progress tracker"},
+		{"G", "Attack Graph", "module execution tree"},
+	}
+}
+
+func fmtScroll(current, total int) string {
+	if total == 0 {
+		return ""
+	}
+	return StyleHelp.Render(fmt.Sprintf("  %d/%d", current+1, total))
+}
 
 func StyleCyan(s string) string {
 	return lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render(s)

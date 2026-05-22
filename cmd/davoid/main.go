@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -15,13 +16,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"runtime"
-
+	"github.com/bryanparreira/davoid/internal/config"
+	"github.com/bryanparreira/davoid/internal/cvss"
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/auditor"
 	"github.com/bryanparreira/davoid/internal/modules/playbook"
+	"github.com/bryanparreira/davoid/internal/opsec"
 	"github.com/bryanparreira/davoid/internal/runner"
+	"github.com/bryanparreira/davoid/internal/snapshot"
 	"github.com/bryanparreira/davoid/internal/targets"
+	"github.com/bryanparreira/davoid/internal/templates"
 	"github.com/bryanparreira/davoid/internal/tui"
 	"github.com/bryanparreira/davoid/internal/vault"
 )
@@ -63,7 +67,7 @@ func launchTUI() error {
 	return nil
 }
 
-var version = "2.3.1" // overridden by -ldflags "-X main.version=..."
+var version = "2.4.0" // overridden by -ldflags "-X main.version=..."
 
 var rootCmd = &cobra.Command{
 	Use:   "davoid",
@@ -491,7 +495,7 @@ var playbookCmd = &cobra.Command{
 
 var playbookListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all available playbooks",
+	Short: "List all available playbooks (built-in and custom YAML)",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println()
 		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
@@ -501,8 +505,18 @@ var playbookListCmd = &cobra.Command{
 			fmt.Fprintf(w, "  %-22s\t%-22s\t%-18s\t%s\n",
 				pb.Key, pb.Name, pb.Category, truncate(pb.Description, 55))
 		}
+		// Custom YAML playbooks from ~/.davoid/playbooks/
+		customs := playbook.ListCustom()
+		if len(customs) > 0 {
+			fmt.Fprintln(w, "  ───\t────\t────────\t───────────")
+			for _, pb := range customs {
+				fmt.Fprintf(w, "  %-22s\t%-22s\t%-18s\t%s\n",
+					pb.Key, pb.Name, pb.Category, truncate(pb.Description, 55))
+			}
+		}
 		w.Flush()
 		fmt.Println()
+		fmt.Printf("  Custom playbooks: ~/.davoid/playbooks/<name>.yaml\n\n")
 	},
 }
 
@@ -519,6 +533,496 @@ var playbookRunCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return playbook.Run(args[0])
+	},
+}
+
+// ── Config command ────────────────────────────────────────────────────────────
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Manage Davoid operator configuration",
+}
+
+var configSetCmd = &cobra.Command{
+	Use:   "set <key> <value>",
+	Short: "Set a configuration value",
+	Long: `Set a configuration value by key.
+
+Available keys:
+  webhook.url     Webhook URL for notifications (Discord, Slack, or ntfy.sh)
+  webhook.events  Comma-separated events: shell_connect,creds_captured,finding_critical,handshake_captured,hash_cracked
+
+Examples:
+  davoid config set webhook.url https://discord.com/api/webhooks/...
+  davoid config set webhook.events shell_connect,creds_captured
+  davoid config set webhook.events ""    # clear events filter (all events)`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := config.Set(args[0], args[1]); err != nil {
+			return err
+		}
+		fmt.Printf("\n  ✓  %s = %s\n\n", args[0], args[1])
+		return nil
+	},
+}
+
+var configGetCmd = &cobra.Command{
+	Use:   "get <key>",
+	Short: "Get a configuration value",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		val, err := config.Get(args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", val)
+		return nil
+	},
+}
+
+var configListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all configuration values",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println()
+		for _, line := range config.All() {
+			fmt.Printf("  %s\n", line)
+		}
+		fmt.Println()
+	},
+}
+
+// ── OPSEC command ─────────────────────────────────────────────────────────────
+
+var opsecCmd = &cobra.Command{
+	Use:   "opsec",
+	Short: "Show OPSEC noise score for the active engagement",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		eng, err := engagement.Active()
+		if err != nil || eng == nil {
+			return fmt.Errorf("no active engagement — run 'davoid new <name>' first")
+		}
+
+		findings, err := engagement.Findings(eng.ID)
+		if err != nil {
+			return err
+		}
+
+		seen := map[string]bool{}
+		var moduleKeys []string
+		for _, f := range findings {
+			if f.Module != "" && !seen[f.Module] {
+				seen[f.Module] = true
+				moduleKeys = append(moduleKeys, f.Module)
+			}
+		}
+
+		score, label, breakdown := opsec.Score(moduleKeys)
+		color := opsec.LabelColor(label)
+		reset := "\033[0m"
+
+		fmt.Println()
+		fmt.Printf("  OPSEC Score — %s\n", eng.Name)
+		fmt.Printf("  %s\n", strings.Repeat("─", 65))
+		fmt.Printf("  Overall: %s%s%s  %s\n", color, opsec.ScoreBar(score), reset, color+label+reset)
+		fmt.Println()
+
+		if len(breakdown) == 0 {
+			fmt.Println("  No modules run yet.")
+		} else {
+			fmt.Printf("  %-22s  %-8s  %s\n", "MODULE", "NOISE", "REASON")
+			fmt.Printf("  %s\n", strings.Repeat("─", 65))
+			for _, op := range breakdown {
+				icon := opsec.NoiseIcon(op.Level)
+				fmt.Printf("  %s %-20s  %-8s  %s\n",
+					icon, op.ModuleKey, op.Level.String(), truncate(op.Reason, 38))
+			}
+		}
+		fmt.Println()
+		return nil
+	},
+}
+
+// ── Checklist command ─────────────────────────────────────────────────────────
+
+// checklistPhase maps PTES phases to module keys.
+type checklistPhase struct {
+	Name    string
+	Modules []string
+}
+
+var phaseDefs = []checklistPhase{
+	{
+		Name:    "Intelligence Gathering",
+		Modules: []string{"osint", "scanner", "web_recon", "cloud_ops"},
+	},
+	{
+		Name:    "Threat Modeling / Vuln Analysis",
+		Modules: []string{"scanner", "ad_ops", "msf_engine"},
+	},
+	{
+		Name:    "Exploitation",
+		Modules: []string{"payloads", "crypt_keeper", "msf_engine", "phishing", "catcher"},
+	},
+	{
+		Name:    "Post-Exploitation",
+		Modules: []string{"looter", "persistence", "cred_tester", "ghost_hub"},
+	},
+	{
+		Name:    "Network / MITM",
+		Modules: []string{"mitm", "sniff", "bruteforce"},
+	},
+	{
+		Name:    "Lateral Movement / AD",
+		Modules: []string{"ad_ops", "cred_tester", "bruteforce"},
+	},
+	{
+		Name:    "Reporting",
+		Modules: []string{"purple_team"},
+	},
+}
+
+var checklistCmd = &cobra.Command{
+	Use:   "checklist",
+	Short: "Show methodology checklist for the active engagement (PTES phases)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		eng, err := engagement.Active()
+		if err != nil || eng == nil {
+			return fmt.Errorf("no active engagement — run 'davoid new <name>' first")
+		}
+
+		findings, _ := engagement.Findings(eng.ID)
+		used := map[string]bool{}
+		for _, f := range findings {
+			if f.Module != "" {
+				used[f.Module] = true
+			}
+		}
+
+		fmt.Println()
+		fmt.Printf("  Methodology Checklist — %s\n", eng.Name)
+		fmt.Printf("  %s\n\n", strings.Repeat("─", 65))
+
+		totalModules := 0
+		totalDone := 0
+
+		for _, phase := range phaseDefs {
+			done := 0
+			for _, m := range phase.Modules {
+				if used[m] {
+					done++
+				}
+			}
+			totalModules += len(phase.Modules)
+			totalDone += done
+
+			pct := done * 100 / len(phase.Modules)
+			bar := progressBar(pct, 12)
+
+			fmt.Printf("  Phase: %s\n", phase.Name)
+			fmt.Printf("  %s  %d/%d\n", bar, done, len(phase.Modules))
+			for _, m := range phase.Modules {
+				icon := "✗"
+				color := "\033[31m"
+				if used[m] {
+					icon = "✓"
+					color = "\033[32m"
+				}
+				fmt.Printf("    %s%s %-20s\033[0m\n", color, icon, m)
+			}
+			fmt.Println()
+		}
+
+		totalPct := 0
+		if totalModules > 0 {
+			totalPct = totalDone * 100 / totalModules
+		}
+		fmt.Printf("  Coverage: %d%%  (%d/%d modules executed)\n", totalPct, totalDone, totalModules)
+		if totalPct < 50 {
+			fmt.Printf("  Run 'davoid modules' to see all available modules.\n")
+		}
+		fmt.Println()
+		return nil
+	},
+}
+
+func progressBar(pct, width int) string {
+	filled := pct * width / 100
+	bar := ""
+	for i := 0; i < width; i++ {
+		if i < filled {
+			bar += "█"
+		} else {
+			bar += "░"
+		}
+	}
+	return "[" + bar + "]"
+}
+
+// ── Attack graph command ──────────────────────────────────────────────────────
+
+var graphCmd = &cobra.Command{
+	Use:   "graph",
+	Short: "Render ASCII attack graph for the active engagement",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		eng, err := engagement.Active()
+		if err != nil || eng == nil {
+			return fmt.Errorf("no active engagement — run 'davoid new <name>' first")
+		}
+
+		findings, _ := engagement.Findings(eng.ID)
+		hosts, _ := targets.List(eng.ID)
+		creds, _ := vault.List(eng.ID)
+
+		fmt.Println()
+		fmt.Printf("  ATTACK GRAPH — %s\n", eng.Name)
+		if eng.Target != "" {
+			fmt.Printf("  Target scope: %s\n", eng.Target)
+		}
+		fmt.Printf("  %s\n\n", strings.Repeat("─", 65))
+
+		if len(hosts) == 0 && len(findings) == 0 {
+			fmt.Println("  No data yet. Run some modules first.")
+			fmt.Println()
+			return nil
+		}
+
+		// Root node
+		scopeLabel := eng.Target
+		if scopeLabel == "" {
+			scopeLabel = "Target Scope"
+		}
+		fmt.Printf("  [%s]\n", scopeLabel)
+
+		// Group findings by module
+		byModule := map[string][]*engagement.Finding{}
+		for _, f := range findings {
+			byModule[f.Module] = append(byModule[f.Module], f)
+		}
+
+		modKeys := make([]string, 0)
+		seenMods := map[string]bool{}
+		for _, f := range findings {
+			if !seenMods[f.Module] {
+				seenMods[f.Module] = true
+				modKeys = append(modKeys, f.Module)
+			}
+		}
+
+		for mi, mod := range modKeys {
+			connector := "├──"
+			if mi == len(modKeys)-1 && len(hosts) == 0 {
+				connector = "└──"
+			}
+
+			modName := mod
+			for _, m := range runner.Registry {
+				if m.Key == mod {
+					modName = m.Name
+					break
+				}
+			}
+			fmt.Printf("  │\n  %s [%s]\n", connector, modName)
+
+			modFindings := byModule[mod]
+			for fi, f := range modFindings {
+				fc := "│   ├──"
+				if fi == len(modFindings)-1 {
+					fc = "│   └──"
+				}
+				sev := f.Severity
+				sevColor := ""
+				switch sev {
+				case "CRITICAL":
+					sevColor = "\033[35m"
+				case "HIGH":
+					sevColor = "\033[31m"
+				case "MEDIUM":
+					sevColor = "\033[33m"
+				default:
+					sevColor = "\033[34m"
+				}
+				fmt.Printf("  %s %s[%s]\033[0m %s\n", fc, sevColor, sev, truncate(f.Title, 45))
+				if f.Target != "" {
+					fmt.Printf("  │       → %s\n", f.Target)
+				}
+			}
+		}
+
+		// Hosts section
+		if len(hosts) > 0 {
+			fmt.Printf("  │\n  └── [Discovered Hosts]\n")
+			for hi, h := range hosts {
+				hc := "      ├──"
+				if hi == len(hosts)-1 {
+					hc = "      └──"
+				}
+				label := h.IP
+				if h.Hostname != "" {
+					label = h.IP + " / " + h.Hostname
+				}
+				if h.OS != "" {
+					label += " (" + h.OS + ")"
+				}
+				fmt.Printf("  %s %s\n", hc, label)
+				if len(h.Ports) > 0 && h.Ports[0] != "" {
+					ports := h.Ports
+					if len(ports) > 5 {
+						ports = append(ports[:5], fmt.Sprintf("+%d", len(h.Ports)-5))
+					}
+					fmt.Printf("           ports: %s\n", strings.Join(ports, ", "))
+				}
+			}
+		}
+
+		// Credentials summary
+		if len(creds) > 0 {
+			fmt.Printf("\n  Captured Credentials: %d\n", len(creds))
+			for _, c := range creds {
+				fmt.Printf("  ● %s @ %s  [%s]\n", c.Username, c.Host, c.Kind)
+			}
+		}
+
+		fmt.Println()
+		return nil
+	},
+}
+
+// ── Finding templates command ─────────────────────────────────────────────────
+
+var templateCmd = &cobra.Command{
+	Use:   "template",
+	Short: "Manage and apply finding templates with CVSS scoring",
+}
+
+var templateListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all available finding templates",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println()
+		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "  KEY\tNAME\tSEVERITY\tCVSS")
+		fmt.Fprintln(w, "  ───\t────\t────────\t────")
+		for _, t := range templates.Registry {
+			score := cvss.Calculate(t.CVSS)
+			fmt.Fprintf(w, "  %-20s\t%-30s\t%-10s\t%.1f\n",
+				t.Key, t.Name, t.Severity, score)
+		}
+		w.Flush()
+		fmt.Println()
+	},
+}
+
+var templateShowCmd = &cobra.Command{
+	Use:   "show <key>",
+	Short: "Show a finding template",
+	Args:  cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return templates.Keys(), cobra.ShellCompDirectiveNoFileComp
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		t := templates.Get(args[0])
+		if t == nil {
+			return fmt.Errorf("template not found: %s\n\nRun 'davoid template list' to see all templates.", args[0])
+		}
+		target, _ := cmd.Flags().GetString("target")
+		fmt.Print(templates.Render(t, target))
+		return nil
+	},
+}
+
+var templateApplyCmd = &cobra.Command{
+	Use:   "apply <key>",
+	Short: "Apply a template as a finding in the active engagement",
+	Args:  cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return templates.Keys(), cobra.ShellCompDirectiveNoFileComp
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		t := templates.Get(args[0])
+		if t == nil {
+			return fmt.Errorf("template not found: %s", args[0])
+		}
+		target, _ := cmd.Flags().GetString("target")
+		mod, _ := cmd.Flags().GetString("module")
+		evidence, _ := cmd.Flags().GetString("evidence")
+
+		title := strings.ReplaceAll(t.Title, "[TARGET]", target)
+		title = strings.ReplaceAll(title, "[PARAMETER]", "[parameter]")
+
+		score := cvss.Calculate(t.CVSS)
+		sev := cvss.Severity(score)
+
+		f, err := engagement.LogFinding("", mod, target, title, t.Description, sev, evidence)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("\n  ✓  Finding logged: %s\n", f.Title)
+		fmt.Printf("     Severity: %s  |  CVSS: %.1f  |  ID: %s\n\n", sev, score, f.ID[:8])
+		return nil
+	},
+}
+
+// ── Engagement snapshot export / import ───────────────────────────────────────
+
+var exportCmd = &cobra.Command{
+	Use:   "export [engagement-id]",
+	Short: "Export an engagement snapshot to a portable file",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		out, _ := cmd.Flags().GetString("out")
+		password, _ := cmd.Flags().GetString("password")
+
+		var engID string
+		if len(args) > 0 {
+			engID = args[0]
+		} else {
+			eng, err := engagement.Active()
+			if err != nil || eng == nil {
+				return fmt.Errorf("no active engagement — pass an ID or run 'davoid new <name>'")
+			}
+			engID = eng.ID
+		}
+
+		if out == "" {
+			out = "davoid-" + engID[:8] + ".snap"
+		}
+
+		if err := snapshot.Export(engID, out, password); err != nil {
+			return err
+		}
+
+		if password != "" {
+			fmt.Printf("\n  ✓  Snapshot exported (AES-256 encrypted): %s\n", out)
+		} else {
+			fmt.Printf("\n  ✓  Snapshot exported: %s\n", out)
+			fmt.Printf("  Tip: use --password to encrypt the archive.\n")
+		}
+		fmt.Printf("  Share with: davoid import %s\n\n", out)
+		return nil
+	},
+}
+
+var importCmd = &cobra.Command{
+	Use:   "import <file>",
+	Short: "Import an engagement snapshot",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		password, _ := cmd.Flags().GetString("password")
+
+		eng, err := snapshot.Import(args[0], password)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("\n  ✓  Snapshot imported\n")
+		fmt.Printf("     Name:   %s\n", eng.Name)
+		fmt.Printf("     ID:     %s\n", eng.ID)
+		if eng.Target != "" {
+			fmt.Printf("     Target: %s\n", eng.Target)
+		}
+		fmt.Printf("\n  Run 'davoid list' to see all engagements.\n\n")
+		return nil
 	},
 }
 
@@ -621,12 +1125,36 @@ func init() {
 	lootCmd.Flags().Bool("reveal", false, "Show plaintext secrets (default: masked)")
 	lootCmd.Flags().Bool("json", false, "Output as JSON")
 
+	// Template sub-commands
+	templateShowCmd.Flags().String("target", "", "Target to substitute in template title")
+	templateApplyCmd.Flags().String("target", "", "Affected target")
+	templateApplyCmd.Flags().String("module", "", "Module that discovered the finding")
+	templateApplyCmd.Flags().String("evidence", "", "Supporting evidence")
+	templateCmd.AddCommand(templateListCmd, templateShowCmd, templateApplyCmd)
+
+	// Config sub-commands
+	configCmd.AddCommand(configSetCmd, configGetCmd, configListCmd)
+
+	// Playbook sub-commands
 	playbookCmd.AddCommand(playbookListCmd, playbookRunCmd)
+
+	// Export / import flags
+	exportCmd.Flags().String("out", "", "Output file path (default: davoid-<id>.snap)")
+	exportCmd.Flags().String("password", "", "Encrypt snapshot with AES-256 password")
+	importCmd.Flags().String("password", "", "Decryption password (if snapshot was encrypted)")
 
 	rootCmd.AddCommand(
 		newCmd, listCmd, reportCmd, findingCmd,
 		versionCmd, modulesCmd, runCmd, doctorCmd,
 		lootCmd, playbookCmd,
+		// New commands
+		configCmd,
+		opsecCmd,
+		checklistCmd,
+		graphCmd,
+		templateCmd,
+		exportCmd,
+		importCmd,
 	)
 }
 

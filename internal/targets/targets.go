@@ -85,6 +85,23 @@ func IPs(engagementID string) []string {
 	return ips
 }
 
+// ImportHost inserts a host by its original ID (upsert-ignore).
+// Used by the snapshot import system.
+func ImportHost(h *Host, engagementID string) error {
+	db := engagement.DB()
+	if db == nil {
+		return fmt.Errorf("targets: db not initialized")
+	}
+	portStr := strings.Join(h.Ports, ",")
+	_, err := db.Exec(`INSERT OR IGNORE INTO hosts
+		(id, engagement_id, ip, hostname, os, ports, discovered_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		h.ID, engagementID, h.IP, h.Hostname, h.OS, portStr,
+		h.DiscoveredAt.Format(time.RFC3339),
+	)
+	return err
+}
+
 // Count returns how many hosts are saved for an engagement.
 func Count(engagementID string) int {
 	db := engagement.DB()

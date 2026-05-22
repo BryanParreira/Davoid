@@ -9,6 +9,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/notify"
 )
 
 func Run() error {
@@ -55,6 +56,9 @@ func Run() error {
 				fmt.Sprintf("Connected at %s", ts.Format(time.RFC3339)),
 				"CRITICAL", "")
 		}
+		notify.Fire(notify.EventShellConnect,
+			"Shell Connected",
+			fmt.Sprintf("Reverse shell from %s at %s", remoteAddr, ts.Format("15:04:05")))
 
 		handleShell(conn)
 		conn.Close()

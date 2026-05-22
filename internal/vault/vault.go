@@ -82,6 +82,22 @@ func Pairs(engagementID string) (usernames, secrets []string) {
 	return
 }
 
+// ImportCredential inserts a credential by its original ID (upsert-ignore).
+// Used by the snapshot import system.
+func ImportCredential(c *Credential, engagementID string) error {
+	db := engagement.DB()
+	if db == nil {
+		return fmt.Errorf("vault: db not initialized")
+	}
+	_, err := db.Exec(`INSERT OR IGNORE INTO credentials
+		(id, engagement_id, source, host, username, secret, kind, captured_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		c.ID, engagementID, c.Source, c.Host, c.Username, c.Secret, c.Kind,
+		c.CapturedAt.Format(time.RFC3339),
+	)
+	return err
+}
+
 // Count returns how many creds are saved for an engagement.
 func Count(engagementID string) int {
 	db := engagement.DB()

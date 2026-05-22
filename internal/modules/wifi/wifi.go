@@ -16,6 +16,7 @@ import (
 
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/notify"
 	"github.com/bryanparreira/davoid/internal/vault"
 )
 
@@ -737,6 +738,9 @@ outer:
 
 	if captureConfirmed {
 		ui.Success(fmt.Sprintf("WPA handshake captured! → %s", lastCapturePath))
+		notify.Fire(notify.EventHandshakeCaptured,
+			"WPA Handshake Captured",
+			fmt.Sprintf("Network: %s  BSSID: %s  File: %s", essid, bssid, lastCapturePath))
 	} else {
 		ui.Info(fmt.Sprintf("Capture stopped. File: %s", lastCapturePath))
 		ui.Info("Verify: aircrack-ng " + lastCapturePath)
@@ -838,6 +842,9 @@ func RunCrack() error {
 				fmt.Sprintf("WPA PSK cracked: %s", essid),
 				fmt.Sprintf("BSSID: %s  PSK: %s", bssid, pass),
 				"CRITICAL", pass)
+			notify.Fire(notify.EventHashCracked,
+				"WPA PSK Cracked",
+				fmt.Sprintf("Network: %s  PSK: %s", essid, pass))
 			ui.Success("PSK saved to vault and engagement findings.")
 		}
 	}

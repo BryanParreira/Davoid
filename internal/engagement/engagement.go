@@ -342,5 +342,32 @@ func RecentFindings(limit int) ([]*Finding, error) {
 	return out, nil
 }
 
+// ImportEngagement inserts an engagement by its original ID (upsert-ignore).
+// Used by the snapshot import system.
+func ImportEngagement(eng *Engagement) error {
+	_, err := db.Exec(
+		`INSERT OR IGNORE INTO engagements (id, name, target, scope, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		eng.ID, eng.Name, eng.Target, eng.Scope, eng.Status,
+		eng.CreatedAt.Format(time.RFC3339),
+		eng.UpdatedAt.Format(time.RFC3339),
+	)
+	return err
+}
+
+// ImportFinding inserts a finding by its original ID (upsert-ignore).
+// Used by the snapshot import system.
+func ImportFinding(f *Finding) error {
+	_, err := db.Exec(
+		`INSERT OR IGNORE INTO findings
+		 (id, engagement_id, module, target, title, description, severity, evidence, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, f.EngagementID, f.Module, f.Target, f.Title,
+		f.Description, f.Severity, f.Evidence,
+		f.CreatedAt.Format(time.RFC3339),
+	)
+	return err
+}
+
 // DB returns the underlying database handle for advanced use.
 func DB() *sql.DB { return db }

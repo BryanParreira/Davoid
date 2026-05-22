@@ -2,7 +2,11 @@ package playbook
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/bryanparreira/davoid/internal/modules/ui"
 	"github.com/bryanparreira/davoid/internal/runner"
@@ -69,14 +73,94 @@ var Registry = []Playbook{
 	},
 }
 
-// Get returns a playbook by key or nil.
+// Get returns a playbook by key, checking the built-in registry and then
+// ~/.davoid/playbooks/<key>.yaml for custom YAML playbooks.
 func Get(key string) *Playbook {
 	for i := range Registry {
 		if Registry[i].Key == key {
 			return &Registry[i]
 		}
 	}
-	return nil
+	return loadYAML(key)
+}
+
+// yamlPlaybook mirrors Playbook for YAML unmarshalling.
+type yamlPlaybook struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Category    string   `yaml:"category"`
+	Steps       []struct {
+		Module string `yaml:"module"`
+	} `yaml:"steps"`
+}
+
+// loadYAML tries to load a custom playbook from ~/.davoid/playbooks/<key>.yaml.
+func loadYAML(key string) *Playbook {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	path := filepath.Join(home, ".davoid", "playbooks", key+".yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var yp yamlPlaybook
+	if err := yaml.Unmarshal(data, &yp); err != nil {
+		return nil
+	}
+	modules := make([]string, 0, len(yp.Steps))
+	for _, s := range yp.Steps {
+		if s.Module != "" {
+			modules = append(modules, s.Module)
+		}
+	}
+	if len(modules) == 0 {
+		return nil
+	}
+	cat := yp.Category
+	if cat == "" {
+		cat = "Custom"
+	}
+	return &Playbook{
+		Key:         key,
+		Name:        yp.Name,
+		Description: yp.Description,
+		Category:    cat,
+		Modules:     modules,
+	}
+}
+
+// ListCustom returns all YAML playbooks found in ~/.davoid/playbooks/.
+func ListCustom() []Playbook {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Join(home, ".davoid", "playbooks")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var customs []Playbook
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+			continue
+		}
+		key := strings.TrimSuffix(e.Name(), ".yaml")
+		// skip if key matches a built-in
+		if Get(key) != nil {
+			pb := loadYAML(key)
+			if pb != nil {
+				customs = append(customs, *pb)
+			}
+			continue
+		}
+		if pb := loadYAML(key); pb != nil {
+			customs = append(customs, *pb)
+		}
+	}
+	return customs
 }
 
 // Run executes a playbook interactively, one module at a time.

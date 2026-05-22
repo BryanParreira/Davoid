@@ -67,7 +67,7 @@ func launchTUI() error {
 	return nil
 }
 
-var version = "2.4.1" // overridden by -ldflags "-X main.version=..."
+var version = "2.4.2" // overridden by -ldflags "-X main.version=..."
 
 var rootCmd = &cobra.Command{
 	Use:   "davoid",

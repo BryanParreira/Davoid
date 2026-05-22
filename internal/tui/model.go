@@ -16,6 +16,7 @@ import (
 	"github.com/bryanparreira/davoid/internal/campaign"
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/playbook"
+	"github.com/bryanparreira/davoid/internal/opsec"
 	"github.com/bryanparreira/davoid/internal/runner"
 	"github.com/bryanparreira/davoid/internal/targets"
 	"github.com/bryanparreira/davoid/internal/updater"
@@ -46,6 +47,9 @@ const (
 	statePlaybooks
 	statePlaybookConfirm
 	stateCampaign
+	stateOpsec
+	stateChecklist
+	stateGraph
 )
 
 // --------------------------------------------------------------------------
@@ -82,6 +86,10 @@ type (
 		phases      []campaign.PhaseInfo
 		suggestions []campaign.Suggestion
 	}
+	opsecBadgeMsg     struct{ score int; label string }
+	opsecReadyMsg     struct{ content string }
+	checklistReadyMsg struct{ content string }
+	graphReadyMsg     struct{ content string }
 )
 
 func tickCmd() tea.Cmd {
@@ -169,6 +177,18 @@ type Model struct {
 	campaignSuggestions []campaign.Suggestion
 	campaignCursor      int
 	fromCampaign        bool // true when a module was launched from campaign view
+	// opsec badge shown in main menu header
+	opsecScore int
+	opsecLabel string
+	// opsec detail view
+	opsecContent string
+	opsecScroll  int
+	// ptes checklist view
+	checklistContent string
+	checklistScroll  int
+	// attack graph view
+	graphContent string
+	graphScroll  int
 }
 
 // PendingModule returns the module key that should be run after the TUI exits,
@@ -385,8 +405,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engLoadedMsg:
 		m.activeEng = msg.eng
-		if msg.eng != nil && m.state == stateCampaign {
-			return m, loadCampaignData(msg.eng.ID)
+		if msg.eng != nil {
+			cmds := []tea.Cmd{loadOpsecBadge(msg.eng.ID)}
+			if m.state == stateCampaign {
+				cmds = append(cmds, loadCampaignData(msg.eng.ID))
+			}
+			return m, tea.Batch(cmds...)
 		}
 		return m, nil
 
@@ -473,6 +497,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.campaignCursor >= len(msg.suggestions) {
 			m.campaignCursor = 0
 		}
+		return m, nil
+
+	case opsecBadgeMsg:
+		m.opsecScore = msg.score
+		m.opsecLabel = msg.label
+		return m, nil
+
+	case opsecReadyMsg:
+		m.opsecContent = msg.content
+		m.state = stateOpsec
+		m.opsecScroll = 0
+		return m, nil
+
+	case checklistReadyMsg:
+		m.checklistContent = msg.content
+		m.state = stateChecklist
+		m.checklistScroll = 0
+		return m, nil
+
+	case graphReadyMsg:
+		m.graphContent = msg.content
+		m.state = stateGraph
+		m.graphScroll = 0
 		return m, nil
 
 	case errMsg:
@@ -756,6 +803,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, loadNotes(m.activeEng.ID)
+		case "i", "I":
+			if noEng() {
+				return m, nil
+			}
+			return m, loadOpsecView(m.activeEng.ID)
+		case "k", "K":
+			if noEng() {
+				return m, nil
+			}
+			return m, loadChecklistView(m.activeEng.ID)
+		case "g", "G":
+			if noEng() {
+				return m, nil
+			}
+			return m, loadGraphView(m.activeEng.ID)
 		case "x", "X":
 			if m.activeEng != nil {
 				engagement.ClearActive()
@@ -928,6 +990,45 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateMenu
 		}
 
+	// ── OPSEC view ───────────────────────────────────────────────────────────
+	case stateOpsec:
+		switch key {
+		case "up", "k":
+			if m.opsecScroll > 0 {
+				m.opsecScroll--
+			}
+		case "down", "j":
+			m.opsecScroll++
+		case "esc", "q":
+			m.state = stateEngagementHub
+		}
+
+	// ── PTES Checklist ───────────────────────────────────────────────────────
+	case stateChecklist:
+		switch key {
+		case "up", "k":
+			if m.checklistScroll > 0 {
+				m.checklistScroll--
+			}
+		case "down", "j":
+			m.checklistScroll++
+		case "esc", "q":
+			m.state = stateEngagementHub
+		}
+
+	// ── Attack Graph ─────────────────────────────────────────────────────────
+	case stateGraph:
+		switch key {
+		case "up", "k":
+			if m.graphScroll > 0 {
+				m.graphScroll--
+			}
+		case "down", "j":
+			m.graphScroll++
+		case "esc", "q":
+			m.state = stateEngagementHub
+		}
+
 	// ── Note add form ─────────────────────────────────────────────────────
 	case stateNoteAdd:
 		switch key {
@@ -1054,6 +1155,166 @@ func loadNotes(engID string) tea.Cmd {
 	}
 }
 
+func loadOpsecBadge(engID string) tea.Cmd {
+	return func() tea.Msg {
+		ff, _ := engagement.Findings(engID)
+		seen := map[string]bool{}
+		var keys []string
+		for _, f := range ff {
+			if !seen[f.Module] {
+				seen[f.Module] = true
+				keys = append(keys, f.Module)
+			}
+		}
+		score, label, _ := opsec.Score(keys)
+		return opsecBadgeMsg{score: score, label: label}
+	}
+}
+
+func loadOpsecView(engID string) tea.Cmd {
+	return func() tea.Msg {
+		ff, _ := engagement.Findings(engID)
+		seen := map[string]bool{}
+		var keys []string
+		for _, f := range ff {
+			if !seen[f.Module] {
+				seen[f.Module] = true
+				keys = append(keys, f.Module)
+			}
+		}
+		score, label, breakdown := opsec.Score(keys)
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("%s  %s\n\n", opsec.ScoreBar(score), label))
+		sb.WriteString(strings.Repeat("─", 64) + "\n")
+		sb.WriteString(fmt.Sprintf("  %-3s  %-22s  %-8s  %s\n", "", "Module", "Noise", "Reason"))
+		sb.WriteString(strings.Repeat("─", 64) + "\n")
+		for _, rec := range breakdown {
+			icon := opsec.NoiseIcon(rec.Level)
+			sb.WriteString(fmt.Sprintf("  %s  %-22s  %-8s  %s\n", icon, rec.ModuleKey, rec.Level.String(), rec.Reason))
+		}
+		if len(breakdown) == 0 {
+			sb.WriteString("  No modules executed yet.\n")
+		}
+		return opsecReadyMsg{content: sb.String()}
+	}
+}
+
+func loadChecklistView(engID string) tea.Cmd {
+	return func() tea.Msg {
+		ff, _ := engagement.Findings(engID)
+		done := map[string]bool{}
+		for _, f := range ff {
+			done[f.Module] = true
+		}
+		phases := []struct {
+			name    string
+			icon    string
+			modules []string
+			manual  []string
+		}{
+			{"Pre-Engagement", "①", nil, []string{
+				"Define scope and rules of engagement",
+				"Create engagement in Davoid  ✓",
+			}},
+			{"Reconnaissance", "②", []string{"osint", "scanner", "web_recon"}, nil},
+			{"Network & MITM", "③", []string{"mitm", "sniff"}, nil},
+			{"Social Engineering", "④", []string{"phishing", "ghost_hub"}, nil},
+			{"Exploitation", "⑤", []string{"payloads", "msf_engine", "catcher"}, nil},
+			{"Post-Exploitation", "⑥", []string{"looter", "cred_tester", "persistence", "bruteforce"}, nil},
+			{"Active Directory", "⑦", []string{"ad_ops"}, nil},
+			{"WiFi", "⑧", []string{"wifi_monitor", "wifi_scan", "wifi_deauth", "wifi_handshake", "wifi_crack", "wifi_eviltwin"}, nil},
+			{"Reporting", "⑨", nil, []string{"Generate engagement report  [davoid report]"}},
+		}
+		var sb strings.Builder
+		sb.WriteString("PTES METHODOLOGY CHECKLIST\n")
+		sb.WriteString(strings.Repeat("─", 64) + "\n\n")
+		totalItems, completedItems := 0, 0
+		for _, ph := range phases {
+			sb.WriteString(fmt.Sprintf("%s  %s\n", ph.icon, ph.name))
+			for _, mod := range ph.modules {
+				check := "[ ]"
+				if done[mod] {
+					check = "[✓]"
+					completedItems++
+				}
+				totalItems++
+				sb.WriteString(fmt.Sprintf("  %s %s\n", check, mod))
+			}
+			for _, item := range ph.manual {
+				sb.WriteString(fmt.Sprintf("  [·] %s\n", item))
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString(strings.Repeat("─", 64) + "\n")
+		sb.WriteString(fmt.Sprintf("Progress: %d / %d module steps completed\n", completedItems, totalItems))
+		return checklistReadyMsg{content: sb.String()}
+	}
+}
+
+func loadGraphView(engID string) tea.Cmd {
+	return func() tea.Msg {
+		ff, _ := engagement.Findings(engID)
+		type modEntry struct {
+			targets []string
+			count   int
+		}
+		modMap := map[string]*modEntry{}
+		order := []string{}
+		seen := map[string]bool{}
+		for _, f := range ff {
+			if !seen[f.Module] {
+				seen[f.Module] = true
+				order = append(order, f.Module)
+				modMap[f.Module] = &modEntry{}
+			}
+			modMap[f.Module].count++
+			tSeen := false
+			for _, t := range modMap[f.Module].targets {
+				if t == f.Target {
+					tSeen = true
+					break
+				}
+			}
+			if !tSeen {
+				modMap[f.Module].targets = append(modMap[f.Module].targets, f.Target)
+			}
+		}
+		var sb strings.Builder
+		sb.WriteString("ATTACK GRAPH\n")
+		sb.WriteString(strings.Repeat("─", 64) + "\n\n")
+		if len(order) == 0 {
+			sb.WriteString("  No findings recorded yet.\n")
+			sb.WriteString("  Run modules to populate the attack graph.\n")
+		} else {
+			sb.WriteString("  [OPERATOR]\n")
+			for i, mod := range order {
+				entry := modMap[mod]
+				connector := "  ├──"
+				childConn := "  │    └──"
+				if i == len(order)-1 {
+					connector = "  └──"
+					childConn = "       └──"
+				}
+				noiseInfo := opsec.ModuleNoise[mod]
+				icon := opsec.NoiseIcon(noiseInfo.Level)
+				sb.WriteString(fmt.Sprintf("%s %s [%s]  %d finding(s)\n", connector, mod, icon, entry.count))
+				for _, t := range entry.targets {
+					sb.WriteString(fmt.Sprintf("%s target: %s\n", childConn, t))
+				}
+			}
+		}
+		sb.WriteString("\n")
+		sb.WriteString(strings.Repeat("─", 64) + "\n")
+		sb.WriteString(fmt.Sprintf("Noise icons: %s none  %s low  %s medium  %s high\n",
+			opsec.NoiseIcon(opsec.NoiseNone),
+			opsec.NoiseIcon(opsec.NoiseLow),
+			opsec.NoiseIcon(opsec.NoiseMedium),
+			opsec.NoiseIcon(opsec.NoiseHigh),
+		))
+		return graphReadyMsg{content: sb.String()}
+	}
+}
+
 // --------------------------------------------------------------------------
 // View
 // --------------------------------------------------------------------------
@@ -1090,6 +1351,12 @@ func (m Model) View() string {
 		return m.viewPlaybookConfirm()
 	case stateCampaign:
 		return m.viewCampaign()
+	case stateOpsec:
+		return m.viewOpsec()
+	case stateChecklist:
+		return m.viewChecklist()
+	case stateGraph:
+		return m.viewGraph()
 	default:
 		return m.viewMainMenu()
 	}
@@ -1140,6 +1407,18 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString(StyleValue.Render(m.version))
 	if m.vpn != "" {
 		sb.WriteString("  " + StyleSuccess.Render("VPN "+m.vpn))
+	}
+	if m.activeEng != nil && m.opsecLabel != "" {
+		var badge string
+		switch m.opsecLabel {
+		case "QUIET", "CLEAN":
+			badge = StyleSuccess.Render("OPSEC " + m.opsecLabel)
+		case "MODERATE":
+			badge = StyleWarning.Render("OPSEC " + m.opsecLabel)
+		default:
+			badge = StyleError.Render("OPSEC " + m.opsecLabel)
+		}
+		sb.WriteString("  " + badge)
 	}
 	if m.latestVersion != "" {
 		sb.WriteString("  " + StyleWarning.Render("↑ "+m.latestVersion+" [U]"))
@@ -1477,6 +1756,9 @@ func (m Model) viewHelp() string {
 		{"X", "Deactivate current engagement (start fresh)"},
 		{"N", "New engagement"},
 		{"S", "Switch to a different engagement"},
+		{"I", "OPSEC Score — module noise breakdown"},
+		{"K", "PTES Checklist — methodology progress"},
+		{"G", "Attack Graph — module execution tree"},
 		{"", ""},
 		{"In Campaign Mode", ""},
 		{"↑ / ↓", "Navigate suggested modules"},
@@ -1535,6 +1817,10 @@ func (m Model) viewEngagementHub() string {
 		{"V", "Credential Vault", "harvested credentials"},
 		{"M", "Target Map", "network topology + discovered hosts"},
 		{"O", "Notes", "engagement notes"},
+		{"", "", ""},
+		{"I", "OPSEC Score", "module noise rating for this op"},
+		{"K", "PTES Checklist", "methodology progress tracker"},
+		{"G", "Attack Graph", "module execution tree"},
 	}
 
 	for _, r := range rows {
@@ -1895,6 +2181,132 @@ func (m Model) viewCampaign() string {
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n")
 	sb.WriteString("  " + StyleHelp.Render("[↑↓/1-6] navigate  [enter] launch  [M] all modules  [R] refresh  [E] engagement  [H] home  [esc] menu") + "\n")
 
+	return sb.String()
+}
+
+func (m Model) viewOpsec() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	title := "  OPSEC Score"
+	if m.activeEng != nil {
+		title = fmt.Sprintf("  OPSEC Score — %s", m.activeEng.Name)
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+
+	lines := strings.Split(m.opsecContent, "\n")
+	start := m.opsecScroll
+	if start >= len(lines) {
+		start = 0
+	}
+	maxLines := m.height - 10
+	end := start + maxLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+	for _, line := range lines[start:end] {
+		switch {
+		case strings.Contains(line, "─"):
+			sb.WriteString(StyleDivider.Render("  "+line) + "\n")
+		case strings.HasPrefix(strings.TrimSpace(line), "✦"):
+			sb.WriteString(StyleSuccess.Render("  "+line) + "\n")
+		case strings.HasPrefix(strings.TrimSpace(line), "◎"):
+			sb.WriteString(StyleSuccess.Render("  "+line) + "\n")
+		case strings.HasPrefix(strings.TrimSpace(line), "◉"):
+			sb.WriteString(StyleWarning.Render("  "+line) + "\n")
+		case strings.HasPrefix(strings.TrimSpace(line), "⬟"):
+			sb.WriteString(StyleError.Render("  "+line) + "\n")
+		case strings.Contains(line, "QUIET") || strings.Contains(line, "CLEAN"):
+			sb.WriteString("  " + StyleSuccess.Render(line) + "\n")
+		case strings.Contains(line, "MODERATE"):
+			sb.WriteString("  " + StyleWarning.Render(line) + "\n")
+		case strings.Contains(line, "LOUD") || strings.Contains(line, "CRITICAL"):
+			sb.WriteString("  " + StyleError.Render(line) + "\n")
+		default:
+			sb.WriteString("  " + StyleMenuItem.Render(line) + "\n")
+		}
+	}
+
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewChecklist() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	title := "  PTES Checklist"
+	if m.activeEng != nil {
+		title = fmt.Sprintf("  PTES Checklist — %s", m.activeEng.Name)
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+
+	lines := strings.Split(m.checklistContent, "\n")
+	start := m.checklistScroll
+	if start >= len(lines) {
+		start = 0
+	}
+	maxLines := m.height - 10
+	end := start + maxLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+	for _, line := range lines[start:end] {
+		switch {
+		case strings.Contains(line, "─"):
+			sb.WriteString(StyleDivider.Render("  "+line) + "\n")
+		case strings.Contains(line, "[✓]"):
+			sb.WriteString(StyleSuccess.Render("  "+line) + "\n")
+		case strings.Contains(line, "[ ]"):
+			sb.WriteString(StyleHelp.Render("  "+line) + "\n")
+		case strings.Contains(line, "[·]"):
+			sb.WriteString(StyleLabel.Render("  "+line) + "\n")
+		case strings.Contains(line, "Progress:"):
+			sb.WriteString(StyleSectionHeader.Render("  "+line) + "\n")
+		case len(line) > 0 && line[0] != ' ':
+			sb.WriteString(StyleSectionHeader.Render("  "+line) + "\n")
+		default:
+			sb.WriteString(StyleMenuItem.Render("  "+line) + "\n")
+		}
+	}
+
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewGraph() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n\n")
+	title := "  Attack Graph"
+	if m.activeEng != nil {
+		title = fmt.Sprintf("  Attack Graph — %s", m.activeEng.Name)
+	}
+	sb.WriteString(StyleMenuTitle.Render(title) + "\n\n")
+
+	lines := strings.Split(m.graphContent, "\n")
+	start := m.graphScroll
+	if start >= len(lines) {
+		start = 0
+	}
+	maxLines := m.height - 10
+	end := start + maxLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+	for _, line := range lines[start:end] {
+		switch {
+		case strings.Contains(line, "─"):
+			sb.WriteString(StyleDivider.Render("  "+line) + "\n")
+		case strings.Contains(line, "├──") || strings.Contains(line, "└──"):
+			sb.WriteString(StyleMenuKey.Render("  "+line) + "\n")
+		case strings.Contains(line, "target:"):
+			sb.WriteString(StyleHelp.Render("  "+line) + "\n")
+		case strings.Contains(line, "[OPERATOR]"):
+			sb.WriteString(StyleEngagementActive.Render("  "+line) + "\n")
+		default:
+			sb.WriteString(StyleMenuItem.Render("  "+line) + "\n")
+		}
+	}
+
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 

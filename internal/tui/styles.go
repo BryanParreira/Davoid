@@ -131,6 +131,93 @@ var (
 		Foreground(colorDimCyan)
 )
 
+// Dashboard / settings / search / status-bar additions
+var (
+	StyleDashboardBox = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorDimCyan).
+		Padding(0, 2)
+
+	StyleDashboardStat = lipgloss.NewStyle().
+		Foreground(colorCyan).
+		Bold(true)
+
+	StyleDashboardLabel = lipgloss.NewStyle().
+		Foreground(colorLightGray)
+
+	StyleSearchBar = lipgloss.NewStyle().
+		Foreground(colorBG).
+		Background(colorCyan).
+		Bold(true).
+		Padding(0, 1)
+
+	StyleSearchMatch = lipgloss.NewStyle().
+		Foreground(colorBG).
+		Background(colorGreen).
+		Bold(true)
+
+	StyleSettingsField = lipgloss.NewStyle().
+		Foreground(colorWhite).
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(colorDimCyan).
+		Padding(0, 1).
+		Width(50)
+
+	StyleBottomBar = lipgloss.NewStyle().
+		Foreground(colorLightGray).
+		Background(lipgloss.Color("#111111")).
+		Padding(0, 1)
+
+	StyleBottomBarEngagement = lipgloss.NewStyle().
+		Foreground(colorGreen).
+		Background(lipgloss.Color("#111111")).
+		Bold(true).
+		Padding(0, 1)
+
+	StyleBottomBarAlert = lipgloss.NewStyle().
+		Foreground(colorRed).
+		Background(lipgloss.Color("#111111")).
+		Bold(true).
+		Padding(0, 1)
+
+	StyleBottomBarWarn = lipgloss.NewStyle().
+		Foreground(colorOrange).
+		Background(lipgloss.Color("#111111")).
+		Bold(true).
+		Padding(0, 1)
+
+	StyleATTACKTag = lipgloss.NewStyle().
+		Foreground(colorPurple).
+		Bold(true)
+
+	StyleEvidenceType = lipgloss.NewStyle().
+		Foreground(colorDimCyan).
+		Italic(true)
+
+	StyleCompareLeft = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorCyan).
+		Padding(0, 1)
+
+	StyleCompareRight = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPurple).
+		Padding(0, 1)
+
+	StyleRunningOutput = lipgloss.NewStyle().
+		Foreground(colorWhite)
+
+	StyleRunningHeader = lipgloss.NewStyle().
+		Foreground(colorCyan).
+		Bold(true)
+
+	StyleScopeWarn = lipgloss.NewStyle().
+		Foreground(colorBG).
+		Background(colorOrange).
+		Bold(true).
+		Padding(0, 1)
+)
+
 func SeverityStyle(severity string) lipgloss.Style {
 	switch severity {
 	case "CRITICAL":

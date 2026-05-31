@@ -100,8 +100,22 @@ func GetPhaseProgress(engID string) []PhaseInfo {
 	return out
 }
 
+// suggestionCache caches generated suggestions keyed by engID+stateHash.
+var suggestionCache = map[string][]Suggestion{}
+
 // GenerateSuggestions returns ranked next-step suggestions for the TUI.
+// Results are cached until findings/hosts/creds counts change.
 func GenerateSuggestions(engID string, modules []ModuleMeta) []Suggestion {
+	// Build a lightweight cache key from current engagement state counts.
+	findings, _ := engagement.Findings(engID)
+	hosts, _ := targets.List(engID)
+	creds, _ := vault.List(engID)
+	cacheKey := fmt.Sprintf("%s:%d:%d:%d", engID, len(findings), len(hosts), len(creds))
+
+	if cached, ok := suggestionCache[cacheKey]; ok {
+		return cached
+	}
+
 	c := &campaign{
 		modules: modules,
 		eng:     &engagement.Engagement{ID: engID},
@@ -116,6 +130,13 @@ func GenerateSuggestions(engID string, modules []ModuleMeta) []Suggestion {
 			Priority:   s.priority,
 		}
 	}
+	// Evict stale entries for this engagement before storing.
+	for k := range suggestionCache {
+		if strings.HasPrefix(k, engID+":") {
+			delete(suggestionCache, k)
+		}
+	}
+	suggestionCache[cacheKey] = out
 	return out
 }
 

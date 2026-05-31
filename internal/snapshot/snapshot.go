@@ -17,11 +17,12 @@ import (
 	"github.com/bryanparreira/davoid/internal/vault"
 )
 
-const version = "1"
+// currentVersion is the snapshot schema version. Bump when schema changes break import.
+const currentVersion = 2
 
 // Snapshot is a portable, serializable engagement archive.
 type Snapshot struct {
-	Version     string                 `json:"version"`
+	Version     int                    `json:"version"`
 	ExportedAt  time.Time              `json:"exported_at"`
 	Engagement  engagement.Engagement  `json:"engagement"`
 	Findings    []*engagement.Finding  `json:"findings"`
@@ -45,7 +46,7 @@ func Export(engID, path, password string) error {
 	creds, _ := vault.List(engID)
 
 	snap := Snapshot{
-		Version:     version,
+		Version:     currentVersion,
 		ExportedAt:  time.Now().UTC(),
 		Engagement:  *eng,
 		Findings:    findings,
@@ -86,6 +87,12 @@ func Import(path, password string) (*engagement.Engagement, error) {
 	var snap Snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
 		return nil, fmt.Errorf("parse snapshot: %w", err)
+	}
+
+	// Version 0 means pre-versioning snapshot (legacy). Warn but allow import.
+	// Future breaking schema changes should refuse versions below the minimum.
+	if snap.Version > currentVersion {
+		return nil, fmt.Errorf("snapshot version %d is newer than this build (max %d) — upgrade davoid first", snap.Version, currentVersion)
 	}
 
 	if err := engagement.ImportEngagement(&snap.Engagement); err != nil {

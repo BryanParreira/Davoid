@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,8 +50,13 @@ func migrate() {
 		severity      TEXT NOT NULL DEFAULT 'INFO',
 		evidence      TEXT NOT NULL DEFAULT '',
 		created_at    TEXT NOT NULL,
+		attack_tags   TEXT NOT NULL DEFAULT '',
+		evidence_type TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY(engagement_id) REFERENCES engagements(id)
 	)`)
+	// Additive migrations for existing databases
+	db.Exec(`ALTER TABLE findings ADD COLUMN attack_tags   TEXT NOT NULL DEFAULT ''`)
+	db.Exec(`ALTER TABLE findings ADD COLUMN evidence_type TEXT NOT NULL DEFAULT ''`)
 
 	db.Exec(`CREATE TABLE IF NOT EXISTS credentials (
 		id            TEXT PRIMARY KEY,
@@ -104,6 +110,8 @@ type Finding struct {
 	Severity     string
 	Evidence     string
 	CreatedAt    time.Time
+	ATTACKTags   []string // MITRE ATT&CK technique IDs (e.g. "T1046", "T1018")
+	EvidenceType string   // "command", "http", "screenshot", "file", "network", ""
 }
 
 // Create starts a new engagement and persists it.
@@ -230,8 +238,15 @@ func Close(id string) error {
 	return err
 }
 
-// LogFinding adds a finding to an engagement.
+// LogFinding adds a finding to an engagement with deduplication.
+// Findings with the same (engagement_id, module, target, title) are updated
+// rather than duplicated — evidence and description are merged.
 func LogFinding(engID, module, target, title, description, severity, evidence string) (*Finding, error) {
+	return LogFindingTagged(engID, module, target, title, description, severity, evidence, nil, "")
+}
+
+// LogFindingTagged is LogFinding with explicit ATT&CK tags and evidence type.
+func LogFindingTagged(engID, module, target, title, description, severity, evidence string, attackTags []string, evidenceType string) (*Finding, error) {
 	if engID == "" {
 		eng, err := Active()
 		if err != nil || eng == nil {
@@ -240,6 +255,28 @@ func LogFinding(engID, module, target, title, description, severity, evidence st
 		engID = eng.ID
 	}
 	now := time.Now().UTC()
+	tagsStr := strings.Join(attackTags, ",")
+
+	// Dedup: update existing finding rather than creating a duplicate.
+	var existingID string
+	_ = db.QueryRow(
+		`SELECT id FROM findings WHERE engagement_id=? AND module=? AND target=? AND title=? LIMIT 1`,
+		engID, module, target, title,
+	).Scan(&existingID)
+
+	if existingID != "" {
+		db.Exec(
+			`UPDATE findings SET description=?, severity=?, evidence=?, attack_tags=?, evidence_type=? WHERE id=?`,
+			description, severity, evidence, tagsStr, evidenceType, existingID,
+		)
+		db.Exec(`UPDATE engagements SET updated_at=? WHERE id=?`, now.Format(time.RFC3339), engID)
+		return &Finding{
+			ID: existingID, EngagementID: engID, Module: module, Target: target,
+			Title: title, Description: description, Severity: severity, Evidence: evidence,
+			CreatedAt: now, ATTACKTags: attackTags, EvidenceType: evidenceType,
+		}, nil
+	}
+
 	f := &Finding{
 		ID:           uuid.New().String(),
 		EngagementID: engID,
@@ -250,29 +287,28 @@ func LogFinding(engID, module, target, title, description, severity, evidence st
 		Severity:     severity,
 		Evidence:     evidence,
 		CreatedAt:    now,
+		ATTACKTags:   attackTags,
+		EvidenceType: evidenceType,
 	}
 	_, err := db.Exec(
 		`INSERT INTO findings
-		 (id, engagement_id, module, target, title, description, severity, evidence, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, engagement_id, module, target, title, description, severity, evidence, created_at, attack_tags, evidence_type)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.ID, f.EngagementID, f.Module, f.Target, f.Title,
 		f.Description, f.Severity, f.Evidence,
-		f.CreatedAt.Format(time.RFC3339),
+		f.CreatedAt.Format(time.RFC3339), tagsStr, evidenceType,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("log finding: %w", err)
 	}
-	db.Exec(
-		`UPDATE engagements SET updated_at=? WHERE id=?`,
-		now.Format(time.RFC3339), engID,
-	)
+	db.Exec(`UPDATE engagements SET updated_at=? WHERE id=?`, now.Format(time.RFC3339), engID)
 	return f, nil
 }
 
 // Findings returns all findings for an engagement, newest first.
 func Findings(engID string) ([]*Finding, error) {
 	rows, err := db.Query(
-		`SELECT id, engagement_id, module, target, title, description, severity, evidence, created_at
+		`SELECT id, engagement_id, module, target, title, description, severity, evidence, created_at, attack_tags, evidence_type
 		 FROM findings WHERE engagement_id = ? ORDER BY created_at DESC`,
 		engID,
 	)
@@ -284,12 +320,16 @@ func Findings(engID string) ([]*Finding, error) {
 	var out []*Finding
 	for rows.Next() {
 		f := &Finding{}
-		var ca string
+		var ca, tags, evType string
 		if err := rows.Scan(&f.ID, &f.EngagementID, &f.Module, &f.Target,
-			&f.Title, &f.Description, &f.Severity, &f.Evidence, &ca); err != nil {
+			&f.Title, &f.Description, &f.Severity, &f.Evidence, &ca, &tags, &evType); err != nil {
 			continue
 		}
 		f.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+		if tags != "" {
+			f.ATTACKTags = strings.Split(tags, ",")
+		}
+		f.EvidenceType = evType
 		out = append(out, f)
 	}
 	return out, nil
@@ -319,7 +359,7 @@ func FindingStats(engID string) map[string]int {
 // RecentFindings returns the N most recent findings across all engagements.
 func RecentFindings(limit int) ([]*Finding, error) {
 	rows, err := db.Query(
-		`SELECT id, engagement_id, module, target, title, description, severity, evidence, created_at
+		`SELECT id, engagement_id, module, target, title, description, severity, evidence, created_at, attack_tags, evidence_type
 		 FROM findings ORDER BY created_at DESC LIMIT ?`,
 		limit,
 	)
@@ -331,12 +371,16 @@ func RecentFindings(limit int) ([]*Finding, error) {
 	var out []*Finding
 	for rows.Next() {
 		f := &Finding{}
-		var ca string
+		var ca, tags, evType string
 		if err := rows.Scan(&f.ID, &f.EngagementID, &f.Module, &f.Target,
-			&f.Title, &f.Description, &f.Severity, &f.Evidence, &ca); err != nil {
+			&f.Title, &f.Description, &f.Severity, &f.Evidence, &ca, &tags, &evType); err != nil {
 			continue
 		}
 		f.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+		if tags != "" {
+			f.ATTACKTags = strings.Split(tags, ",")
+		}
+		f.EvidenceType = evType
 		out = append(out, f)
 	}
 	return out, nil
@@ -360,11 +404,12 @@ func ImportEngagement(eng *Engagement) error {
 func ImportFinding(f *Finding) error {
 	_, err := db.Exec(
 		`INSERT OR IGNORE INTO findings
-		 (id, engagement_id, module, target, title, description, severity, evidence, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, engagement_id, module, target, title, description, severity, evidence, created_at, attack_tags, evidence_type)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		f.ID, f.EngagementID, f.Module, f.Target, f.Title,
 		f.Description, f.Severity, f.Evidence,
 		f.CreatedAt.Format(time.RFC3339),
+		strings.Join(f.ATTACKTags, ","), f.EvidenceType,
 	)
 	return err
 }

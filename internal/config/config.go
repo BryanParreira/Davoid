@@ -12,6 +12,7 @@ import (
 type Config struct {
 	WebhookURL    string   `json:"webhook_url"`
 	WebhookEvents []string `json:"webhook_events"`
+	OllamaURL     string   `json:"ollama_url"` // e.g. "http://localhost:11434"
 }
 
 func path() string {
@@ -51,8 +52,10 @@ func Set(key, value string) error {
 		} else {
 			cfg.WebhookEvents = strings.Split(value, ",")
 		}
+	case "ollama.url":
+		cfg.OllamaURL = value
 	default:
-		return fmt.Errorf("unknown config key: %s\n\nValid keys:\n  webhook.url     Webhook URL (Discord, Slack, or ntfy.sh)\n  webhook.events  Comma-separated events: shell_connect,creds_captured,finding_critical,handshake_captured,hash_cracked", key)
+		return fmt.Errorf("unknown config key: %s\n\nValid keys:\n  webhook.url     Webhook URL (Discord, Slack, or ntfy.sh)\n  webhook.events  Comma-separated events: shell_connect,creds_captured,finding_critical,handshake_captured,hash_cracked\n  ollama.url      Ollama API URL (default: http://localhost:11434)", key)
 	}
 	return Save(cfg)
 }
@@ -65,6 +68,8 @@ func Get(key string) (string, error) {
 		return cfg.WebhookURL, nil
 	case "webhook.events":
 		return strings.Join(cfg.WebhookEvents, ","), nil
+	case "ollama.url":
+		return cfg.OllamaURL, nil
 	default:
 		return "", fmt.Errorf("unknown config key: %s", key)
 	}
@@ -73,9 +78,14 @@ func Get(key string) (string, error) {
 // All returns all config key=value pairs as strings.
 func All() []string {
 	cfg := Load()
+	ollamaURL := cfg.OllamaURL
+	if ollamaURL == "" {
+		ollamaURL = "http://localhost:11434 (default)"
+	}
 	return []string{
 		fmt.Sprintf("webhook.url     = %s", maskURL(cfg.WebhookURL)),
 		fmt.Sprintf("webhook.events  = %s", strings.Join(cfg.WebhookEvents, ",")),
+		fmt.Sprintf("ollama.url      = %s", ollamaURL),
 	}
 }
 

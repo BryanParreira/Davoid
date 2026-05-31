@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bryanparreira/davoid/internal/campaign"
+	"github.com/bryanparreira/davoid/internal/config"
 	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/playbook"
 	"github.com/bryanparreira/davoid/internal/opsec"
@@ -50,6 +51,11 @@ const (
 	stateOpsec
 	stateChecklist
 	stateGraph
+	stateDashboard      // engagement overview landing
+	stateSettings       // inline config editor
+	stateSearch         // search overlay (layered over any list)
+	stateCompare        // multi-engagement comparison
+	stateModuleRunning  // streaming module output
 )
 
 // --------------------------------------------------------------------------
@@ -91,10 +97,36 @@ type (
 	checklistReadyMsg struct{ content string }
 	graphReadyMsg     struct{ content string }
 	playbooksMsg      struct{ list []playbook.Playbook }
+
+	// new messages
+	compareDataMsg struct {
+		engA     *engagement.Engagement
+		engB     *engagement.Engagement
+		findingsA []*engagement.Finding
+		findingsB []*engagement.Finding
+	}
+	moduleOutputMsg struct {
+		line string
+		done bool
+		err  error
+		ch   <-chan string
+	}
+	dashboardMsg struct {
+		stats     dashboardStats
+	}
 )
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// dashboardStats holds precomputed stats shown in the dashboard view.
+type dashboardStats struct {
+	findingStats map[string]int
+	hostCount    int
+	credCount    int
+	noteCount    int
+	recentFindings []*engagement.Finding
 }
 
 // --------------------------------------------------------------------------
@@ -192,6 +224,40 @@ type Model struct {
 	// attack graph view
 	graphContent string
 	graphScroll  int
+
+	// dashboard
+	dashStats      dashboardStats
+	dashboardReady bool
+
+	// settings (inline config editor)
+	settingsFields      [3]inputField // webhook URL, webhook events, Ollama URL
+	settingsFieldCursor int
+	settingsFromHub     bool
+
+	// search / filter
+	searchQuery   string
+	searchActive  bool
+	searchState   state // state we were in when search was activated
+	filteredFindings  []*engagement.Finding
+	filteredVaultCreds []*vault.Credential
+
+	// multi-engagement comparison
+	compareEngList    []*engagement.Engagement
+	compareACursor    int
+	compareBCursor    int
+	compareStage      int // 0=pick A, 1=pick B, 2=view diff
+	compareEngA       *engagement.Engagement
+	compareEngB       *engagement.Engagement
+	compareFindingsA  []*engagement.Finding
+	compareFindingsB  []*engagement.Finding
+	compareScroll     int
+
+	// module streaming output
+	moduleOutputLines []string
+	moduleOutputScroll int
+	moduleOutputDone  bool
+	moduleOutputErr   error
+	streamingModKey   string
 }
 
 // PendingModule returns the module key that should be run after the TUI exits,
@@ -248,7 +314,19 @@ func NewModel(version string) Model {
 			{label: "Target (IP / CIDR / domain)"},
 			{label: "Scope"},
 		},
+		settingsFields: [3]inputField{
+			{label: "Webhook URL (Discord / Slack / ntfy.sh)"},
+			{label: "Webhook Events (comma-separated)"},
+			{label: "Ollama URL"},
+		},
 	}
+	return m
+}
+
+// NewDashboardModel returns a Model that starts directly in the dashboard.
+func NewDashboardModel(version string) Model {
+	m := NewModel(version)
+	m.state = stateDashboard
 	return m
 }
 
@@ -259,6 +337,44 @@ func (m Model) Init() tea.Cmd {
 		checkUpdate(),
 		tickCmd(),
 	)
+}
+
+func loadDashboard(engID string) tea.Cmd {
+	return func() tea.Msg {
+		stats := engagement.FindingStats(engID)
+		hosts, _ := targets.List(engID)
+		creds, _ := vault.List(engID)
+		notes, _ := engagement.Notes(engID)
+		recent, _ := engagement.Findings(engID)
+		if len(recent) > 5 {
+			recent = recent[:5]
+		}
+		return dashboardMsg{stats: dashboardStats{
+			findingStats:   stats,
+			hostCount:      len(hosts),
+			credCount:      len(creds),
+			noteCount:      len(notes),
+			recentFindings: recent,
+		}}
+	}
+}
+
+func loadCompareData(engA, engB *engagement.Engagement) tea.Cmd {
+	return func() tea.Msg {
+		fa, _ := engagement.Findings(engA.ID)
+		fb, _ := engagement.Findings(engB.ID)
+		return compareDataMsg{engA: engA, engB: engB, findingsA: fa, findingsB: fb}
+	}
+}
+
+func readModuleOutputStep(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		line, ok := <-ch
+		if !ok {
+			return moduleOutputMsg{done: true}
+		}
+		return moduleOutputMsg{line: line, ch: ch}
+	}
 }
 
 func loadNetInfo() tea.Cmd {
@@ -420,6 +536,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateCampaign {
 				cmds = append(cmds, loadCampaignData(msg.eng.ID))
 			}
+			if m.state == stateDashboard || (!m.dashboardReady && m.state == stateMenu) {
+				cmds = append(cmds, loadDashboard(msg.eng.ID))
+				// Start at dashboard on first load if engagement is active
+				if m.state == stateMenu && !m.dashboardReady {
+					m.state = stateDashboard
+				}
+			}
 			return m, tea.Batch(cmds...)
 		}
 		return m, nil
@@ -538,6 +661,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = statePlaybooks
 		return m, nil
 
+	case dashboardMsg:
+		m.dashStats = msg.stats
+		m.dashboardReady = true
+		return m, nil
+
+	case compareDataMsg:
+		m.compareEngA = msg.engA
+		m.compareEngB = msg.engB
+		m.compareFindingsA = msg.findingsA
+		m.compareFindingsB = msg.findingsB
+		m.compareStage = 2
+		m.compareScroll = 0
+		return m, nil
+
+	case moduleOutputMsg:
+		if msg.done {
+			m.moduleOutputDone = true
+			m.moduleOutputErr = msg.err
+		} else {
+			if msg.line != "" {
+				m.moduleOutputLines = append(m.moduleOutputLines, msg.line)
+				// auto-scroll to bottom
+				m.moduleOutputScroll = len(m.moduleOutputLines)
+			}
+			if msg.ch != nil {
+				return m, readModuleOutputStep(msg.ch)
+			}
+		}
+		return m, nil
+
 	case errMsg:
 		m.statusMsg = msg.err.Error()
 		m.statusIsError = true
@@ -557,10 +710,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// Global home key — back to main menu from any sub-screen
-	if (key == "h" || key == "H") && m.state != stateMenu &&
-		m.state != stateEngagementNew && m.state != stateNoteAdd {
-		m.state = stateMenu
+	// Global home key — back to main menu (or dashboard) from any sub-screen
+	if (key == "h" || key == "H") && m.state != stateMenu && m.state != stateDashboard &&
+		m.state != stateEngagementNew && m.state != stateNoteAdd && m.state != stateSettings && m.state != stateSearch {
+		if m.activeEng != nil {
+			m.state = stateDashboard
+		} else {
+			m.state = stateMenu
+		}
 		return m, nil
 	}
 
@@ -638,6 +795,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.subMenuCursor < len(m.subMenuItems)-1 {
 				m.subMenuCursor++
 			}
+		case "/":
+			m.searchQuery = ""
+			m.searchActive = true
+			m.searchState = stateModuleList
+			m.state = stateSearch
 		case "enter", " ":
 			if m.subMenuCursor < len(m.subMenuItems) {
 				modKey := m.subMenuItems[m.subMenuCursor].key
@@ -657,6 +819,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case stateModuleConfirm:
 		switch key {
 		case "y", "Y", "enter":
+			// Check required external tools before launching
+			if missing := checkModuleTools(m.selectedModule.Key); len(missing) > 0 {
+				m.statusMsg = fmt.Sprintf("Missing tools: %s — run 'davoid doctor'", strings.Join(missing, ", "))
+				m.statusIsError = true
+				return m, nil
+			}
 			m.pendingModule = m.selectedModule.Key
 			return m, tea.Quit
 		case "n", "N", "esc":
@@ -749,7 +917,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j":
 			m.findingScroll++
+		case "/":
+			m.searchQuery = ""
+			m.searchActive = true
+			m.searchState = stateFindings
+			m.filteredFindings = m.findings
+			m.state = stateSearch
 		case "esc", "q":
+			m.searchQuery = ""
+			m.filteredFindings = nil
 			m.state = stateEngagementHub
 		}
 
@@ -790,7 +966,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.hubCursor < len(rows) && rows[m.hubCursor].key != "" {
 				return m.activateHubKey(rows[m.hubCursor].key)
 			}
-		case "n", "N", "s", "S", "f", "F", "l", "L", "r", "R", "v", "V", "m", "M", "o", "O", "i", "I", "K", "g", "G", "x", "X":
+		case "n", "N", "s", "S", "f", "F", "l", "L", "r", "R", "v", "V", "m", "M", "o", "O", "i", "I", "K", "g", "G", "x", "X", "c", "C", "t", "T":
 			return m.activateHubKey(key)
 		case "esc", "q", "Q":
 			m.state = stateMenu
@@ -854,7 +1030,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j":
 			m.vaultScroll++
+		case "/":
+			m.searchQuery = ""
+			m.searchActive = true
+			m.searchState = stateVault
+			m.filteredVaultCreds = m.vaultCreds
+			m.state = stateSearch
 		case "esc", "q":
+			m.searchQuery = ""
+			m.filteredVaultCreds = nil
 			m.state = stateEngagementHub
 		}
 
@@ -1010,6 +1194,170 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state = stateNotes
 		default:
 			m.noteInput.handleKey(key)
+		}
+
+	// ── Dashboard ────────────────────────────────────────────────────────
+	case stateDashboard:
+		switch key {
+		case "enter", " ", "m", "M":
+			m.state = stateMenu
+		case "e", "E":
+			m.state = stateEngagementHub
+		case "c", "C":
+			m.state = stateCampaign
+			m.campaignCursor = 0
+			if m.activeEng != nil {
+				return m, loadCampaignData(m.activeEng.ID)
+			}
+		case "f", "F":
+			if m.activeEng != nil {
+				m.state = stateFindings
+				return m, loadFindings(m.activeEng.ID)
+			}
+		case "r", "R":
+			if m.activeEng != nil {
+				return m, loadDashboard(m.activeEng.ID)
+			}
+		case "s", "S":
+			if m.activeEng != nil {
+				m.state = stateSettings
+				m.settingsFromHub = false
+				cfg := loadConfigForSettings()
+				m.settingsFields[0].value = cfg[0]
+				m.settingsFields[1].value = cfg[1]
+				m.settingsFields[2].value = cfg[2]
+				m.settingsFieldCursor = 0
+			}
+		case "q", "Q":
+			return m, tea.Quit
+		}
+
+	// ── Settings ──────────────────────────────────────────────────────────
+	case stateSettings:
+		switch key {
+		case "tab", "down":
+			m.settingsFieldCursor = (m.settingsFieldCursor + 1) % len(m.settingsFields)
+		case "shift+tab", "up":
+			m.settingsFieldCursor = (m.settingsFieldCursor - 1 + len(m.settingsFields)) % len(m.settingsFields)
+		case "enter":
+			if m.settingsFieldCursor < len(m.settingsFields)-1 {
+				m.settingsFieldCursor++
+			} else {
+				saveSettings(m.settingsFields)
+				m.statusMsg = "Settings saved."
+				m.statusIsError = false
+				if m.settingsFromHub {
+					m.state = stateEngagementHub
+				} else {
+					m.state = stateDashboard
+				}
+			}
+		case "ctrl+s":
+			saveSettings(m.settingsFields)
+			m.statusMsg = "Settings saved."
+			m.statusIsError = false
+			if m.settingsFromHub {
+				m.state = stateEngagementHub
+			} else {
+				m.state = stateDashboard
+			}
+		case "esc":
+			if m.settingsFromHub {
+				m.state = stateEngagementHub
+			} else {
+				m.state = stateDashboard
+			}
+		default:
+			m.settingsFields[m.settingsFieldCursor].handleKey(key)
+		}
+
+	// ── Search overlay ────────────────────────────────────────────────────
+	case stateSearch:
+		switch key {
+		case "esc", "enter":
+			m.searchActive = false
+			m.state = m.searchState
+		case "backspace", "ctrl+h":
+			if len(m.searchQuery) > 0 {
+				m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+				m.applySearch()
+			}
+		case "ctrl+u":
+			m.searchQuery = ""
+			m.applySearch()
+		default:
+			if len(key) == 1 {
+				m.searchQuery += key
+				m.applySearch()
+			}
+		}
+
+	// ── Compare pick A ───────────────────────────────────────────────────
+	case stateCompare:
+		switch m.compareStage {
+		case 0: // pick first engagement
+			switch key {
+			case "up", "k":
+				if m.compareACursor > 0 {
+					m.compareACursor--
+				}
+			case "down", "j":
+				if m.compareACursor < len(m.compareEngList)-1 {
+					m.compareACursor++
+				}
+			case "enter", " ":
+				if m.compareACursor < len(m.compareEngList) {
+					m.compareEngA = m.compareEngList[m.compareACursor]
+					m.compareStage = 1
+					m.compareBCursor = 0
+				}
+			case "esc", "q":
+				m.state = stateEngagementHub
+			}
+		case 1: // pick second engagement
+			switch key {
+			case "up", "k":
+				if m.compareBCursor > 0 {
+					m.compareBCursor--
+				}
+			case "down", "j":
+				if m.compareBCursor < len(m.compareEngList)-1 {
+					m.compareBCursor++
+				}
+			case "enter", " ":
+				if m.compareBCursor < len(m.compareEngList) {
+					m.compareEngB = m.compareEngList[m.compareBCursor]
+					return m, loadCompareData(m.compareEngA, m.compareEngB)
+				}
+			case "esc", "q":
+				m.compareStage = 0
+			}
+		case 2: // view diff
+			switch key {
+			case "up", "k":
+				if m.compareScroll > 0 {
+					m.compareScroll--
+				}
+			case "down", "j":
+				m.compareScroll++
+			case "esc", "q":
+				m.state = stateEngagementHub
+			}
+		}
+
+	// ── Module streaming output ───────────────────────────────────────────
+	case stateModuleRunning:
+		switch key {
+		case "up", "k":
+			if m.moduleOutputScroll > 0 {
+				m.moduleOutputScroll--
+			}
+		case "down", "j":
+			m.moduleOutputScroll++
+		case "enter", "esc", "q":
+			if m.moduleOutputDone {
+				m.state = stateMenu
+			}
 		}
 	}
 
@@ -1289,46 +1637,58 @@ func loadGraphView(engID string) tea.Cmd {
 // --------------------------------------------------------------------------
 
 func (m Model) View() string {
+	var content string
 	switch m.state {
 	case stateEngagementNew:
-		return m.viewNewEngagement()
+		content = m.viewNewEngagement()
 	case stateEngagementList:
-		return m.viewEngagementList()
+		content = m.viewEngagementList()
 	case stateFindings:
-		return m.viewFindings()
+		content = m.viewFindings()
 	case stateModuleList:
-		return m.viewModuleList()
+		content = m.viewModuleList()
 	case stateModuleConfirm:
-		return m.viewModuleConfirm()
+		content = m.viewModuleConfirm()
 	case stateReport:
-		return m.viewReport()
+		content = m.viewReport()
 	case stateHelp:
-		return m.viewHelp()
+		content = m.viewHelp()
 	case stateEngagementHub:
-		return m.viewEngagementHub()
+		content = m.viewEngagementHub()
 	case stateTimeline:
-		return m.viewTimeline()
+		content = m.viewTimeline()
 	case stateVault:
-		return m.viewVault()
+		content = m.viewVault()
 	case stateTargets:
-		return m.viewTargets()
+		content = m.viewTargets()
 	case stateNotes, stateNoteAdd:
-		return m.viewNotes()
+		content = m.viewNotes()
 	case statePlaybooks:
-		return m.viewPlaybooks()
+		content = m.viewPlaybooks()
 	case statePlaybookConfirm:
-		return m.viewPlaybookConfirm()
+		content = m.viewPlaybookConfirm()
 	case stateCampaign:
-		return m.viewCampaign()
+		content = m.viewCampaign()
 	case stateOpsec:
-		return m.viewOpsec()
+		content = m.viewOpsec()
 	case stateChecklist:
-		return m.viewChecklist()
+		content = m.viewChecklist()
 	case stateGraph:
-		return m.viewGraph()
+		content = m.viewGraph()
+	case stateDashboard:
+		content = m.viewDashboard()
+	case stateSettings:
+		content = m.viewSettings()
+	case stateSearch:
+		content = m.viewSearch()
+	case stateCompare:
+		content = m.viewCompare()
+	case stateModuleRunning:
+		content = m.viewModuleRunning()
 	default:
-		return m.viewMainMenu()
+		content = m.viewMainMenu()
 	}
+	return content + m.statusBar()
 }
 
 const bannerWide = `
@@ -1393,6 +1753,16 @@ func (m Model) breadcrumb() string {
 		path = []string{"Main", "Engagement Hub", "Checklist"}
 	case stateGraph:
 		path = []string{"Main", "Engagement Hub", "Attack Graph"}
+	case stateDashboard:
+		path = []string{"Dashboard"}
+	case stateSettings:
+		path = []string{"Main", "Engagement Hub", "Settings"}
+	case stateSearch:
+		path = []string{"Main", "Search"}
+	case stateCompare:
+		path = []string{"Main", "Engagement Hub", "Compare"}
+	case stateModuleRunning:
+		path = []string{"Main", "Modules", "Running"}
 	default:
 		path = []string{"Main"}
 	}
@@ -1547,16 +1917,6 @@ func (m Model) viewMainMenu() string {
 			hintStr = StyleHelp.Render("· " + item.hint)
 		}
 		sb.WriteString(cursor + keyStr + "  " + labelStr + hintStr + "\n")
-	}
-
-	// Status bar
-	if m.statusMsg != "" {
-		sb.WriteString("\n")
-		if m.statusIsError {
-			sb.WriteString("  " + StyleError.Render("✗ "+m.statusMsg) + "\n")
-		} else {
-			sb.WriteString("  " + StyleSuccess.Render("✓ "+m.statusMsg) + "\n")
-		}
 	}
 
 	sb.WriteString("\n")
@@ -1862,16 +2222,7 @@ func (m Model) viewEngagementHub() string {
 	}
 
 	sb.WriteString("\n" + StyleDivider.Render("  "+strings.Repeat("─", 50)) + "\n")
-
-	if m.statusMsg != "" {
-		if m.statusIsError {
-			sb.WriteString("  " + StyleError.Render("✗ "+m.statusMsg) + "\n")
-		} else {
-			sb.WriteString("  " + StyleSuccess.Render("✓ "+m.statusMsg) + "\n")
-		}
-	}
-
-	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  or press key directly  ·  [H] home  ·  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  or press key directly  ·  [T] settings  ·  [H] home  ·  esc back"))
 	return sb.String()
 }
 
@@ -2335,6 +2686,365 @@ func (m Model) viewGraph() string {
 	return sb.String()
 }
 
+// --------------------------------------------------------------------------
+// New views: Dashboard, Settings, Search, Compare, Module Running
+// --------------------------------------------------------------------------
+
+func (m Model) viewDashboard() string {
+	var sb strings.Builder
+	sb.WriteString(StyleBanner.Render(m.banner()) + "\n")
+	sb.WriteString(StyleSubtitle.Render("  ghost in the net  ·  operator-grade red team engagement platform") + "\n")
+	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n\n")
+
+	if m.activeEng == nil {
+		sb.WriteString(StyleEngagementNone.Render("  no active engagement\n\n"))
+		sb.WriteString("  " + StyleMenuKey.Render("[E]") + "  " + StyleMenuItem.Render("Engagement Hub") + "\n")
+		sb.WriteString("  " + StyleMenuKey.Render("[M]") + "  " + StyleMenuItem.Render("Main Menu") + "\n")
+		return sb.String()
+	}
+
+	eng := m.activeEng
+	sb.WriteString("  " + StyleEngagementActive.Render("★ "+eng.Name))
+	if eng.Target != "" {
+		sb.WriteString(StyleLabel.Render("  →  ") + StyleValue.Render(eng.Target))
+	}
+	if eng.Scope != "" {
+		sb.WriteString(StyleLabel.Render("  scope: ") + StyleHelp.Render(eng.Scope))
+	}
+	sb.WriteString("\n\n")
+
+	// Stats grid
+	stats := m.dashStats.findingStats
+	if stats == nil {
+		stats = map[string]int{}
+	}
+	total := stats["CRITICAL"] + stats["HIGH"] + stats["MEDIUM"] + stats["INFO"]
+
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n")
+	sb.WriteString("  ")
+	sb.WriteString(StyleFindingCritical.Render(fmt.Sprintf("CRIT %-4d", stats["CRITICAL"])))
+	sb.WriteString("  ")
+	sb.WriteString(StyleFindingHigh.Render(fmt.Sprintf("HIGH %-4d", stats["HIGH"])))
+	sb.WriteString("  ")
+	sb.WriteString(StyleWarning.Render(fmt.Sprintf("MED  %-4d", stats["MEDIUM"])))
+	sb.WriteString("  ")
+	sb.WriteString(StyleFindingInfo.Render(fmt.Sprintf("INFO %-4d", stats["INFO"])))
+	sb.WriteString("  ")
+	sb.WriteString(StyleLabel.Render(fmt.Sprintf("TOTAL %-4d", total)))
+	sb.WriteString("\n")
+	sb.WriteString("  ")
+	sb.WriteString(StyleDashboardLabel.Render(fmt.Sprintf("Hosts: ")))
+	sb.WriteString(StyleDashboardStat.Render(fmt.Sprintf("%-4d", m.dashStats.hostCount)))
+	sb.WriteString("  ")
+	sb.WriteString(StyleDashboardLabel.Render("Creds: "))
+	sb.WriteString(StyleDashboardStat.Render(fmt.Sprintf("%-4d", m.dashStats.credCount)))
+	sb.WriteString("  ")
+	sb.WriteString(StyleDashboardLabel.Render("Notes: "))
+	sb.WriteString(StyleDashboardStat.Render(fmt.Sprintf("%-4d", m.dashStats.noteCount)))
+	if m.opsecLabel != "" {
+		sb.WriteString("  ")
+		switch m.opsecLabel {
+		case "QUIET", "CLEAN":
+			sb.WriteString(StyleSuccess.Render("OPSEC " + m.opsecLabel))
+		case "MODERATE":
+			sb.WriteString(StyleWarning.Render("OPSEC " + m.opsecLabel))
+		default:
+			sb.WriteString(StyleError.Render("OPSEC " + m.opsecLabel))
+		}
+	}
+	sb.WriteString("\n")
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n\n")
+
+	// Recent findings
+	if len(m.dashStats.recentFindings) > 0 {
+		sb.WriteString(StyleSectionHeader.Render("  Recent Findings") + "\n")
+		for _, f := range m.dashStats.recentFindings {
+			sev := SeverityStyle(f.Severity).Render(fmt.Sprintf("%-8s", f.Severity))
+			mod := StyleLabel.Render(fmt.Sprintf("%-14s", truncate(f.Module, 13)))
+			title := StyleMenuItem.Render(truncate(f.Title, 45))
+			ts := StyleHelp.Render(f.CreatedAt.Format("01-02 15:04"))
+			sb.WriteString(fmt.Sprintf("  %s  %s  %s  %s\n", sev, mod, title, ts))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Quick actions
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n")
+	actions := []struct{ k, l string }{
+		{"M", "Main Menu"},
+		{"C", "Campaign Mode"},
+		{"F", "Findings"},
+		{"E", "Engagement Hub"},
+		{"S", "Settings"},
+		{"R", "Refresh"},
+	}
+	for i, a := range actions {
+		if i > 0 && i%3 == 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("  " + StyleMenuKey.Render("["+a.k+"]") + " " + StyleMenuItem.Render(fmt.Sprintf("%-18s", a.l)))
+	}
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+func (m Model) viewSettings() string {
+	var sb strings.Builder
+	sb.WriteString(m.header("  Settings"))
+
+	sb.WriteString(StyleHelp.Render("  Configure Davoid operator settings. Changes saved on [enter] or ctrl+s.\n\n"))
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n\n")
+
+	labels := []string{"Webhook URL", "Webhook Events", "Ollama URL"}
+	hints := []string{
+		"Discord / Slack / ntfy.sh webhook",
+		"shell_connect,creds_captured,finding_critical,handshake_captured,hash_cracked",
+		"http://localhost:11434",
+	}
+
+	for i, f := range m.settingsFields {
+		selected := i == m.settingsFieldCursor
+		prefix := "  "
+		if selected {
+			prefix = StyleCyan("> ")
+		}
+		label := StyleLabel.Render(labels[i])
+		var val string
+		if selected {
+			val = StyleSettingsField.Render(f.value + "█")
+		} else {
+			val = StyleValue.Render(f.value)
+			if val == "" {
+				val = StyleHelp.Render("("+hints[i]+")")
+			}
+		}
+		sb.WriteString(prefix + label + "\n  " + val + "\n\n")
+	}
+
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n")
+	sb.WriteString(StyleHelp.Render("  tab/↑↓ switch fields  ·  ctrl+s save  ·  enter advance/save  ·  esc back"))
+	return sb.String()
+}
+
+func (m Model) viewSearch() string {
+	var sb strings.Builder
+
+	// Show the underlying list with the search bar overlay at top
+	searchBar := StyleSearchBar.Render(" / ") + " " + StyleValue.Render(m.searchQuery) + StyleHelp.Render("█")
+	sb.WriteString(searchBar + "\n")
+	sb.WriteString(StyleHelp.Render(fmt.Sprintf("  Filtering: %q   esc/enter to confirm\n\n", m.searchQuery)))
+
+	switch m.searchState {
+	case stateFindings:
+		list := m.filteredFindings
+		if list == nil {
+			list = m.findings
+		}
+		if len(list) == 0 {
+			sb.WriteString(StyleLabel.Render("  No matching findings.\n"))
+		} else {
+			for _, f := range list {
+				sev := SeverityStyle(f.Severity).Render(fmt.Sprintf("%-8s", f.Severity))
+				mod := StyleLabel.Render(fmt.Sprintf("%-14s", truncate(f.Module, 13)))
+				title := StyleMenuItem.Render(truncate(f.Title, 50))
+				sb.WriteString(fmt.Sprintf("  %s  %s  %s\n", sev, mod, title))
+			}
+		}
+	case stateVault:
+		list := m.filteredVaultCreds
+		if list == nil {
+			list = m.vaultCreds
+		}
+		if len(list) == 0 {
+			sb.WriteString(StyleLabel.Render("  No matching credentials.\n"))
+		} else {
+			for _, c := range list {
+				secret := strings.Repeat("*", min(len(c.Secret), 8))
+				sb.WriteString(fmt.Sprintf("  %-12s  %-18s  %-20s  %s\n",
+					truncate(c.Source, 10), truncate(c.Host, 16), truncate(c.Username, 18), secret))
+			}
+		}
+	case stateModuleList:
+		q := strings.ToLower(m.searchQuery)
+		for _, item := range m.subMenuItems {
+			if q == "" || strings.Contains(strings.ToLower(item.label), q) {
+				sb.WriteString("  " + StyleMenuItem.Render(item.label) + "\n")
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+func (m Model) viewCompare() string {
+	var sb strings.Builder
+	sb.WriteString(m.header("  Compare Engagements"))
+
+	switch m.compareStage {
+	case 0, 1:
+		label := "  Select first engagement (A):"
+		cursor := m.compareACursor
+		if m.compareStage == 1 {
+			label = fmt.Sprintf("  Select second engagement (B) to compare with %q:", m.compareEngA.Name)
+			cursor = m.compareBCursor
+		}
+		sb.WriteString(StyleSectionHeader.Render(label) + "\n\n")
+		for i, eng := range m.compareEngList {
+			active := ""
+			if m.activeEng != nil && eng.ID == m.activeEng.ID {
+				active = StyleGreen(" ★")
+			}
+			line := fmt.Sprintf("  %-30s  %-20s  %-8s%s",
+				truncate(eng.Name, 28), truncate(eng.Target, 18),
+				eng.CreatedAt.Format("01-02"), active)
+			if i == cursor {
+				sb.WriteString(StyleMenuItemSelected.Render(line) + "\n")
+			} else {
+				sb.WriteString(StyleTableRow.Render(line) + "\n")
+			}
+		}
+		sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  esc back"))
+
+	case 2:
+		engA := m.compareEngA
+		engB := m.compareEngB
+		if engA == nil || engB == nil {
+			sb.WriteString(StyleError.Render("  missing engagement data\n"))
+			return sb.String()
+		}
+
+		statsA := map[string]int{"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "INFO": 0}
+		statsB := map[string]int{"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "INFO": 0}
+		for _, f := range m.compareFindingsA {
+			statsA[f.Severity]++
+		}
+		for _, f := range m.compareFindingsB {
+			statsB[f.Severity]++
+		}
+
+		w := 28
+		header := fmt.Sprintf("  %-*s  │  %-*s", w, truncate(engA.Name, w), w, truncate(engB.Name, w))
+		sb.WriteString(StyleSectionHeader.Render(header) + "\n")
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", w*2+5)) + "\n")
+
+		for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM", "INFO"} {
+			vA := fmt.Sprintf("%s: %d", sev, statsA[sev])
+			vB := fmt.Sprintf("%s: %d", sev, statsB[sev])
+			style := SeverityStyle(sev)
+			sb.WriteString(fmt.Sprintf("  %s  │  %s\n",
+				style.Render(fmt.Sprintf("%-*s", w, vA)),
+				style.Render(fmt.Sprintf("%-*s", w, vB)),
+			))
+		}
+
+		totalA := statsA["CRITICAL"] + statsA["HIGH"] + statsA["MEDIUM"] + statsA["INFO"]
+		totalB := statsB["CRITICAL"] + statsB["HIGH"] + statsB["MEDIUM"] + statsB["INFO"]
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", w*2+5)) + "\n")
+		sb.WriteString(fmt.Sprintf("  %s  │  %s\n",
+			StyleValue.Render(fmt.Sprintf("%-*s", w, fmt.Sprintf("TOTAL: %d", totalA))),
+			StyleValue.Render(fmt.Sprintf("%-*s", w, fmt.Sprintf("TOTAL: %d", totalB))),
+		))
+
+		// Unique-to-A and unique-to-B findings
+		sb.WriteString("\n")
+		titlesA := map[string]bool{}
+		titlesB := map[string]bool{}
+		for _, f := range m.compareFindingsA {
+			titlesA[f.Title] = true
+		}
+		for _, f := range m.compareFindingsB {
+			titlesB[f.Title] = true
+		}
+
+		var onlyA, onlyB []string
+		for t := range titlesA {
+			if !titlesB[t] {
+				onlyA = append(onlyA, t)
+			}
+		}
+		for t := range titlesB {
+			if !titlesA[t] {
+				onlyB = append(onlyB, t)
+			}
+		}
+
+		maxLines := (m.height - 20) / 2
+		start := m.compareScroll
+		if len(onlyA) > 0 {
+			sb.WriteString(StyleSectionHeader.Render(fmt.Sprintf("  Only in %q (%d):", truncate(engA.Name, 20), len(onlyA))) + "\n")
+			for i, t := range onlyA {
+				if i < start {
+					continue
+				}
+				if i-start >= maxLines {
+					break
+				}
+				sb.WriteString(StyleFindingHigh.Render("  + ") + StyleMenuItem.Render(truncate(t, 60)) + "\n")
+			}
+		}
+		if len(onlyB) > 0 {
+			sb.WriteString(StyleSectionHeader.Render(fmt.Sprintf("  Only in %q (%d):", truncate(engB.Name, 20), len(onlyB))) + "\n")
+			for i, t := range onlyB {
+				if i < start {
+					continue
+				}
+				if i-start >= maxLines {
+					break
+				}
+				sb.WriteString(StyleFindingCritical.Render("  + ") + StyleMenuItem.Render(truncate(t, 60)) + "\n")
+			}
+		}
+		sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ scroll  ·  [H] home  ·  esc back"))
+	}
+
+	return sb.String()
+}
+
+func (m Model) viewModuleRunning() string {
+	var sb strings.Builder
+	sb.WriteString(m.header(""))
+
+	mod := m.streamingModKey
+	sb.WriteString(StyleRunningHeader.Render(fmt.Sprintf("  Running: %s", mod)) + "\n")
+	if !m.moduleOutputDone {
+		sb.WriteString(StyleHelp.Render("  Module executing — output streaming below...\n\n"))
+	} else {
+		if m.moduleOutputErr != nil {
+			sb.WriteString(StyleError.Render("  ✗ "+m.moduleOutputErr.Error()) + "\n\n")
+		} else {
+			sb.WriteString(StyleSuccess.Render("  ✓ Module complete") + "\n\n")
+		}
+	}
+
+	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n")
+
+	lines := m.moduleOutputLines
+	maxLines := m.height - 14
+	start := m.moduleOutputScroll
+	if start >= len(lines) && len(lines) > maxLines {
+		start = len(lines) - maxLines
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+	for _, line := range lines[start:end] {
+		sb.WriteString("  " + StyleRunningOutput.Render(line) + "\n")
+	}
+
+	sb.WriteString("\n")
+	if m.moduleOutputDone {
+		sb.WriteString(StyleHelp.Render("  ↑/↓ scroll  ·  enter/esc back to menu"))
+	} else {
+		sb.WriteString(StyleHelp.Render("  ↑/↓ scroll  ·  waiting for module..."))
+	}
+	return sb.String()
+}
+
 func (m Model) activateHubKey(key string) (tea.Model, tea.Cmd) {
 	noEng := func() bool { return m.activeEng == nil }
 	switch strings.ToUpper(key) {
@@ -2420,6 +3130,22 @@ func (m Model) activateHubKey(key string) (tea.Model, tea.Cmd) {
 			m.statusIsError = false
 		}
 		return m, nil
+	case "C":
+		// Compare two engagements
+		m.state = stateCompare
+		m.compareStage = 0
+		m.compareACursor = 0
+		return m, loadEngList()
+	case "T":
+		// Settings
+		m.state = stateSettings
+		m.settingsFromHub = true
+		cfg := loadConfigForSettings()
+		m.settingsFields[0].value = cfg[0]
+		m.settingsFields[1].value = cfg[1]
+		m.settingsFields[2].value = cfg[2]
+		m.settingsFieldCursor = 0
+		return m, nil
 	}
 	return m, nil
 }
@@ -2438,6 +3164,7 @@ func hubMenuRows() []hubRow {
 	return []hubRow{
 		{"N", "New Engagement", "start a new op"},
 		{"S", "Switch / List", "pick from all engagements"},
+		{"C", "Compare Engagements", "side-by-side finding diff"},
 		{"X", "Deactivate", "clear active — start fresh"},
 		{"", "", ""},
 		{"F", "Findings", "all findings for active engagement"},
@@ -2451,6 +3178,8 @@ func hubMenuRows() []hubRow {
 		{"I", "OPSEC Score", "module noise rating for this op"},
 		{"K", "PTES Checklist", "methodology progress tracker"},
 		{"G", "Attack Graph", "module execution tree"},
+		{"", "", ""},
+		{"T", "Settings", "webhook · Ollama URL · notifications"},
 	}
 }
 
@@ -2459,6 +3188,62 @@ func fmtScroll(current, total int) string {
 		return ""
 	}
 	return StyleHelp.Render(fmt.Sprintf("  %d/%d", current+1, total))
+}
+
+// statusBar returns a persistent bottom bar shown on every view.
+// Format: [engagement · CRIT:N HIGH:N] [OPSEC label] [IP] [VPN] [version]
+func (m Model) statusBar() string {
+	var left, right strings.Builder
+
+	if m.activeEng != nil {
+		left.WriteString(StyleBottomBarEngagement.Render(" ★ " + truncate(m.activeEng.Name, 22) + " "))
+		if m.activeEng.Target != "" {
+			left.WriteString(StyleBottomBar.Render(" → " + truncate(m.activeEng.Target, 18)))
+		}
+		if m.activeEng != nil {
+			stats := engagement.FindingStats(m.activeEng.ID)
+			if stats["CRITICAL"] > 0 {
+				left.WriteString(StyleBottomBarAlert.Render(fmt.Sprintf(" C:%d ", stats["CRITICAL"])))
+			}
+			if stats["HIGH"] > 0 {
+				left.WriteString(StyleBottomBarWarn.Render(fmt.Sprintf(" H:%d ", stats["HIGH"])))
+			}
+		}
+		if m.opsecLabel != "" {
+			switch m.opsecLabel {
+			case "QUIET", "CLEAN":
+				left.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Background(lipgloss.Color("#111111")).Bold(true).Padding(0, 1).Render("OPSEC " + m.opsecLabel))
+			case "MODERATE":
+				left.WriteString(lipgloss.NewStyle().Foreground(colorOrange).Background(lipgloss.Color("#111111")).Bold(true).Padding(0, 1).Render("OPSEC " + m.opsecLabel))
+			default:
+				left.WriteString(lipgloss.NewStyle().Foreground(colorRed).Background(lipgloss.Color("#111111")).Bold(true).Padding(0, 1).Render("OPSEC " + m.opsecLabel))
+			}
+		}
+	} else {
+		left.WriteString(StyleBottomBar.Render(" no active engagement "))
+	}
+
+	if m.localIP != "" && m.localIP != "unavailable" {
+		right.WriteString(StyleBottomBar.Render(" " + m.localIP))
+	}
+	if m.vpn != "" {
+		right.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Background(lipgloss.Color("#111111")).Padding(0, 1).Render("VPN " + m.vpn))
+	}
+	right.WriteString(StyleBottomBar.Render(" v" + m.version + " "))
+	if m.latestVersion != "" {
+		right.WriteString(StyleBottomBarWarn.Render(" ↑ " + m.latestVersion + " [U] "))
+	}
+
+	// Status message (errors/successes) shown in bar
+	if m.statusMsg != "" {
+		if m.statusIsError {
+			left.WriteString(StyleBottomBarAlert.Render(" ✗ " + truncate(m.statusMsg, 40) + " "))
+		} else {
+			left.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Background(lipgloss.Color("#111111")).Bold(true).Padding(0, 1).Render("✓ " + truncate(m.statusMsg, 40)))
+		}
+	}
+
+	return "\n" + left.String() + right.String() + "\n"
 }
 
 func StyleCyan(s string) string {
@@ -2481,5 +3266,92 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// applySearch filters findings/vault based on m.searchQuery.
+func (m *Model) applySearch() {
+	q := strings.ToLower(m.searchQuery)
+	switch m.searchState {
+	case stateFindings:
+		if q == "" {
+			m.filteredFindings = m.findings
+			return
+		}
+		var out []*engagement.Finding
+		for _, f := range m.findings {
+			if strings.Contains(strings.ToLower(f.Title), q) ||
+				strings.Contains(strings.ToLower(f.Module), q) ||
+				strings.Contains(strings.ToLower(f.Target), q) ||
+				strings.Contains(strings.ToLower(f.Severity), q) {
+				out = append(out, f)
+			}
+		}
+		m.filteredFindings = out
+	case stateVault:
+		if q == "" {
+			m.filteredVaultCreds = m.vaultCreds
+			return
+		}
+		var out []*vault.Credential
+		for _, c := range m.vaultCreds {
+			if strings.Contains(strings.ToLower(c.Username), q) ||
+				strings.Contains(strings.ToLower(c.Host), q) ||
+				strings.Contains(strings.ToLower(c.Source), q) {
+				out = append(out, c)
+			}
+		}
+		m.filteredVaultCreds = out
+	}
+}
+
+// checkModuleTools returns names of missing external tools for a module.
+// Uses a lightweight mapping — full check via 'davoid doctor'.
+var moduleToolDeps = map[string][]string{
+	"scanner":        {"nmap"},
+	"sniff":          {"tcpdump"},
+	"mitm":           {"arpspoof"},
+	"wifi_monitor":   {"airmon-ng"},
+	"wifi_scan":      {"airodump-ng"},
+	"wifi_deauth":    {"aireplay-ng"},
+	"wifi_handshake": {"airodump-ng"},
+	"wifi_crack":     {"aircrack-ng"},
+	"wifi_eviltwin":  {"hostapd", "dnsmasq"},
+	"msf_engine":     {"msfconsole"},
+	"ad_ops":         {"ldapsearch"},
+}
+
+func checkModuleTools(key string) []string {
+	deps, ok := moduleToolDeps[key]
+	if !ok {
+		return nil
+	}
+	var missing []string
+	for _, tool := range deps {
+		if _, err := exec.LookPath(tool); err != nil {
+			missing = append(missing, tool)
+		}
+	}
+	return missing
+}
+
+// loadConfigForSettings returns [webhookURL, webhookEvents, ollamaURL] from disk.
+func loadConfigForSettings() [3]string {
+	cfg := config.Load()
+	events := strings.Join(cfg.WebhookEvents, ",")
+	ollama := cfg.OllamaURL
+	return [3]string{cfg.WebhookURL, events, ollama}
+}
+
+// saveSettings persists settings from the TUI fields.
+func saveSettings(fields [3]inputField) {
+	cfg := config.Load()
+	cfg.WebhookURL = strings.TrimSpace(fields[0].value)
+	if e := strings.TrimSpace(fields[1].value); e == "" {
+		cfg.WebhookEvents = nil
+	} else {
+		cfg.WebhookEvents = strings.Split(e, ",")
+	}
+	cfg.OllamaURL = strings.TrimSpace(fields[2].value)
+	_ = config.Save(cfg)
 }
 

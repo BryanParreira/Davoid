@@ -83,15 +83,12 @@ var Registry = []Module{
 	{Key: "ai_assist", Name: "AI Console", Description: "LangChain + Ollama AI-assisted attack strategy & payload mutation", Category: "Advanced"},
 	{Key: "cloud_ops", Name: "Cloud Ops", Description: "Cloud-specific attack modules (AWS, GCP, Azure)", Category: "Advanced"},
 	{Key: "purple_team", Name: "Purple Team", Description: "Defensive scenario simulation and blue team reporting", Category: "Advanced"},
-	{Key: "god_mode", Name: "God Mode", Description: "Advanced exploitation chains", Category: "Advanced"},
-	{Key: "auditor", Name: "Setup Auditor", Description: "Pre-flight check: dependencies, network interface capabilities", Category: "Advanced"},
+	{Key: "god_mode", Name: "God Mode", Description: "Autonomous full-campaign orchestrator — recon → exploit chain → report", Category: "Advanced"},
 
-	{Key: "wifi_monitor", Name: "Monitor Mode", Description: "Toggle monitor mode on wireless interfaces (airmon-ng)", Category: "WiFi & Wireless"},
-	{Key: "wifi_scan", Name: "WiFi Scanner", Description: "Discover nearby networks, channels, encryption, clients (airodump-ng)", Category: "WiFi & Wireless"},
-	{Key: "wifi_deauth", Name: "Deauth Attack", Description: "Broadcast or targeted 802.11 deauthentication frames (aireplay-ng)", Category: "WiFi & Wireless"},
-	{Key: "wifi_handshake", Name: "Handshake Capture", Description: "Capture WPA/WPA2 4-way handshake for offline cracking", Category: "WiFi & Wireless"},
-	{Key: "wifi_crack", Name: "WPA Cracker", Description: "Dictionary attack against captured handshake (aircrack-ng)", Category: "WiFi & Wireless"},
-	{Key: "wifi_eviltwin", Name: "Evil Twin AP", Description: "Deploy rogue access point cloning a target SSID (hostapd + dnsmasq)", Category: "WiFi & Wireless"},
+	// ── [7] WiFi & Wireless ────────────────────────────────────────────────
+	// All 6 sub-modules (monitor/scan/deauth/handshake/crack/eviltwin) live inside
+	// RunSuite() — individual keys still work via `davoid run wifi_*` CLI.
+	{Key: "wifi", Name: "WiFi Suite", Description: "Full wireless attack chain: monitor → scan → deauth → handshake → crack → evil twin", Category: "WiFi & Wireless"},
 }
 
 // ByCategory returns modules filtered by category.
@@ -129,6 +126,8 @@ func RunModule(key string) error {
 	case "god_mode": return godmode.Run()
 	case "payloads": return payloads.Run()
 	case "catcher": return catcher.Run()
+	// Unified WiFi suite (TUI entry) — individual keys kept for `davoid run wifi_*` CLI
+	case "wifi": return wifi.RunSuite()
 	case "wifi_monitor": return wifi.RunMonitor()
 	case "wifi_scan": return wifi.RunScan()
 	case "wifi_deauth": return wifi.RunDeauth()

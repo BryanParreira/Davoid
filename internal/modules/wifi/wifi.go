@@ -1045,6 +1045,58 @@ no-resolv
 }
 
 // =============================================================================
+// Suite — unified entry point with sub-menu
+// =============================================================================
+
+func RunSuite() error {
+	for {
+		ui.Header("WiFi & Wireless — Full Attack Suite")
+		fmt.Println()
+		fmt.Println("  [1]  Monitor Mode         enable/disable monitor mode on wireless interface")
+		fmt.Println("  [2]  WiFi Scanner          discover nearby APs, channels, clients")
+		fmt.Println("  [3]  Deauth Attack         802.11 deauthentication frames (broadcast/targeted)")
+		fmt.Println("  [4]  Handshake Capture     capture WPA/WPA2 4-way handshake for offline crack")
+		fmt.Println("  [5]  WPA Cracker           dictionary attack on captured handshake (aircrack-ng)")
+		fmt.Println("  [6]  Evil Twin AP          rogue AP clone + DHCP + NAT (hostapd + dnsmasq)")
+		fmt.Println()
+		fmt.Println("  [Q]  Back")
+		fmt.Println()
+
+		choice := ui.Prompt("Select")
+		switch strings.TrimSpace(strings.ToUpper(choice)) {
+		case "1":
+			if err := RunMonitor(); err != nil {
+				ui.Fail(err.Error())
+			}
+		case "2":
+			if err := RunScan(); err != nil {
+				ui.Fail(err.Error())
+			}
+		case "3":
+			if err := RunDeauth(); err != nil {
+				ui.Fail(err.Error())
+			}
+		case "4":
+			if err := RunHandshake(); err != nil {
+				ui.Fail(err.Error())
+			}
+		case "5":
+			if err := RunCrack(); err != nil {
+				ui.Fail(err.Error())
+			}
+		case "6":
+			if err := RunEvilTwin(); err != nil {
+				ui.Fail(err.Error())
+			}
+		case "Q", "":
+			return nil
+		default:
+			ui.Warn("Unknown option.")
+		}
+	}
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
 

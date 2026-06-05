@@ -39,16 +39,24 @@ var tools []tool
 
 func init() {
 	tools = []tool{
+		// Recon
 		{"ping", "ping <host> — check host reachability", toolPing},
 		{"nmap", "nmap <host> — quick port scan", toolNmap},
 		{"dig", "dig <domain> — DNS lookup", toolDig},
 		{"whois", "whois <domain/IP> — WHOIS lookup", toolWhois},
-		{"curl", "curl <url> — HTTP request", toolCurl},
+		{"masscan", "masscan <host/cidr> <ports> — fast port scanner", toolMasscan},
+		// Web
+		{"curl", "curl <url> — HTTP request with headers", toolCurl},
+		{"nikto", "nikto <host> — web vulnerability scanner", toolNikto},
+		{"gobuster", "gobuster <url> <wordlist> — directory/file brute force", toolGobuster},
+		{"sqlmap", "sqlmap <url> — SQL injection test", toolSQLMap},
+		// Post-exploitation helpers
 		{"grep", "grep <pattern> <file> — search in file", toolGrep},
 		{"find", "find <path> <name> — find files", toolFind},
 		{"id", "id — show current user", toolID},
 		{"uname", "uname — show system info", toolUname},
 		{"netstat", "netstat — show listening ports", toolNetstat},
+		{"hashcat", "hashcat <hash> <wordlist> — crack hash", toolHashcat},
 	}
 }
 
@@ -351,6 +359,125 @@ func toolNetstat(_ string) string {
 	default:
 		out, _ = exec.Command("netstat", "-tulnp").CombinedOutput()
 	}
+	if len(out) > 2000 {
+		out = out[:2000]
+	}
+	return string(out)
+}
+
+func toolMasscan(args string) string {
+	if _, err := exec.LookPath("masscan"); err != nil {
+		return "masscan not found. Install: sudo apt install masscan"
+	}
+	parts := strings.Fields(args)
+	if len(parts) < 2 {
+		return "usage: masscan <target> <ports>  e.g. masscan 10.0.0.0/24 80,443,8080"
+	}
+	// masscan requires root; --rate limit to avoid destroying networks
+	cmdArgs := []string{parts[0], "-p", parts[1], "--rate", "1000", "--wait", "3"}
+	out, _ := exec.Command("masscan", cmdArgs...).CombinedOutput()
+	if len(out) > 2000 {
+		out = out[:2000]
+	}
+	return string(out)
+}
+
+func toolNikto(args string) string {
+	if _, err := exec.LookPath("nikto"); err != nil {
+		return "nikto not found. Install: sudo apt install nikto"
+	}
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return "usage: nikto <host or url>"
+	}
+	target := parts[0]
+	out, _ := exec.Command("nikto", "-h", target, "-Tuning", "123bde", "-maxtime", "60s").CombinedOutput()
+	if len(out) > 3000 {
+		out = out[:3000]
+	}
+	return string(out)
+}
+
+func toolGobuster(args string) string {
+	if _, err := exec.LookPath("gobuster"); err != nil {
+		return "gobuster not found. Install: sudo apt install gobuster  OR  go install github.com/OJ/gobuster/v3@latest"
+	}
+	parts := strings.Fields(args)
+	if len(parts) < 1 {
+		return "usage: gobuster <url> [wordlist]"
+	}
+	url := parts[0]
+	wordlist := "/usr/share/wordlists/dirb/common.txt"
+	if len(parts) >= 2 {
+		wordlist = parts[1]
+	}
+	out, _ := exec.Command("gobuster", "dir",
+		"-u", url,
+		"-w", wordlist,
+		"-t", "20",
+		"-q",
+		"--no-error",
+	).CombinedOutput()
+	if len(out) > 3000 {
+		out = out[:3000]
+	}
+	return string(out)
+}
+
+func toolSQLMap(args string) string {
+	if _, err := exec.LookPath("sqlmap"); err != nil {
+		return "sqlmap not found. Install: sudo apt install sqlmap  OR  pip install sqlmap"
+	}
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return "usage: sqlmap <url>  e.g. sqlmap http://target.com/login?id=1"
+	}
+	// Non-interactive, batch mode, limited requests to avoid IDS noise
+	cmdArgs := []string{
+		"-u", parts[0],
+		"--batch",
+		"--level", "1",
+		"--risk", "1",
+		"--timeout", "10",
+		"--retries", "1",
+		"--output-dir", "/tmp/davoid_sqlmap",
+	}
+	out, _ := exec.Command("sqlmap", cmdArgs...).CombinedOutput()
+	if len(out) > 3000 {
+		out = out[:3000]
+	}
+	return string(out)
+}
+
+func toolHashcat(args string) string {
+	if _, err := exec.LookPath("hashcat"); err != nil {
+		return "hashcat not found. Install: sudo apt install hashcat"
+	}
+	parts := strings.Fields(args)
+	if len(parts) < 2 {
+		return "usage: hashcat <hash_or_file> <wordlist>  (auto-detects hash type)"
+	}
+	hashInput := parts[0]
+	wordlist := parts[1]
+	// Write hash to temp file if it looks like a raw hash (no file path separators)
+	hashFile := hashInput
+	if !strings.Contains(hashInput, "/") && !strings.Contains(hashInput, "\\") {
+		tmp, err := os.CreateTemp("", "davoid_hash_*")
+		if err == nil {
+			tmp.WriteString(hashInput + "\n")
+			tmp.Close()
+			hashFile = tmp.Name()
+			defer os.Remove(hashFile)
+		}
+	}
+	// -a 0 = dictionary attack, --quiet = no progress spam, --force = skip GPU warning
+	out, _ := exec.Command("hashcat",
+		"-a", "0",
+		hashFile, wordlist,
+		"--quiet",
+		"--force",
+		"--potfile-disable",
+	).CombinedOutput()
 	if len(out) > 2000 {
 		out = out[:2000]
 	}

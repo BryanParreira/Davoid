@@ -254,6 +254,13 @@ func Update(latest string) <-chan string {
 			return
 		}
 
+		// Save current binary as .bak for rollback before replacing
+		backupPath := exePath + ".bak"
+		if copyErr := copyFile(exePath, backupPath); copyErr == nil {
+			os.Chmod(backupPath, 0755)
+			send(fmt.Sprintf("Backup saved: %s.bak", filepath.Base(exePath)))
+		}
+
 		if needsSudo {
 			// Copy verified binary to fallback path
 			if err := copyFile(tmpPath, fallbackPath); err != nil {
@@ -272,6 +279,7 @@ func Update(latest string) <-chan string {
 				sudoCmd := exec.Command("sudo", "mv", fallbackPath, exePath)
 				if err := sudoCmd.Run(); err == nil {
 					send(fmt.Sprintf("✓ Updated to %s — restart davoid.", latest))
+					send(fmt.Sprintf("  Rollback: sudo mv %s.bak %s", filepath.Base(exePath), exePath))
 					return
 				}
 			}
@@ -289,6 +297,7 @@ func Update(latest string) <-chan string {
 				}
 			}
 			send(fmt.Sprintf("✓ Updated to %s — restart davoid.", latest))
+			send(fmt.Sprintf("  Rollback anytime: mv %s.bak %s", exePath, exePath))
 		}
 	}()
 	return ch

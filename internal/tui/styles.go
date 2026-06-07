@@ -2,12 +2,12 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Davoid color palette — ghost-in-the-net identity
+// Davoid color palette — crimson-ops identity
 var (
 	colorBG       = lipgloss.Color("#0d0d0d")
-	colorCyan     = lipgloss.Color("#00e5ff")
-	colorDimCyan  = lipgloss.Color("#007a8a")
-	colorRed      = lipgloss.Color("#ff3d3d")
+	colorCyan     = lipgloss.Color("#ff2020")
+	colorDimCyan  = lipgloss.Color("#8a0000")
+	colorRed      = lipgloss.Color("#ff5555")
 	colorOrange   = lipgloss.Color("#ff8c00")
 	colorGreen    = lipgloss.Color("#39ff14")
 	colorGray     = lipgloss.Color("#444444")

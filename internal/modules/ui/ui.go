@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	Cyan   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00d7ff")).Bold(true)
+	Cyan   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff2020")).Bold(true)
 	Green  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff87")).Bold(true)
 	Red    = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)
 	Yellow = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffd700")).Bold(true)

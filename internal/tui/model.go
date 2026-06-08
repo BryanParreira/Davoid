@@ -286,7 +286,7 @@ type menuItem struct {
 
 func buildMainMenu() []menuItem {
 	return []menuItem{
-		{key: "C", label: "Campaign Mode ★", hint: "guided kill chain · smart suggestions"},
+		{key: "C", label: "Campaign Mode", hint: "guided kill chain · smart suggestions"},
 		{key: "", label: ""},
 		{key: "1", label: fmt.Sprintf("Recon & OSINT  (%d)", len(runner.ByCategory("Recon & OSINT"))),      hint: "scanner · OSINT · web recon"},
 		{key: "2", label: fmt.Sprintf("Network Attacks  (%d)", len(runner.ByCategory("Network Attacks"))),    hint: "MITM · traffic intercept"},
@@ -297,8 +297,8 @@ func buildMainMenu() []menuItem {
 		{key: "7", label: fmt.Sprintf("WiFi & Wireless  (%d)", len(runner.ByCategory("WiFi & Wireless"))),    hint: "monitor · scan · deauth · handshake"},
 		{key: "8", label: fmt.Sprintf("Advanced  (%d)", len(runner.ByCategory("Advanced"))),           hint: "AI · cloud · purple team · god mode"},
 		{key: "", label: ""},
-		{key: "P", label: "Playbooks ▸",    hint: "pre-built attack chains"},
-		{key: "E", label: "Engagement ▸",   hint: "findings · vault · targets · notes"},
+		{key: "P", label: "Playbooks",       hint: "pre-built attack chains"},
+		{key: "E", label: "Engagement Hub",  hint: "findings · vault · targets · notes"},
 		{key: "", label: ""},
 		{key: "?", label: "Help"},
 		{key: "Q", label: "Quit"},
@@ -1780,7 +1780,7 @@ func (m Model) breadcrumb() string {
 			parts[i] = StyleHelp.Render(p)
 		}
 	}
-	return "  " + strings.Join(parts, StyleHelp.Render(" ▸ "))
+	return "  " + strings.Join(parts, StyleHelp.Render(" / "))
 }
 
 func (m Model) header(title string) string {
@@ -1836,7 +1836,7 @@ func (m Model) viewMainMenu() string {
 		sb.WriteString("  " + badge)
 	}
 	if m.latestVersion != "" {
-		sb.WriteString("  " + StyleWarning.Render("↑ "+m.latestVersion+" [U]"))
+		sb.WriteString("  " + StyleWarning.Render("update: "+m.latestVersion+" [U]"))
 	}
 	sb.WriteString("\n")
 
@@ -1883,10 +1883,10 @@ func (m Model) viewMainMenu() string {
 			stats := engagement.FindingStats(m.activeEng.ID)
 			sb.WriteString("  ")
 			if stats["CRITICAL"] > 0 {
-				sb.WriteString(StyleFindingCritical.Render(fmt.Sprintf("● %dC", stats["CRITICAL"])) + " ")
+				sb.WriteString(StyleFindingCritical.Render(fmt.Sprintf("C:%d", stats["CRITICAL"])) + " ")
 			}
 			if stats["HIGH"] > 0 {
-				sb.WriteString(StyleFindingHigh.Render(fmt.Sprintf("● %dH", stats["HIGH"])) + " ")
+				sb.WriteString(StyleFindingHigh.Render(fmt.Sprintf("H:%d", stats["HIGH"])) + " ")
 			}
 		}
 	} else {
@@ -1913,7 +1913,7 @@ func (m Model) viewMainMenu() string {
 		cursor := "  "
 		selected := m.menuCursor == i
 		if selected {
-			cursor = StyleCyan("▶ ")
+			cursor = StyleCyan("> ")
 		}
 		keyStr := StyleMenuKey.Render("[" + item.key + "]")
 		var labelStr string
@@ -1926,8 +1926,8 @@ func (m Model) viewMainMenu() string {
 			labelStr = StyleMenuItem.Render(fmt.Sprintf("%-24s", item.label))
 		}
 		hintStr := ""
-		if item.hint != "" && !selected {
-			hintStr = StyleHelp.Render("· " + item.hint)
+		if item.hint != "" {
+			hintStr = StyleHelp.Render("   " + item.hint)
 		}
 		sb.WriteString(cursor + keyStr + "  " + labelStr + hintStr + "\n")
 	}
@@ -1967,7 +1967,7 @@ func (m Model) viewModuleList() string {
 			item := m.subMenuItems[i]
 			selected := i == m.subMenuCursor
 			if selected {
-				sb.WriteString(StyleCyan("  ▶ ") + StyleMenuItemSelected.Render(" "+item.label+" ") + "\n")
+				sb.WriteString(StyleCyan("  > ") + StyleMenuItemSelected.Render(" "+item.label+" ") + "\n")
 				if item.desc != "" {
 					sb.WriteString(StyleHelp.Render("      "+item.desc) + "\n")
 				}
@@ -2020,7 +2020,7 @@ func (m Model) viewModuleConfirm() string {
 		}
 		sb.WriteString("\n")
 	} else {
-		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement — findings won't be tracked.") + "\n\n")
+		sb.WriteString("  " + StyleWarning.Render("[!] No active engagement — findings won't be tracked.") + "\n\n")
 	}
 
 	yesStyle := lipgloss.NewStyle().Foreground(colorBG).Background(colorGreen).Bold(true).Padding(0, 2)
@@ -2072,7 +2072,7 @@ func (m Model) viewEngagementList() string {
 		for i, eng := range m.allEngagements {
 			active := ""
 			if m.activeEng != nil && eng.ID == m.activeEng.ID {
-				active = StyleGreen(" ★ ")
+				active = StyleGreen(" [active]")
 			}
 			line := fmt.Sprintf("  %-30s  %-20s  %-10s  %-8s%s",
 				truncate(eng.Name, 28),
@@ -2140,7 +2140,7 @@ func (m Model) viewFindings() string {
 func (m Model) viewReport() string {
 	var sb strings.Builder
 	sb.WriteString(m.header(""))
-	sb.WriteString(StyleSuccess.Render("  ✓ Report Generated") + "\n")
+	sb.WriteString(StyleSuccess.Render("  Report Generated") + "\n")
 	if m.reportPath != "" {
 		sb.WriteString(StyleLabel.Render("  Saved to: ") + StyleValue.Render(m.reportPath) + "\n\n")
 	}
@@ -2232,7 +2232,7 @@ func (m Model) viewEngagementHub() string {
 			BorderForeground(colorDimCyan).
 			Padding(0, 2).
 			Render(
-				StyleEngagementActive.Render("★ "+m.activeEng.Name) +
+				StyleEngagementActive.Render(m.activeEng.Name) +
 					func() string {
 						if m.activeEng.Target != "" {
 							return StyleLabel.Render("  →  ") + StyleValue.Render(m.activeEng.Target)
@@ -2264,7 +2264,7 @@ func (m Model) viewEngagementHub() string {
 		selected := m.hubCursor == i
 		cursor := "   "
 		if selected {
-			cursor = StyleCyan(" ▶ ")
+			cursor = StyleCyan(" > ")
 		}
 		key := StyleMenuKey.Render("[" + r.key + "]")
 		var label string
@@ -2503,7 +2503,7 @@ func (m Model) viewPlaybookConfirm() string {
 	if m.activeEng != nil {
 		sb.WriteString("  " + StyleLabel.Render("Engagement: ") + StyleEngagementActive.Render(m.activeEng.Name) + "\n\n")
 	} else {
-		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement — findings won't be tracked.") + "\n\n")
+		sb.WriteString("  " + StyleWarning.Render("[!] No active engagement — findings won't be tracked.") + "\n\n")
 	}
 
 	sb.WriteString("  " + StylePrompt.Render("Launch? [y/N]  ") + StyleHelp.Render("· esc back"))
@@ -2526,7 +2526,7 @@ func (m Model) viewCampaign() string {
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 60)) + "\n\n")
 
 	if m.activeEng == nil {
-		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement.") + "\n\n")
+		sb.WriteString("  " + StyleWarning.Render("[!] No active engagement.") + "\n\n")
 		sb.WriteString("  " + StyleMenuItem.Render("Campaign Mode tracks your progress across the kill chain.") + "\n")
 		sb.WriteString("  " + StyleMenuItem.Render("Create an engagement to get started.") + "\n\n")
 		sb.WriteString("  " + StyleMenuKey.Render("[N]") + "  " + StyleMenuItem.Render("New Engagement") + "\n")
@@ -2540,9 +2540,9 @@ func (m Model) viewCampaign() string {
 	sb.WriteString("  " + StyleSectionHeader.Render("Kill Chain Progress") + "\n")
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 40)) + "\n")
 	for _, p := range m.campaignPhases {
-		marker := StyleLabel.Render("○")
+		marker := StyleHelp.Render("[ ]")
 		if p.FindingCount > 0 {
-			marker = StyleSuccess.Render("●")
+			marker = StyleSuccess.Render("[x]")
 		}
 		suffix := ""
 		if p.FindingCount == 1 {
@@ -2760,7 +2760,7 @@ func (m Model) viewDashboard() string {
 
 	eng := m.activeEng
 	// Engagement header bar
-	engLine := StyleEngagementActive.Render("★ "+eng.Name)
+	engLine := StyleEngagementActive.Render(eng.Name)
 	if eng.Target != "" {
 		engLine += StyleLabel.Render("  →  ") + StyleValue.Render(eng.Target)
 	}
@@ -2964,7 +2964,7 @@ func (m Model) viewCompare() string {
 		for i, eng := range m.compareEngList {
 			active := ""
 			if m.activeEng != nil && eng.ID == m.activeEng.ID {
-				active = StyleGreen(" ★")
+				active = StyleGreen(" [active]")
 			}
 			line := fmt.Sprintf("  %-30s  %-20s  %-8s%s",
 				truncate(eng.Name, 28), truncate(eng.Target, 18),
@@ -3082,9 +3082,9 @@ func (m Model) viewModuleRunning() string {
 		sb.WriteString(StyleHelp.Render("  Module executing — output streaming below...\n\n"))
 	} else {
 		if m.moduleOutputErr != nil {
-			sb.WriteString(StyleError.Render("  ✗ "+m.moduleOutputErr.Error()) + "\n\n")
+			sb.WriteString(StyleError.Render("  Error: "+m.moduleOutputErr.Error()) + "\n\n")
 		} else {
-			sb.WriteString(StyleSuccess.Render("  ✓ Module complete") + "\n\n")
+			sb.WriteString(StyleSuccess.Render("  Module complete") + "\n\n")
 		}
 	}
 
@@ -3269,7 +3269,7 @@ func (m Model) statusBar() string {
 	var left, right strings.Builder
 
 	if m.activeEng != nil {
-		left.WriteString(StyleBottomBarEngagement.Render(" ★ " + truncate(m.activeEng.Name, 22) + " "))
+		left.WriteString(StyleBottomBarEngagement.Render(" " + truncate(m.activeEng.Name, 22) + " "))
 		if m.activeEng.Target != "" {
 			left.WriteString(StyleBottomBar.Render(" → " + truncate(m.activeEng.Target, 18)))
 		}
@@ -3310,9 +3310,9 @@ func (m Model) statusBar() string {
 	// Status message (errors/successes) shown in bar
 	if m.statusMsg != "" {
 		if m.statusIsError {
-			left.WriteString(StyleBottomBarAlert.Render(" ✗ " + truncate(m.statusMsg, 40) + " "))
+			left.WriteString(StyleBottomBarAlert.Render(" ERR " + truncate(m.statusMsg, 40) + " "))
 		} else {
-			left.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Background(lipgloss.Color("#111111")).Bold(true).Padding(0, 1).Render("✓ " + truncate(m.statusMsg, 40)))
+			left.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Background(lipgloss.Color("#111111")).Bold(true).Padding(0, 1).Render("OK " + truncate(m.statusMsg, 40)))
 		}
 	}
 

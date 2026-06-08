@@ -279,6 +279,7 @@ type menuItem struct {
 	key   string
 	label string
 	hint  string // short dimmed hint shown next to label on main menu
+	desc  string // module description shown as subtitle in module list
 	sub   bool   // true = opens submenu, false = direct action
 	state state
 }
@@ -771,6 +772,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, loadPlaybooks()
 		case "e", "E":
 			m.state = stateEngagementHub
+			m.hubCursor = 1 // skip section header row 0
 			return m, nil
 		case "?":
 			m.state = stateHelp
@@ -1408,7 +1410,11 @@ func (m Model) openCategoryMenu(category string) (Model, tea.Cmd) {
 		if info, ok := opsec.ModuleNoise[mod.Key]; ok {
 			icon = opsec.NoiseIcon(info.Level)
 		}
-		items[i] = menuItem{key: mod.Key, label: fmt.Sprintf("%s %-20s  %s", icon, mod.Name, runner.ShortDesc(mod.Description, 48))}
+		items[i] = menuItem{
+			key:   mod.Key,
+			label: icon + " " + mod.Name,
+			desc:  runner.ShortDesc(mod.Description, 58),
+		}
 	}
 	m.subMenuItems = items
 	m.subMenuCursor = 0
@@ -1889,18 +1895,25 @@ func (m Model) viewMainMenu() string {
 	sb.WriteString("\n\n")
 
 	// Menu items — rendered directly from menuItems so cursor tracking is exact
+	attackSectionPrinted := false
 	for i, item := range m.menuItems {
 		if item.key == "" {
 			sb.WriteString("\n")
 			continue
 		}
+		// Print "ATTACK MODULES" header before first category key
+		if !attackSectionPrinted && item.key == "1" {
+			sb.WriteString("  " + StyleSectionHeader.Render("ATTACK MODULES") + "\n")
+			sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 42)) + "\n")
+			attackSectionPrinted = true
+		}
 		if item.key == "P" {
-			sb.WriteString(StyleDivider.Render(strings.Repeat("─", 40)) + "\n")
+			sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 42)) + "\n")
 		}
 		cursor := "  "
 		selected := m.menuCursor == i
 		if selected {
-			cursor = StyleCyan("> ")
+			cursor = StyleCyan("▶ ")
 		}
 		keyStr := StyleMenuKey.Render("[" + item.key + "]")
 		var labelStr string
@@ -1920,7 +1933,7 @@ func (m Model) viewMainMenu() string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  number keys for quick access  ·  [?] help  ·  ctrl+c quit"))
+	sb.WriteString(StyleHelp.Render("  ↑/↓  ·  enter  ·  1-8 quick jump  ·  [?] help  ·  [Q] quit"))
 	sb.WriteString("\n")
 
 	return sb.String()
@@ -1934,9 +1947,10 @@ func (m Model) viewModuleList() string {
 		sb.WriteString(StyleError.Render("  No modules in this category.\n"))
 	} else {
 		sb.WriteString(m.header("  Select Module"))
-		maxVisible := m.height - 14
-		if maxVisible < 4 {
-			maxVisible = 4
+		// Each item = 3 lines (name + desc + blank gap)
+		maxVisible := (m.height - 14) / 3
+		if maxVisible < 3 {
+			maxVisible = 3
 		}
 		start := 0
 		if m.subMenuCursor >= maxVisible {
@@ -1951,40 +1965,67 @@ func (m Model) viewModuleList() string {
 		}
 		for i := start; i < end; i++ {
 			item := m.subMenuItems[i]
-			if i == m.subMenuCursor {
-				sb.WriteString("  " + StyleMenuItemSelected.Render(" "+item.label+" ") + "\n")
+			selected := i == m.subMenuCursor
+			if selected {
+				sb.WriteString(StyleCyan("  ▶ ") + StyleMenuItemSelected.Render(" "+item.label+" ") + "\n")
+				if item.desc != "" {
+					sb.WriteString(StyleHelp.Render("      "+item.desc) + "\n")
+				}
 			} else {
-				sb.WriteString("  " + StyleMenuKey.Render("  ") + StyleMenuItem.Render(item.label) + "\n")
+				sb.WriteString("    " + StyleMenuItem.Render(item.label) + "\n")
+				if item.desc != "" {
+					sb.WriteString(StyleHelp.Render("      "+item.desc) + "\n")
+				}
 			}
+			sb.WriteString("\n")
 		}
 		if end < len(m.subMenuItems) {
 			sb.WriteString(StyleHelp.Render(fmt.Sprintf("  ↓ %d more below\n", len(m.subMenuItems)-end)))
 		}
 	}
 
-	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  [H] home  ·  esc back"))
+	sb.WriteString(StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  [/] search  ·  esc back"))
 	return sb.String()
 }
 
 func (m Model) viewModuleConfirm() string {
 	var sb strings.Builder
 	sb.WriteString(m.header("  Launch Module"))
-	sb.WriteString("  " + StyleLabel.Render("Module:  ") + StyleValue.Render(m.selectedModule.Name) + "\n")
-	sb.WriteString("  " + StyleLabel.Render("Category: ") + StyleValue.Render(m.selectedModule.Category) + "\n\n")
-	sb.WriteString("  " + StyleMenuItem.Render(m.selectedModule.Description) + "\n\n")
+
+	// Module info in a rounded border box
+	noiseDesc := ""
+	if info, ok := opsec.ModuleNoise[m.selectedModule.Key]; ok {
+		noiseDesc = opsec.NoiseIcon(info.Level) + "  " + info.Reason
+	}
+	boxWidth := 62
+	if m.width > 0 && m.width < 72 {
+		boxWidth = m.width - 10
+	}
+	boxContent := StyleLabel.Render("Module    ") + StyleValue.Bold(true).Render(m.selectedModule.Name) + "\n" +
+		StyleLabel.Render("Category  ") + StyleValue.Render(m.selectedModule.Category) + "\n" +
+		StyleLabel.Render("Noise     ") + StyleHelp.Render(noiseDesc) + "\n\n" +
+		StyleMenuItem.Render(m.selectedModule.Description)
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorDimCyan).
+		Padding(1, 2).
+		Width(boxWidth).
+		Render(boxContent)
+	sb.WriteString("  " + box + "\n\n")
 
 	if m.activeEng != nil {
-		sb.WriteString("  " + StyleLabel.Render("Engagement: ") + StyleEngagementActive.Render(m.activeEng.Name) + "\n")
+		sb.WriteString("  " + StyleLabel.Render("Engagement  ") + StyleEngagementActive.Render(m.activeEng.Name) + "\n")
 		if m.activeEng.Scope != "" {
-			sb.WriteString("  " + StyleLabel.Render("Scope:      ") + StyleHelp.Render(m.activeEng.Scope) + "\n")
+			sb.WriteString("  " + StyleLabel.Render("Scope       ") + StyleHelp.Render(m.activeEng.Scope) + "\n")
 		}
 		sb.WriteString("\n")
 	} else {
-		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement — findings won't be tracked.\n\n"))
+		sb.WriteString("  " + StyleWarning.Render("⚠  No active engagement — findings won't be tracked.") + "\n\n")
 	}
 
-	sb.WriteString("  " + StylePrompt.Render("Launch? [y/N]  "))
-	sb.WriteString(StyleHelp.Render("· esc back"))
+	yesStyle := lipgloss.NewStyle().Foreground(colorBG).Background(colorGreen).Bold(true).Padding(0, 2)
+	noStyle := lipgloss.NewStyle().Foreground(colorLightGray).Border(lipgloss.NormalBorder()).BorderForeground(colorGray).Padding(0, 1)
+	sb.WriteString("  " + yesStyle.Render("Y  launch") + "  " + noStyle.Render("N  back") + "\n")
 	return sb.String()
 }
 
@@ -2186,43 +2227,57 @@ func (m Model) viewEngagementHub() string {
 	sb.WriteString(StyleMenuTitle.Render("  Engagement Hub") + "\n")
 
 	if m.activeEng != nil {
-		sb.WriteString("  " + StyleLabel.Render("Active: ") + StyleEngagementActive.Render(m.activeEng.Name))
-		if m.activeEng.Target != "" {
-			sb.WriteString(StyleLabel.Render("  →  ") + StyleValue.Render(m.activeEng.Target))
-		}
-		if m.activeEng.Scope != "" {
-			sb.WriteString(StyleLabel.Render("  scope: ") + StyleHelp.Render(m.activeEng.Scope))
-		}
+		engBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorDimCyan).
+			Padding(0, 2).
+			Render(
+				StyleEngagementActive.Render("★ "+m.activeEng.Name) +
+					func() string {
+						if m.activeEng.Target != "" {
+							return StyleLabel.Render("  →  ") + StyleValue.Render(m.activeEng.Target)
+						}
+						return ""
+					}() +
+					func() string {
+						if m.activeEng.Scope != "" {
+							return StyleLabel.Render("  scope: ") + StyleHelp.Render(m.activeEng.Scope)
+						}
+						return ""
+					}(),
+			)
+		sb.WriteString("  " + engBox + "\n\n")
 	} else {
-		sb.WriteString("  " + StyleEngagementNone.Render("no active engagement"))
+		sb.WriteString("  " + StyleEngagementNone.Render("no active engagement — [N] to create one") + "\n\n")
 	}
-	sb.WriteString("\n\n")
-	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 50)) + "\n\n")
 
 	rows := hubMenuRows()
 	for i, r := range rows {
+		if r.section != "" {
+			sb.WriteString("\n  " + StyleSectionHeader.Render(r.section) + "\n")
+			sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 36)) + "\n")
+			continue
+		}
 		if r.key == "" {
-			sb.WriteString("\n")
 			continue
 		}
 		selected := m.hubCursor == i
-		cursor := "  "
+		cursor := "   "
 		if selected {
-			cursor = StyleCyan("> ")
+			cursor = StyleCyan(" ▶ ")
 		}
-		key := StyleMenuKey.Render(fmt.Sprintf("  [%s]", r.key))
+		key := StyleMenuKey.Render("[" + r.key + "]")
 		var label string
 		if selected {
-			label = StyleMenuItemSelected.Render(fmt.Sprintf("  %-20s", r.label) + " ")
+			label = StyleMenuItemSelected.Render(" "+fmt.Sprintf("%-18s", r.label)+" ")
 		} else {
-			label = StyleMenuItem.Render(fmt.Sprintf("  %-20s", r.label))
+			label = StyleMenuItem.Render(fmt.Sprintf("%-20s", r.label))
 		}
 		desc := StyleHelp.Render(r.desc)
-		sb.WriteString(cursor + key + label + desc + "\n")
+		sb.WriteString(cursor + key + "  " + label + "  " + desc + "\n")
 	}
 
-	sb.WriteString("\n" + StyleDivider.Render("  "+strings.Repeat("─", 50)) + "\n")
-	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓ navigate  ·  enter select  ·  or press key directly  ·  [T] settings  ·  [H] home  ·  esc back"))
+	sb.WriteString("\n" + StyleHelp.Render("  ↑/↓  ·  enter  ·  press key directly  ·  esc back"))
 	return sb.String()
 }
 
@@ -2697,92 +2752,108 @@ func (m Model) viewDashboard() string {
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", 65)) + "\n\n")
 
 	if m.activeEng == nil {
-		sb.WriteString(StyleEngagementNone.Render("  no active engagement\n\n"))
+		sb.WriteString("  " + StyleEngagementNone.Render("no active engagement") + "\n\n")
 		sb.WriteString("  " + StyleMenuKey.Render("[E]") + "  " + StyleMenuItem.Render("Engagement Hub") + "\n")
 		sb.WriteString("  " + StyleMenuKey.Render("[M]") + "  " + StyleMenuItem.Render("Main Menu") + "\n")
-		return sb.String()
+		return sb.String() + m.statusBar()
 	}
 
 	eng := m.activeEng
-	sb.WriteString("  " + StyleEngagementActive.Render("★ "+eng.Name))
+	// Engagement header bar
+	engLine := StyleEngagementActive.Render("★ "+eng.Name)
 	if eng.Target != "" {
-		sb.WriteString(StyleLabel.Render("  →  ") + StyleValue.Render(eng.Target))
+		engLine += StyleLabel.Render("  →  ") + StyleValue.Render(eng.Target)
 	}
 	if eng.Scope != "" {
-		sb.WriteString(StyleLabel.Render("  scope: ") + StyleHelp.Render(eng.Scope))
+		engLine += StyleLabel.Render("  scope: ") + StyleHelp.Render(eng.Scope)
 	}
-	sb.WriteString("\n\n")
+	sb.WriteString("  " + engLine + "\n\n")
 
-	// Stats grid
+	// ── Finding severity boxes ─────────────────────────────────────────────
 	stats := m.dashStats.findingStats
 	if stats == nil {
 		stats = map[string]int{}
 	}
 	total := stats["CRITICAL"] + stats["HIGH"] + stats["MEDIUM"] + stats["INFO"]
 
-	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n")
-	sb.WriteString("  ")
-	sb.WriteString(StyleFindingCritical.Render(fmt.Sprintf("CRIT %-4d", stats["CRITICAL"])))
-	sb.WriteString("  ")
-	sb.WriteString(StyleFindingHigh.Render(fmt.Sprintf("HIGH %-4d", stats["HIGH"])))
-	sb.WriteString("  ")
-	sb.WriteString(StyleWarning.Render(fmt.Sprintf("MED  %-4d", stats["MEDIUM"])))
-	sb.WriteString("  ")
-	sb.WriteString(StyleFindingInfo.Render(fmt.Sprintf("INFO %-4d", stats["INFO"])))
-	sb.WriteString("  ")
-	sb.WriteString(StyleLabel.Render(fmt.Sprintf("TOTAL %-4d", total)))
-	sb.WriteString("\n")
-	sb.WriteString("  ")
-	sb.WriteString(StyleDashboardLabel.Render(fmt.Sprintf("Hosts: ")))
-	sb.WriteString(StyleDashboardStat.Render(fmt.Sprintf("%-4d", m.dashStats.hostCount)))
-	sb.WriteString("  ")
-	sb.WriteString(StyleDashboardLabel.Render("Creds: "))
-	sb.WriteString(StyleDashboardStat.Render(fmt.Sprintf("%-4d", m.dashStats.credCount)))
-	sb.WriteString("  ")
-	sb.WriteString(StyleDashboardLabel.Render("Notes: "))
-	sb.WriteString(StyleDashboardStat.Render(fmt.Sprintf("%-4d", m.dashStats.noteCount)))
+	statBox := func(label, val string, style lipgloss.Style) string {
+		return lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorGray).
+			Padding(0, 2).
+			Render(style.Render(fmt.Sprintf("%-4s", val)) + "\n" + StyleHelp.Render(label))
+	}
+
+	critBox := statBox("CRIT", fmt.Sprintf("%d", stats["CRITICAL"]), StyleFindingCritical)
+	highBox := statBox("HIGH", fmt.Sprintf("%d", stats["HIGH"]), StyleFindingHigh)
+	medBox := statBox("MED", fmt.Sprintf("%d", stats["MEDIUM"]), StyleWarning)
+	infoBox := statBox("INFO", fmt.Sprintf("%d", stats["INFO"]), StyleFindingInfo)
+	totalBox := statBox("TOTAL", fmt.Sprintf("%d", total), StyleValue)
+
+	sb.WriteString("  " + lipgloss.JoinHorizontal(lipgloss.Top, critBox, "  ", highBox, "  ", medBox, "  ", infoBox, "  ", totalBox) + "\n\n")
+
+	// ── Resource counters ──────────────────────────────────────────────────
+	resBox := func(label, val string) string {
+		return lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorDimCyan).
+			Padding(0, 3).
+			Render(StyleDashboardStat.Render(fmt.Sprintf("%-4s", val)) + "\n" + StyleDashboardLabel.Render(label))
+	}
+
+	hostsB := resBox("HOSTS", fmt.Sprintf("%d", m.dashStats.hostCount))
+	credsB := resBox("CREDS", fmt.Sprintf("%d", m.dashStats.credCount))
+	notesB := resBox("NOTES", fmt.Sprintf("%d", m.dashStats.noteCount))
+
+	opsecStr := ""
 	if m.opsecLabel != "" {
-		sb.WriteString("  ")
+		var opsecStyle lipgloss.Style
 		switch m.opsecLabel {
 		case "QUIET", "CLEAN":
-			sb.WriteString(StyleSuccess.Render("OPSEC " + m.opsecLabel))
+			opsecStyle = StyleSuccess
 		case "MODERATE":
-			sb.WriteString(StyleWarning.Render("OPSEC " + m.opsecLabel))
+			opsecStyle = StyleWarning
 		default:
-			sb.WriteString(StyleError.Render("OPSEC " + m.opsecLabel))
+			opsecStyle = StyleError
 		}
+		opsecStr = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorGray).
+			Padding(0, 2).
+			Render(opsecStyle.Render(m.opsecLabel) + "\n" + StyleDashboardLabel.Render("OPSEC"))
 	}
-	sb.WriteString("\n")
-	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n\n")
 
-	// Recent findings
+	row2 := hostsB + "  " + credsB + "  " + notesB
+	if opsecStr != "" {
+		row2 += "  " + opsecStr
+	}
+	sb.WriteString("  " + row2 + "\n\n")
+
+	// ── Recent findings ────────────────────────────────────────────────────
 	if len(m.dashStats.recentFindings) > 0 {
-		sb.WriteString(StyleSectionHeader.Render("  Recent Findings") + "\n")
+		sb.WriteString("  " + StyleSectionHeader.Render("RECENT FINDINGS") + "\n")
+		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n")
 		for _, f := range m.dashStats.recentFindings {
 			sev := SeverityStyle(f.Severity).Render(fmt.Sprintf("%-8s", f.Severity))
 			mod := StyleLabel.Render(fmt.Sprintf("%-14s", truncate(f.Module, 13)))
-			title := StyleMenuItem.Render(truncate(f.Title, 45))
+			title := StyleMenuItem.Render(truncate(f.Title, 42))
 			ts := StyleHelp.Render(f.CreatedAt.Format("01-02 15:04"))
 			sb.WriteString(fmt.Sprintf("  %s  %s  %s  %s\n", sev, mod, title, ts))
 		}
 		sb.WriteString("\n")
 	}
 
-	// Quick actions
+	// ── Quick actions ──────────────────────────────────────────────────────
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 55)) + "\n")
 	actions := []struct{ k, l string }{
-		{"M", "Main Menu"},
-		{"C", "Campaign Mode"},
-		{"F", "Findings"},
-		{"E", "Engagement Hub"},
-		{"S", "Settings"},
-		{"R", "Refresh"},
+		{"M", "Main Menu"}, {"C", "Campaign"}, {"F", "Findings"},
+		{"E", "Engagement Hub"}, {"S", "Settings"}, {"R", "Refresh"},
 	}
 	for i, a := range actions {
 		if i > 0 && i%3 == 0 {
 			sb.WriteString("\n")
 		}
-		sb.WriteString("  " + StyleMenuKey.Render("["+a.k+"]") + " " + StyleMenuItem.Render(fmt.Sprintf("%-18s", a.l)))
+		sb.WriteString("  " + StyleMenuKey.Render("["+a.k+"]") + " " + StyleMenuItem.Render(fmt.Sprintf("%-16s", a.l)))
 	}
 	sb.WriteString("\n")
 
@@ -3155,31 +3226,33 @@ func (m Model) activateHubKey(key string) (tea.Model, tea.Cmd) {
 // --------------------------------------------------------------------------
 
 type hubRow struct {
-	key   string
-	label string
-	desc  string
+	key     string
+	label   string
+	desc    string
+	section string // non-empty = section header row (not selectable)
 }
 
 func hubMenuRows() []hubRow {
 	return []hubRow{
-		{"N", "New Engagement", "start a new op"},
-		{"S", "Switch / List", "pick from all engagements"},
-		{"C", "Compare Engagements", "side-by-side finding diff"},
-		{"X", "Deactivate", "clear active — start fresh"},
-		{"", "", ""},
-		{"F", "Findings", "all findings for active engagement"},
-		{"L", "Timeline", "chronological activity log"},
-		{"R", "Report", "generate Markdown / PDF report"},
-		{"", "", ""},
-		{"V", "Credential Vault", "harvested credentials"},
-		{"M", "Target Map", "network topology + discovered hosts"},
-		{"O", "Notes", "engagement notes"},
-		{"", "", ""},
-		{"I", "OPSEC Score", "module noise rating for this op"},
-		{"K", "PTES Checklist", "methodology progress tracker"},
-		{"G", "Attack Graph", "module execution tree"},
-		{"", "", ""},
-		{"T", "Settings", "webhook · Ollama URL · notifications"},
+		{section: "ENGAGEMENTS"},
+		{"N", "New Engagement", "start a new op", ""},
+		{"S", "Switch / List", "pick from all engagements", ""},
+		{"C", "Compare", "side-by-side finding diff", ""},
+		{"X", "Deactivate", "clear active engagement", ""},
+		{section: "INTEL & DATA"},
+		{"F", "Findings", "all findings for active engagement", ""},
+		{"L", "Timeline", "chronological activity log", ""},
+		{"R", "Report", "generate Markdown / PDF report", ""},
+		{section: "RESOURCES"},
+		{"V", "Credential Vault", "harvested credentials", ""},
+		{"M", "Target Map", "network topology + discovered hosts", ""},
+		{"O", "Notes", "engagement notes", ""},
+		{section: "ANALYSIS"},
+		{"I", "OPSEC Score", "module noise rating for this op", ""},
+		{"K", "PTES Checklist", "methodology progress tracker", ""},
+		{"G", "Attack Graph", "module execution tree", ""},
+		{section: "CONFIG"},
+		{"T", "Settings", "webhook · Ollama URL · notifications", ""},
 	}
 }
 

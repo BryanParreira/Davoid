@@ -67,7 +67,7 @@ func launchTUI() error {
 	return nil
 }
 
-var version = "2.6.1" // overridden by -ldflags "-X main.version=..."
+var version = "2.7.1" // overridden by -ldflags "-X main.version=..."
 
 var rootCmd = &cobra.Command{
 	Use:   "davoid",
@@ -101,7 +101,7 @@ var newCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("\n  ✓  Engagement created and set as active\n")
+		fmt.Printf("\n  Engagement created and set as active\n")
 		fmt.Printf("     Name:   %s\n", eng.Name)
 		fmt.Printf("     ID:     %s\n", eng.ID)
 		if target != "" {
@@ -137,7 +137,7 @@ var listCmd = &cobra.Command{
 		for _, eng := range engagements {
 			marker := " "
 			if active != nil && eng.ID == active.ID {
-				marker = "★"
+				marker = "*"
 			}
 			stats := engagement.FindingStats(eng.ID)
 			total := stats["CRITICAL"] + stats["HIGH"] + stats["MEDIUM"] + stats["INFO"]
@@ -179,19 +179,19 @@ var reportCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("\n  ✓  Report saved to: %s\n", path)
+		fmt.Printf("\n  Report saved to: %s\n", path)
 
 		if useAI {
 			fmt.Printf("\n  Generating AI executive summary via Ollama...\n")
 			summary, err := generateAISummary(engID)
 			if err != nil {
-				fmt.Printf("  ⚠  AI summary failed: %v\n", err)
-				fmt.Printf("     Make sure Ollama is running: ollama serve\n")
+				fmt.Printf("  AI summary failed: %v\n", err)
+				fmt.Printf("  Make sure Ollama is running: ollama serve\n")
 			} else {
 				if err := engagement.PrependAISummary(path, summary); err != nil {
-					fmt.Printf("  ⚠  Could not write AI summary: %v\n", err)
+					fmt.Printf("  Could not write AI summary: %v\n", err)
 				} else {
-					fmt.Printf("  ✓  AI executive summary added to report\n")
+					fmt.Printf("  AI executive summary added to report\n")
 				}
 			}
 		}
@@ -220,7 +220,7 @@ var findingCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("\n  ✓  Finding logged: %s [%s]\n     ID: %s\n\n", f.Title, f.Severity, f.ID[:8])
+		fmt.Printf("\n  Finding logged: %s [%s]\n  ID: %s\n\n", f.Title, f.Severity, f.ID[:8])
 		return nil
 	},
 }
@@ -264,10 +264,10 @@ var doctorCmd = &cobra.Command{
 				continue
 			}
 			_, err := exec.LookPath(d.Cmd)
-			status := "\033[32m✓ found  \033[0m"
+			status := "\033[32mfound  \033[0m"
 			install := ""
 			if err != nil {
-				status = "\033[31m✗ missing\033[0m"
+				status = "\033[31mmissing\033[0m"
 				install = auditor.InstallCmd(d, pm)
 				missing++
 			} else {
@@ -561,7 +561,7 @@ Examples:
 		if err := config.Set(args[0], args[1]); err != nil {
 			return err
 		}
-		fmt.Printf("\n  ✓  %s = %s\n\n", args[0], args[1])
+		fmt.Printf("\n  set: %s = %s\n\n", args[0], args[1])
 		return nil
 	},
 }
@@ -722,10 +722,10 @@ var checklistCmd = &cobra.Command{
 			fmt.Printf("  Phase: %s\n", phase.Name)
 			fmt.Printf("  %s  %d/%d\n", bar, done, len(phase.Modules))
 			for _, m := range phase.Modules {
-				icon := "✗"
+				icon := "[ ]"
 				color := "\033[31m"
 				if used[m] {
-					icon = "✓"
+					icon = "[x]"
 					color = "\033[32m"
 				}
 				fmt.Printf("    %s%s %-20s\033[0m\n", color, icon, m)
@@ -810,9 +810,9 @@ var graphCmd = &cobra.Command{
 		}
 
 		for mi, mod := range modKeys {
-			connector := "├──"
+			connector := "+--"
 			if mi == len(modKeys)-1 && len(hosts) == 0 {
-				connector = "└──"
+				connector = "\\--"
 			}
 
 			modName := mod
@@ -822,13 +822,13 @@ var graphCmd = &cobra.Command{
 					break
 				}
 			}
-			fmt.Printf("  │\n  %s [%s]\n", connector, modName)
+			fmt.Printf("  |\n  %s [%s]\n", connector, modName)
 
 			modFindings := byModule[mod]
 			for fi, f := range modFindings {
-				fc := "│   ├──"
+				fc := "|   +--"
 				if fi == len(modFindings)-1 {
-					fc = "│   └──"
+					fc = "|   \\--"
 				}
 				sev := f.Severity
 				sevColor := ""
@@ -844,18 +844,18 @@ var graphCmd = &cobra.Command{
 				}
 				fmt.Printf("  %s %s[%s]\033[0m %s\n", fc, sevColor, sev, truncate(f.Title, 45))
 				if f.Target != "" {
-					fmt.Printf("  │       → %s\n", f.Target)
+					fmt.Printf("  |       > %s\n", f.Target)
 				}
 			}
 		}
 
 		// Hosts section
 		if len(hosts) > 0 {
-			fmt.Printf("  │\n  └── [Discovered Hosts]\n")
+			fmt.Printf("  |\n  \\-- [Discovered Hosts]\n")
 			for hi, h := range hosts {
-				hc := "      ├──"
+				hc := "      +--"
 				if hi == len(hosts)-1 {
-					hc = "      └──"
+					hc = "      \\--"
 				}
 				label := h.IP
 				if h.Hostname != "" {
@@ -879,7 +879,7 @@ var graphCmd = &cobra.Command{
 		if len(creds) > 0 {
 			fmt.Printf("\n  Captured Credentials: %d\n", len(creds))
 			for _, c := range creds {
-				fmt.Printf("  ● %s @ %s  [%s]\n", c.Username, c.Host, c.Kind)
+				fmt.Printf("  - %s @ %s  [%s]\n", c.Username, c.Host, c.Kind)
 			}
 		}
 
@@ -957,7 +957,7 @@ var templateApplyCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("\n  ✓  Finding logged: %s\n", f.Title)
+		fmt.Printf("\n  Finding logged: %s\n", f.Title)
 		fmt.Printf("     Severity: %s  |  CVSS: %.1f  |  ID: %s\n\n", sev, score, f.ID[:8])
 		return nil
 	},
@@ -993,9 +993,9 @@ var exportCmd = &cobra.Command{
 		}
 
 		if password != "" {
-			fmt.Printf("\n  ✓  Snapshot exported (AES-256 encrypted): %s\n", out)
+			fmt.Printf("\n  Snapshot exported (AES-256 encrypted): %s\n", out)
 		} else {
-			fmt.Printf("\n  ✓  Snapshot exported: %s\n", out)
+			fmt.Printf("\n  Snapshot exported: %s\n", out)
 			fmt.Printf("  Tip: use --password to encrypt the archive.\n")
 		}
 		fmt.Printf("  Share with: davoid import %s\n\n", out)
@@ -1015,7 +1015,7 @@ var importCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("\n  ✓  Snapshot imported\n")
+		fmt.Printf("\n  Snapshot imported\n")
 		fmt.Printf("     Name:   %s\n", eng.Name)
 		fmt.Printf("     ID:     %s\n", eng.ID)
 		if eng.Target != "" {
@@ -1227,8 +1227,8 @@ The demo engagement represents a simulated corporate network pentest.`,
 			"dig axfr acmecorp.local @192.168.1.10\n\n; Transfer complete — 47 records returned\nRevealed internal IP mappings, service names, and network topology.",
 			"MEDIUM", "CWE-200")
 
-		fmt.Printf("  ✓  Demo engagement ready: %s\n", eng.Name)
-		fmt.Printf("  ✓  %d hosts · %d findings · %d credentials seeded\n\n", 5, 13, 6)
+		fmt.Printf("  Demo engagement ready: %s\n", eng.Name)
+		fmt.Printf("  Seeded: %d hosts, %d findings, %d credentials\n\n", 5, 13, 6)
 		fmt.Println("  Launching TUI...")
 		fmt.Println()
 

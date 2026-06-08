@@ -174,8 +174,8 @@ func Update(latest string) <-chan string {
 		fallbackPath := filepath.Join(os.TempDir(), "davoid-update")
 
 		if needsSudo {
-			send(fmt.Sprintf("⚠  No write access to %s", exePath))
-			send("   Downloading to temp — will attempt sudo install.")
+			send(fmt.Sprintf("No write access to %s", exePath))
+			send("Downloading to temp — will attempt sudo install.")
 		} else {
 			send(fmt.Sprintf("Downloading %s...", asset))
 		}
@@ -231,21 +231,25 @@ func Update(latest string) <-chan string {
 
 		expectedSum := ""
 		for _, line := range strings.Split(string(csData), "\n") {
+			line = strings.TrimRight(line, "\r\n ")
 			if strings.Contains(line, asset) {
 				parts := strings.Fields(line)
 				if len(parts) >= 1 {
-					expectedSum = parts[0]
+					expectedSum = strings.TrimSpace(parts[0])
 				}
 				break
 			}
 		}
 
 		if expectedSum == "" {
-			send("Error: checksum not found for " + asset)
+			send("Error: checksum entry not found for " + asset)
+			send("  Run: curl -fsSL https://raw.githubusercontent.com/BryanParreira/Davoid/main/install.sh | bash")
 			return
 		}
 		if actualSum != expectedSum {
-			send("Error: checksum mismatch — update aborted (file may be corrupt)")
+			send("Error: checksum mismatch — download may be corrupt, try again")
+			send(fmt.Sprintf("  got:      %s", actualSum))
+			send(fmt.Sprintf("  expected: %s", expectedSum))
 			return
 		}
 
@@ -278,13 +282,13 @@ func Update(latest string) <-chan string {
 				send("Trying sudo install...")
 				sudoCmd := exec.Command("sudo", "mv", fallbackPath, exePath)
 				if err := sudoCmd.Run(); err == nil {
-					send(fmt.Sprintf("✓ Updated to %s — restart davoid.", latest))
+					send(fmt.Sprintf("Updated to %s — restart davoid to apply.", latest))
 					send(fmt.Sprintf("  Rollback: sudo mv %s.bak %s", filepath.Base(exePath), exePath))
 					return
 				}
 			}
 			// sudo failed or not available — show manual command
-			send("⚠  Sudo required. Run this to finish install:")
+			send("Sudo required. Run this to finish install:")
 			send(fmt.Sprintf("  sudo mv %s %s", fallbackPath, exePath))
 			send("Then relaunch davoid.")
 		} else {
@@ -296,7 +300,7 @@ func Update(latest string) <-chan string {
 					return
 				}
 			}
-			send(fmt.Sprintf("✓ Updated to %s — restart davoid.", latest))
+			send(fmt.Sprintf("Updated to %s — restart davoid to apply.", latest))
 			send(fmt.Sprintf("  Rollback anytime: mv %s.bak %s", exePath, exePath))
 		}
 	}()

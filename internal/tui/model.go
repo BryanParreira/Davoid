@@ -579,7 +579,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateLines = append(m.updateLines, msg.line)
 				}
 				// Auto-quit 1.5s after successful install so new binary loads
-				if strings.HasPrefix(msg.line, "✓ Updated to") {
+				if strings.HasPrefix(msg.line, "Updated to") {
 					return m, tea.Tick(1500*time.Millisecond, func(t time.Time) tea.Msg {
 						return tea.Quit()
 					})
@@ -1535,18 +1535,18 @@ func loadChecklistView(engID string) tea.Cmd {
 			modules []string
 			manual  []string
 		}{
-			{"Pre-Engagement", "①", nil, []string{
+			{"Pre-Engagement", "1.", nil, []string{
 				"Define scope and rules of engagement",
-				"Create engagement in Davoid  ✓",
+				"Create engagement in Davoid",
 			}},
-			{"Reconnaissance", "②", []string{"osint", "scanner", "web_recon"}, nil},
-			{"Network & MITM", "③", []string{"mitm", "sniff"}, nil},
-			{"Social Engineering", "④", []string{"phishing", "ghost_hub"}, nil},
-			{"Exploitation", "⑤", []string{"payloads", "msf_engine"}, nil},
-			{"Post-Exploitation", "⑥", []string{"looter", "credops", "persistence"}, nil},
-			{"Active Directory", "⑦", []string{"ad_ops"}, nil},
-			{"WiFi", "⑧", []string{"wifi_monitor", "wifi_scan", "wifi_deauth", "wifi_handshake", "wifi_crack", "wifi_eviltwin"}, nil},
-			{"Reporting", "⑨", nil, []string{"Generate engagement report  [davoid report]"}},
+			{"Reconnaissance", "2.", []string{"osint", "scanner", "web_recon"}, nil},
+			{"Network & MITM", "3.", []string{"mitm", "sniff"}, nil},
+			{"Social Engineering", "4.", []string{"phishing", "ghost_hub"}, nil},
+			{"Exploitation", "5.", []string{"payloads", "msf_engine"}, nil},
+			{"Post-Exploitation", "6.", []string{"looter", "credops", "persistence"}, nil},
+			{"Active Directory", "7.", []string{"ad_ops"}, nil},
+			{"WiFi", "8.", []string{"wifi_monitor", "wifi_scan", "wifi_deauth", "wifi_handshake", "wifi_crack", "wifi_eviltwin"}, nil},
+			{"Reporting", "9.", nil, []string{"Generate engagement report  [davoid report]"}},
 		}
 		var sb strings.Builder
 		sb.WriteString("PTES METHODOLOGY CHECKLIST\n")
@@ -1557,14 +1557,14 @@ func loadChecklistView(engID string) tea.Cmd {
 			for _, mod := range ph.modules {
 				check := "[ ]"
 				if done[mod] {
-					check = "[✓]"
+					check = "[x]"
 					completedItems++
 				}
 				totalItems++
 				sb.WriteString(fmt.Sprintf("  %s %s\n", check, mod))
 			}
 			for _, item := range ph.manual {
-				sb.WriteString(fmt.Sprintf("  [·] %s\n", item))
+				sb.WriteString(fmt.Sprintf("  [-] %s\n", item))
 			}
 			sb.WriteString("\n")
 		}
@@ -1612,11 +1612,11 @@ func loadGraphView(engID string) tea.Cmd {
 			sb.WriteString("  [OPERATOR]\n")
 			for i, mod := range order {
 				entry := modMap[mod]
-				connector := "  ├──"
-				childConn := "  │    └──"
+				connector := "  +--"
+				childConn := "  |    \\--"
 				if i == len(order)-1 {
-					connector = "  └──"
-					childConn = "       └──"
+					connector = "  \\--"
+					childConn = "       \\--"
 				}
 				noiseInfo := opsec.ModuleNoise[mod]
 				icon := opsec.NoiseIcon(noiseInfo.Level)
@@ -1628,7 +1628,7 @@ func loadGraphView(engID string) tea.Cmd {
 		}
 		sb.WriteString("\n")
 		sb.WriteString(strings.Repeat("─", 64) + "\n")
-		sb.WriteString(fmt.Sprintf("Noise icons: %s none  %s low  %s medium  %s high\n",
+		sb.WriteString(fmt.Sprintf("Noise levels: %s  %s  %s  %s\n",
 			opsec.NoiseIcon(opsec.NoiseNone),
 			opsec.NoiseIcon(opsec.NoiseLow),
 			opsec.NoiseIcon(opsec.NoiseMedium),
@@ -1851,17 +1851,17 @@ func (m Model) viewMainMenu() string {
 		for _, line := range lines {
 			switch {
 			case strings.HasPrefix(line, "Error"):
-				sb.WriteString("  " + StyleError.Render("✗ "+line) + "\n")
-			case strings.HasPrefix(line, "✓"):
+				sb.WriteString("  " + StyleError.Render(line) + "\n")
+			case strings.HasPrefix(line, "Updated to"):
 				sb.WriteString("  " + StyleSuccess.Render(line) + "\n")
-			case strings.HasPrefix(line, "⚠"):
+			case strings.HasPrefix(line, "Sudo required") || strings.HasPrefix(line, "No write access"):
 				sb.WriteString("  " + StyleWarning.Render(line) + "\n")
-			case strings.HasPrefix(line, "  sudo") || strings.HasPrefix(line, "  Try"):
+			case strings.HasPrefix(line, "  sudo mv") || strings.HasPrefix(line, "  Try"):
 				sb.WriteString("  " + StyleMenuKey.Render(line) + "\n")
-			case strings.HasPrefix(line, "Downloading..."):
-				sb.WriteString("  " + StyleLabel.Render("⟳ "+line) + "\n")
+			case strings.HasPrefix(line, "Downloading"):
+				sb.WriteString("  " + StyleLabel.Render(line) + "\n")
 			default:
-				sb.WriteString("  " + StyleValue.Render("  "+line) + "\n")
+				sb.WriteString("  " + StyleValue.Render(line) + "\n")
 			}
 		}
 		if m.updating {
@@ -1877,7 +1877,7 @@ func (m Model) viewMainMenu() string {
 	if m.activeEng != nil {
 		sb.WriteString(StyleEngagementActive.Render(m.activeEng.Name))
 		if m.activeEng.Target != "" {
-			sb.WriteString(StyleLabel.Render("  →  ") + StyleValue.Render(m.activeEng.Target))
+			sb.WriteString(StyleLabel.Render("  >  ") + StyleValue.Render(m.activeEng.Target))
 		}
 		if len(m.findings) > 0 {
 			stats := engagement.FindingStats(m.activeEng.ID)
@@ -2235,7 +2235,7 @@ func (m Model) viewEngagementHub() string {
 				StyleEngagementActive.Render(m.activeEng.Name) +
 					func() string {
 						if m.activeEng.Target != "" {
-							return StyleLabel.Render("  →  ") + StyleValue.Render(m.activeEng.Target)
+							return StyleLabel.Render("  >  ") + StyleValue.Render(m.activeEng.Target)
 						}
 						return ""
 					}() +
@@ -2492,11 +2492,11 @@ func (m Model) viewPlaybookConfirm() string {
 
 	sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", 40)) + "\n\n")
 	for i, key := range pb.Modules {
-		icon := "  ├──"
+		connector := "  +--"
 		if i == len(pb.Modules)-1 {
-			icon = "  └──"
+			connector = "  \\--"
 		}
-		sb.WriteString(StyleHelp.Render(fmt.Sprintf("%s [%d] %s", icon, i+1, key)) + "\n")
+		sb.WriteString(StyleHelp.Render(fmt.Sprintf("%s [%d] %s", connector, i+1, key)) + "\n")
 	}
 	sb.WriteString("\n")
 
@@ -2594,7 +2594,7 @@ func (m Model) viewCampaign() string {
 			case 0:
 				urgency = StyleError.Render("!")
 			case 1:
-				urgency = StyleWarning.Render("→")
+				urgency = StyleWarning.Render("!")
 			}
 			nameStr := StyleMenuItem.Render(fmt.Sprintf("%-20s", s.ModuleName))
 			reasonStr := StyleLabel.Render(truncate(s.Reason, 42))
@@ -2638,14 +2638,14 @@ func (m Model) viewOpsec() string {
 		switch {
 		case strings.Contains(line, "─"):
 			sb.WriteString(StyleDivider.Render("  "+line) + "\n")
-		case strings.HasPrefix(strings.TrimSpace(line), "✦"):
-			sb.WriteString(StyleSuccess.Render("  "+line) + "\n")
-		case strings.HasPrefix(strings.TrimSpace(line), "◎"):
-			sb.WriteString(StyleSuccess.Render("  "+line) + "\n")
-		case strings.HasPrefix(strings.TrimSpace(line), "◉"):
-			sb.WriteString(StyleWarning.Render("  "+line) + "\n")
-		case strings.HasPrefix(strings.TrimSpace(line), "⬟"):
+		case strings.HasPrefix(strings.TrimSpace(line), "HIGH"):
 			sb.WriteString(StyleError.Render("  "+line) + "\n")
+		case strings.HasPrefix(strings.TrimSpace(line), "MED"):
+			sb.WriteString(StyleWarning.Render("  "+line) + "\n")
+		case strings.HasPrefix(strings.TrimSpace(line), "LOW"):
+			sb.WriteString(StyleSuccess.Render("  "+line) + "\n")
+		case strings.HasPrefix(strings.TrimSpace(line), "NONE"):
+			sb.WriteString(StyleHelp.Render("  "+line) + "\n")
 		case strings.Contains(line, "QUIET") || strings.Contains(line, "CLEAN"):
 			sb.WriteString("  " + StyleSuccess.Render(line) + "\n")
 		case strings.Contains(line, "MODERATE"):
@@ -2684,11 +2684,11 @@ func (m Model) viewChecklist() string {
 		switch {
 		case strings.Contains(line, "─"):
 			sb.WriteString(StyleDivider.Render("  "+line) + "\n")
-		case strings.Contains(line, "[✓]"):
+		case strings.Contains(line, "[x]"):
 			sb.WriteString(StyleSuccess.Render("  "+line) + "\n")
 		case strings.Contains(line, "[ ]"):
 			sb.WriteString(StyleHelp.Render("  "+line) + "\n")
-		case strings.Contains(line, "[·]"):
+		case strings.Contains(line, "[-]"):
 			sb.WriteString(StyleLabel.Render("  "+line) + "\n")
 		case strings.Contains(line, "Progress:"):
 			sb.WriteString(StyleSectionHeader.Render("  "+line) + "\n")
@@ -2726,7 +2726,7 @@ func (m Model) viewGraph() string {
 		switch {
 		case strings.Contains(line, "─"):
 			sb.WriteString(StyleDivider.Render("  "+line) + "\n")
-		case strings.Contains(line, "├──") || strings.Contains(line, "└──"):
+		case strings.Contains(line, "+--") || strings.Contains(line, "\\--"):
 			sb.WriteString(StyleMenuKey.Render("  "+line) + "\n")
 		case strings.Contains(line, "target:"):
 			sb.WriteString(StyleHelp.Render("  "+line) + "\n")
@@ -2762,7 +2762,7 @@ func (m Model) viewDashboard() string {
 	// Engagement header bar
 	engLine := StyleEngagementActive.Render(eng.Name)
 	if eng.Target != "" {
-		engLine += StyleLabel.Render("  →  ") + StyleValue.Render(eng.Target)
+		engLine += StyleLabel.Render("  >  ") + StyleValue.Render(eng.Target)
 	}
 	if eng.Scope != "" {
 		engLine += StyleLabel.Render("  scope: ") + StyleHelp.Render(eng.Scope)
@@ -2995,7 +2995,7 @@ func (m Model) viewCompare() string {
 		}
 
 		w := 28
-		header := fmt.Sprintf("  %-*s  │  %-*s", w, truncate(engA.Name, w), w, truncate(engB.Name, w))
+		header := fmt.Sprintf("  %-*s  |%-*s", w, truncate(engA.Name, w), w, truncate(engB.Name, w))
 		sb.WriteString(StyleSectionHeader.Render(header) + "\n")
 		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", w*2+5)) + "\n")
 
@@ -3003,7 +3003,7 @@ func (m Model) viewCompare() string {
 			vA := fmt.Sprintf("%s: %d", sev, statsA[sev])
 			vB := fmt.Sprintf("%s: %d", sev, statsB[sev])
 			style := SeverityStyle(sev)
-			sb.WriteString(fmt.Sprintf("  %s  │  %s\n",
+			sb.WriteString(fmt.Sprintf("  %s  |%s\n",
 				style.Render(fmt.Sprintf("%-*s", w, vA)),
 				style.Render(fmt.Sprintf("%-*s", w, vB)),
 			))
@@ -3012,7 +3012,7 @@ func (m Model) viewCompare() string {
 		totalA := statsA["CRITICAL"] + statsA["HIGH"] + statsA["MEDIUM"] + statsA["INFO"]
 		totalB := statsB["CRITICAL"] + statsB["HIGH"] + statsB["MEDIUM"] + statsB["INFO"]
 		sb.WriteString(StyleDivider.Render("  "+strings.Repeat("─", w*2+5)) + "\n")
-		sb.WriteString(fmt.Sprintf("  %s  │  %s\n",
+		sb.WriteString(fmt.Sprintf("  %s  |%s\n",
 			StyleValue.Render(fmt.Sprintf("%-*s", w, fmt.Sprintf("TOTAL: %d", totalA))),
 			StyleValue.Render(fmt.Sprintf("%-*s", w, fmt.Sprintf("TOTAL: %d", totalB))),
 		))
@@ -3271,7 +3271,7 @@ func (m Model) statusBar() string {
 	if m.activeEng != nil {
 		left.WriteString(StyleBottomBarEngagement.Render(" " + truncate(m.activeEng.Name, 22) + " "))
 		if m.activeEng.Target != "" {
-			left.WriteString(StyleBottomBar.Render(" → " + truncate(m.activeEng.Target, 18)))
+			left.WriteString(StyleBottomBar.Render(" > " + truncate(m.activeEng.Target, 18)))
 		}
 		if m.activeEng != nil {
 			stats := engagement.FindingStats(m.activeEng.ID)

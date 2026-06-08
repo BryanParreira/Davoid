@@ -345,7 +345,7 @@ func moduleLabel(key string) string {
 
 func stepIcon(i, total int) string {
 	if i == total-1 {
-		return "  └──"
+		return "  \\--"
 	}
-	return "  ├──"
+	return "  +--"
 }

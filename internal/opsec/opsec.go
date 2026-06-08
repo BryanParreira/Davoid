@@ -115,17 +115,17 @@ func Score(moduleKeys []string) (score int, label string, breakdown []OpRecord) 
 	return score, label, breakdown
 }
 
-// NoiseIcon returns an ASCII glyph for a noise level.
+// NoiseIcon returns a short text label for a noise level.
 func NoiseIcon(n NoiseLevel) string {
 	switch n {
 	case NoiseNone:
-		return "✦"
+		return "NONE"
 	case NoiseLow:
-		return "◎"
+		return "LOW"
 	case NoiseMedium:
-		return "◉"
+		return "MED"
 	case NoiseHigh:
-		return "⬟"
+		return "HIGH"
 	default:
 		return "?"
 	}

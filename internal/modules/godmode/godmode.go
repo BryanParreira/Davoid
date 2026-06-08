@@ -516,17 +516,12 @@ func buildDecisionTree(ports []string, serviceMap map[string]string, probes []pr
 
 	var sugs []suggestion
 
-	// Check if any creds in vault — if yes, suggest credtester first
-	if eng != nil {
-		vault.List(eng.ID) // warm up
-	}
-
 	if portSet["22"] || portSet["21"] || portSet["80"] || portSet["443"] || portSet["8080"] {
 		if eng != nil {
 			creds, _ := vault.List(eng.ID)
 			if len(creds) > 0 {
 				sugs = append(sugs, suggestion{
-					module: "davoid run cred_tester",
+					module: "davoid run credops",
 					reason: fmt.Sprintf("%d credential(s) in vault — test SSH/FTP/HTTP access", len(creds)),
 				})
 			}
@@ -571,7 +566,7 @@ func buildDecisionTree(ports []string, serviceMap map[string]string, probes []pr
 
 	if portSet["3389"] {
 		sugs = append(sugs, suggestion{
-			module: "davoid run bruteforce",
+			module: "davoid run credops",
 			reason: "RDP exposed — brute force credentials or check BlueKeep (CVE-2019-0708)",
 		})
 	}

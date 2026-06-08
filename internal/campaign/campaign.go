@@ -45,12 +45,12 @@ var killChain = []phase{
 	{
 		name:    "Exploitation",
 		icon:    "③",
-		modules: []string{"payloads", "msf_engine", "catcher", "wifi_crack", "wifi_eviltwin"},
+		modules: []string{"payloads", "msf_engine", "wifi_crack", "wifi_eviltwin"},
 	},
 	{
 		name:    "Post-Exploitation",
 		icon:    "④",
-		modules: []string{"looter", "cred_tester", "bruteforce", "persistence", "ad_ops"},
+		modules: []string{"looter", "credops", "persistence", "ad_ops"},
 	},
 }
 
@@ -194,16 +194,16 @@ var portSuggestions = []struct {
 	reason    string
 	priority  int
 }{
-	{"22", "cred_tester", "SSH open", 1},
-	{"23", "cred_tester", "Telnet open (likely weak auth)", 0},
+	{"22", "credops", "SSH open", 1},
+	{"23", "credops", "Telnet open (likely weak auth)", 0},
 	{"80", "web_recon", "HTTP service discovered", 2},
 	{"443", "web_recon", "HTTPS service discovered", 2},
 	{"8080", "web_recon", "HTTP-alt service discovered", 2},
 	{"445", "msf_engine", "SMB open — check for EternalBlue/PrintNightmare", 0},
-	{"1433", "cred_tester", "MSSQL open", 1},
-	{"3306", "cred_tester", "MySQL open", 1},
-	{"3389", "cred_tester", "RDP open", 1},
-	{"5432", "cred_tester", "PostgreSQL open", 1},
+	{"1433", "credops", "MSSQL open", 1},
+	{"3306", "credops", "MySQL open", 1},
+	{"3389", "credops", "RDP open", 1},
+	{"5432", "credops", "PostgreSQL open", 1},
 	{"6379", "msf_engine", "Redis open (often unauthenticated)", 0},
 	{"389", "ad_ops", "LDAP open — likely domain controller", 0},
 	{"636", "ad_ops", "LDAPS open — likely domain controller", 0},
@@ -267,14 +267,16 @@ func (c *campaign) generateSuggestions() []suggestion {
 		case "mitm", "sniff":
 			if strings.Contains(title, "credential") || strings.Contains(title, "password") ||
 				strings.Contains(desc, "password") || strings.Contains(desc, "credential") {
-				add(suggestion{moduleKey: "cred_tester", reason: "Credentials intercepted — test reuse", priority: 0})
+				add(suggestion{moduleKey: "credops", reason: "Credentials intercepted — test reuse", priority: 0})
 			}
 		case "scanner":
 			if strings.Contains(desc, "cve") || strings.Contains(title, "vulnerable") {
 				add(suggestion{moduleKey: "msf_engine", reason: "Vulnerability found: " + truncate(f.Title, 40), priority: 0})
 			}
-		case "catcher":
-			add(suggestion{moduleKey: "looter", reason: "Shell session established — harvest loot", priority: 0})
+		case "payloads":
+			if strings.Contains(strings.ToLower(f.Title), "reverse shell") {
+				add(suggestion{moduleKey: "looter", reason: "Shell session established — harvest loot", priority: 0})
+			}
 		case "looter":
 			if strings.Contains(desc, "ssh key") || strings.Contains(title, "key") {
 				add(suggestion{moduleKey: "persistence", reason: "SSH key found — establish persistence", priority: 1})
@@ -288,7 +290,7 @@ func (c *campaign) generateSuggestions() []suggestion {
 	// ── Credential based ─────────────────────────────────────────────────────
 	if len(creds) > 0 {
 		add(suggestion{
-			moduleKey: "cred_tester",
+			moduleKey: "credops",
 			reason:    fmt.Sprintf("%d credential(s) in vault — test reuse", len(creds)),
 			priority:  1,
 		})

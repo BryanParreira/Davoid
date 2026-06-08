@@ -24,14 +24,10 @@ func TagsForModule(key string) []string {
 		return []string{"T1027", "T1140"} // Obfuscated Files, Deobfuscate/Decode
 	case "msf_engine":
 		return []string{"T1190", "T1210"} // Exploit Public-Facing App, Exploitation of Remote Services
-	case "catcher":
-		return []string{"T1059", "T1071"} // Command and Scripting Interpreter, Application Layer Protocol
 	case "looter":
 		return []string{"T1087", "T1083", "T1552"} // Account Discovery, File/Dir Discovery, Unsecured Credentials
-	case "cred_tester":
-		return []string{"T1110", "T1078"} // Brute Force, Valid Accounts
-	case "bruteforce":
-		return []string{"T1110.002"} // Password Cracking
+	case "credops", "cred_tester", "bruteforce", "catcher":
+		return []string{"T1110", "T1078", "T1110.002"} // Brute Force, Valid Accounts, Password Cracking
 	case "persistence":
 		return []string{"T1053", "T1543", "T1547"} // Scheduled Task, Create/Modify System Process, Boot Autostart
 	case "ad_ops":

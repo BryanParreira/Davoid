@@ -69,6 +69,37 @@ func Select(label string, options []string) int {
 	}
 }
 
+// SelectDefault is like Select but pressing Enter (empty input) returns defaultIdx.
+func SelectDefault(label string, options []string, defaultIdx int) int {
+	fmt.Println()
+	fmt.Println(Bold.Render("  " + label))
+	for i, opt := range options {
+		marker := fmt.Sprintf("[%d]", i+1)
+		if i == defaultIdx {
+			fmt.Printf("  %s  %s %s\n", Cyan.Render(marker), opt, Dim.Render("← default"))
+		} else {
+			fmt.Printf("  %s  %s\n", Cyan.Render(marker), opt)
+		}
+	}
+	fmt.Println(Dim.Render("  [0] Back  (Enter = default)"))
+	for {
+		choice := Prompt("Select")
+		if choice == "" {
+			return defaultIdx
+		}
+		var idx int
+		if _, err := fmt.Sscanf(choice, "%d", &idx); err == nil {
+			if idx == 0 {
+				return -1
+			}
+			if idx >= 1 && idx <= len(options) {
+				return idx - 1
+			}
+		}
+		fmt.Println(Red.Render("  Invalid choice."))
+	}
+}
+
 func Confirm(label string) bool {
 	for {
 		s := Prompt(label + " [y/N]")

@@ -123,14 +123,14 @@ var Registry = []Playbook{
 		Name:        "Phish to Shell",
 		Description: "Clone login page → harvest creds → generate payload → catch shell",
 		Category:    "Social Engineering",
-		Modules:     []string{"phishing", "payloads", "catcher"},
+		Modules:     []string{"phishing", "payloads"},
 	},
 	{
 		Key:         "network-compromise",
 		Name:        "Network Compromise",
 		Description: "ARP poison → intercept traffic → crack hashes → spray creds",
 		Category:    "Network",
-		Modules:     []string{"mitm", "sniff", "bruteforce", "cred_tester"},
+		Modules:     []string{"mitm", "sniff", "credops"},
 	},
 	{
 		Key:         "post-exploitation",

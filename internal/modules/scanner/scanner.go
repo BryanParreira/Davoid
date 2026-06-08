@@ -100,13 +100,13 @@ func Run() error {
 		return nil
 	}
 
-	scanType := ui.Select("Scan Type", []string{
+	scanType := ui.SelectDefault("Scan Type", []string{
 		"Quick Scan       (-sV -T4 top 1000 ports)",
 		"Full Audit       (-sS -sV -sC -O all ports)",
 		"Stealth SYN      (-sS -T2)",
 		"UDP Scan         (-sU top 200 ports)",
 		"Vuln Scripts     (-sV --script=vuln)",
-	})
+	}, 0)
 	if scanType < 0 {
 		return nil
 	}

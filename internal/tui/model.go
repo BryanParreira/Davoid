@@ -1387,6 +1387,8 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 		return m.openCategoryMenu("WiFi & Wireless")
 	case "8":
 		return m.openCategoryMenu("Advanced")
+	case "9":
+		return m.openCategoryMenu("Web App Scanning")
 	case "C":
 		m.state = stateCampaign
 		m.campaignCursor = 0

@@ -24,6 +24,7 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/scanner"
 	"github.com/bryanparreira/davoid/internal/modules/sniff"
 	"github.com/bryanparreira/davoid/internal/modules/webrecon"
+	"github.com/bryanparreira/davoid/internal/modules/webscan"
 	"github.com/bryanparreira/davoid/internal/modules/wifi"
 )
 
@@ -45,6 +46,7 @@ var Categories = []string{
 	"Active Directory",
 	"WiFi & Wireless",
 	"Advanced",
+	"Web App Scanning",
 }
 
 // Registry is the full list of available modules.
@@ -53,6 +55,12 @@ var Registry = []Module{
 	{Key: "scanner", Name: "Net-Mapper", Description: "Nmap orchestration with live CVE lookup (NVD)", Category: "Recon & OSINT"},
 	{Key: "osint", Name: "Holmes Engine", Description: "URL / domain / IP / username OSINT — auto-detect routing", Category: "Recon & OSINT"},
 	{Key: "web_recon", Name: "Web Recon", Description: "robots.txt, domain reputation, Google Dorks, CT logs", Category: "Recon & OSINT"},
+
+	// ── [9] Web App Scanning ──────────────────────────────────────────────
+	{Key: "webscan", Name: "Full Scan", Description: "Spider → passive analysis → active injection — complete web audit", Category: "Web App Scanning"},
+	{Key: "webscan_spider", Name: "Spider / Crawler", Description: "BFS crawler: map URLs, forms, and injectable parameters", Category: "Web App Scanning"},
+	{Key: "webscan_passive", Name: "Passive Analyzer", Description: "Insecure cookies, missing headers, CORS wildcard, info leaks, mixed content", Category: "Web App Scanning"},
+	{Key: "webscan_active", Name: "Active Scanner", Description: "SQLi, XSS, path traversal, open redirect, command injection, SSTI", Category: "Web App Scanning"},
 
 	// ── [2] Network Attacks ───────────────────────────────────────────────
 	{Key: "mitm", Name: "MITM Engine", Description: "ARP poisoning + automatic IP forwarding (Linux/macOS)", Category: "Network Attacks"},
@@ -107,6 +115,14 @@ func RunModule(key string) error {
 		return osint.Run()
 	case "web_recon":
 		return webrecon.Run()
+	case "webscan":
+		return webscan.RunFull()
+	case "webscan_spider":
+		return webscan.RunSpider()
+	case "webscan_passive":
+		return webscan.RunPassive()
+	case "webscan_active":
+		return webscan.RunActive()
 	case "mitm":
 		return mitm.Run()
 	case "phishing":

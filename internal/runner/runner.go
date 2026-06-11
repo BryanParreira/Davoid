@@ -19,6 +19,7 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/netintercept"
 	"github.com/bryanparreira/davoid/internal/modules/osint"
 	"github.com/bryanparreira/davoid/internal/modules/payloads"
+	"github.com/bryanparreira/davoid/internal/modules/webintel"
 	"github.com/bryanparreira/davoid/internal/modules/persistence"
 	"github.com/bryanparreira/davoid/internal/modules/phishing"
 	"github.com/bryanparreira/davoid/internal/modules/purpleteam"
@@ -41,6 +42,7 @@ type Module struct {
 // Categories in display order (follows kill chain)
 var Categories = []string{
 	"Recon & OSINT",
+	"Web Intelligence",
 	"Network Attacks",
 	"Social Engineering",
 	"Exploitation",
@@ -48,19 +50,16 @@ var Categories = []string{
 	"Active Directory",
 	"WiFi & Wireless",
 	"Advanced",
-	"Web App Scanning",
 }
 
 // Registry is the full list of available modules.
 var Registry = []Module{
 	// ── [1] Recon & OSINT ────────────────────────────────────────────────
-	{Key: "recon", Name: "Recon Suite", Description: "Net-Mapper + OSINT Engine + Web Recon — unified intelligence gathering", Category: "Recon & OSINT"},
+	{Key: "recon", Name: "Recon Suite", Description: "Net-Mapper + OSINT Engine — unified network & target intelligence", Category: "Recon & OSINT"},
 
-	// ── [9] Web App Scanning ──────────────────────────────────────────────
-	{Key: "webscan", Name: "Full Scan", Description: "Spider → passive analysis → active injection — complete web audit", Category: "Web App Scanning"},
-	{Key: "webscan_spider", Name: "Spider / Crawler", Description: "BFS crawler: map URLs, forms, and injectable parameters", Category: "Web App Scanning"},
-	{Key: "webscan_passive", Name: "Passive Analyzer", Description: "Insecure cookies, missing headers, CORS wildcard, info leaks, mixed content", Category: "Web App Scanning"},
-	{Key: "webscan_active", Name: "Active Scanner", Description: "SQLi, XSS, path traversal, open redirect, command injection, SSTI", Category: "Web App Scanning"},
+	// ── [2] Web Intelligence ──────────────────────────────────────────────
+	{Key: "web_intel", Name: "Web Intelligence Suite", Description: "Subdomain discovery → fingerprint → spider → SQLi/XSS/SSTI — full pipeline", Category: "Web Intelligence"},
+	{Key: "webscan", Name: "Web App Scanner", Description: "Spider → passive analysis → active injection — targeted web audit", Category: "Web Intelligence"},
 
 	// ── [2] Network Attacks ───────────────────────────────────────────────
 	{Key: "net_intercept", Name: "Network Intercept", Description: "ARP poison + live packet capture — full MITM suite", Category: "Network Attacks"},
@@ -110,6 +109,8 @@ func RunModule(key string) error {
 		return recon.Run()
 	case "net_intercept":
 		return netintercept.Run()
+	case "web_intel":
+		return webintel.Run()
 
 	// ── Legacy keys (kept for CLI / playbook / campaign backwards compat) ─
 	case "scanner":

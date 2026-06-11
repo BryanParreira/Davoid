@@ -288,15 +288,15 @@ func buildMainMenu() []menuItem {
 	return []menuItem{
 		{key: "C", label: "Campaign Mode", hint: "guided kill chain · smart suggestions"},
 		{key: "", label: ""},
-		{key: "1", label: fmt.Sprintf("Recon & OSINT  (%d)", len(runner.ByCategory("Recon & OSINT"))),            hint: "net-mapper · OSINT · web recon — unified suite"},
-		{key: "2", label: fmt.Sprintf("Network Attacks  (%d)", len(runner.ByCategory("Network Attacks"))),        hint: "ARP poison + live capture — combined intercept"},
-		{key: "3", label: fmt.Sprintf("Social Engineering  (%d)", len(runner.ByCategory("Social Engineering"))),  hint: "phishing · C2 server"},
-		{key: "4", label: fmt.Sprintf("Exploitation  (%d)", len(runner.ByCategory("Exploitation"))),              hint: "payloads · encrypt · MSF"},
-		{key: "5", label: fmt.Sprintf("Post-Exploitation  (%d)", len(runner.ByCategory("Post-Exploitation"))),    hint: "looter · cred tester · hash crack"},
-		{key: "6", label: fmt.Sprintf("Active Directory  (%d)", len(runner.ByCategory("Active Directory"))),      hint: "LDAP · Kerberoast · DCSync"},
-		{key: "7", label: fmt.Sprintf("WiFi & Wireless  (%d)", len(runner.ByCategory("WiFi & Wireless"))),        hint: "monitor · scan · deauth · handshake"},
-		{key: "8", label: fmt.Sprintf("Advanced  (%d)", len(runner.ByCategory("Advanced"))),                      hint: "AI · cloud · purple team · god mode"},
-		{key: "9", label: fmt.Sprintf("Web App Scanning  (%d)", len(runner.ByCategory("Web App Scanning"))),      hint: "spider · passive · active · SQLi · XSS · SSTI"},
+		{key: "1", label: fmt.Sprintf("Recon & OSINT  (%d)", len(runner.ByCategory("Recon & OSINT"))),            hint: "net-mapper · OSINT — network & target intelligence"},
+		{key: "2", label: fmt.Sprintf("Web Intelligence  (%d)", len(runner.ByCategory("Web Intelligence"))),      hint: "subdomain enum → fingerprint → SQLi · XSS · SSTI pipeline"},
+		{key: "3", label: fmt.Sprintf("Network Attacks  (%d)", len(runner.ByCategory("Network Attacks"))),        hint: "ARP poison + live capture — combined intercept"},
+		{key: "4", label: fmt.Sprintf("Social Engineering  (%d)", len(runner.ByCategory("Social Engineering"))),  hint: "phishing · C2 server"},
+		{key: "5", label: fmt.Sprintf("Exploitation  (%d)", len(runner.ByCategory("Exploitation"))),              hint: "payloads · encrypt · MSF"},
+		{key: "6", label: fmt.Sprintf("Post-Exploitation  (%d)", len(runner.ByCategory("Post-Exploitation"))),    hint: "looter · cred tester · hash crack"},
+		{key: "7", label: fmt.Sprintf("Active Directory  (%d)", len(runner.ByCategory("Active Directory"))),      hint: "LDAP · Kerberoast · DCSync"},
+		{key: "8", label: fmt.Sprintf("WiFi & Wireless  (%d)", len(runner.ByCategory("WiFi & Wireless"))),        hint: "monitor · scan · deauth · handshake"},
+		{key: "9", label: fmt.Sprintf("Advanced  (%d)", len(runner.ByCategory("Advanced"))),                      hint: "AI · cloud · purple team · god mode"},
 		{key: "", label: ""},
 		{key: "P", label: "Playbooks",       hint: "pre-built attack chains"},
 		{key: "E", label: "Engagement Hub",  hint: "findings · vault · targets · notes"},
@@ -749,21 +749,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "1":
 			return m.openCategoryMenu("Recon & OSINT")
 		case "2":
-			return m.openCategoryMenu("Network Attacks")
+			return m.openCategoryMenu("Web Intelligence")
 		case "3":
-			return m.openCategoryMenu("Social Engineering")
+			return m.openCategoryMenu("Network Attacks")
 		case "4":
-			return m.openCategoryMenu("Exploitation")
+			return m.openCategoryMenu("Social Engineering")
 		case "5":
-			return m.openCategoryMenu("Post-Exploitation")
+			return m.openCategoryMenu("Exploitation")
 		case "6":
-			return m.openCategoryMenu("Active Directory")
+			return m.openCategoryMenu("Post-Exploitation")
 		case "7":
-			return m.openCategoryMenu("WiFi & Wireless")
+			return m.openCategoryMenu("Active Directory")
 		case "8":
-			return m.openCategoryMenu("Advanced")
+			return m.openCategoryMenu("WiFi & Wireless")
 		case "9":
-			return m.openCategoryMenu("Web App Scanning")
+			return m.openCategoryMenu("Advanced")
 		case "c", "C":
 			m.state = stateCampaign
 			m.campaignCursor = 0
@@ -1374,21 +1374,21 @@ func (m Model) activateMenuItem(key string) (tea.Model, tea.Cmd) {
 	case "1":
 		return m.openCategoryMenu("Recon & OSINT")
 	case "2":
-		return m.openCategoryMenu("Network Attacks")
+		return m.openCategoryMenu("Web Intelligence")
 	case "3":
-		return m.openCategoryMenu("Social Engineering")
+		return m.openCategoryMenu("Network Attacks")
 	case "4":
-		return m.openCategoryMenu("Exploitation")
+		return m.openCategoryMenu("Social Engineering")
 	case "5":
-		return m.openCategoryMenu("Post-Exploitation")
+		return m.openCategoryMenu("Exploitation")
 	case "6":
-		return m.openCategoryMenu("Active Directory")
+		return m.openCategoryMenu("Post-Exploitation")
 	case "7":
-		return m.openCategoryMenu("WiFi & Wireless")
+		return m.openCategoryMenu("Active Directory")
 	case "8":
-		return m.openCategoryMenu("Advanced")
+		return m.openCategoryMenu("WiFi & Wireless")
 	case "9":
-		return m.openCategoryMenu("Web App Scanning")
+		return m.openCategoryMenu("Advanced")
 	case "C":
 		m.state = stateCampaign
 		m.campaignCursor = 0

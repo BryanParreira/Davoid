@@ -58,6 +58,20 @@ var sensitivePaths = []string{
 	"/.well-known/security.txt",
 }
 
+// RunTarget runs web recon against a pre-determined URL (no prompts).
+// Used by the webintel pipeline module.
+func RunTarget(targetURL string) error {
+	if !strings.HasPrefix(targetURL, "http") {
+		targetURL = "https://" + targetURL
+	}
+	parsed, err := url.Parse(targetURL)
+	if err != nil {
+		return err
+	}
+	eng, _ := engagement.Active()
+	return runRecon(targetURL, parsed, eng)
+}
+
 func Run() error {
 	ui.Header("Web Ghost Elite — Professional Web Auditor")
 
@@ -76,7 +90,10 @@ func Run() error {
 	}
 
 	eng, _ := engagement.Active()
+	return runRecon(targetURL, parsed, eng)
+}
 
+func runRecon(targetURL string, parsed *url.URL, eng *engagement.Engagement) error {
 	// ── Initial request ──────────────────────────────────────────────────────
 	ui.Info(fmt.Sprintf("Connecting to %s...", parsed.Host))
 	resp, err := client.Get(targetURL)

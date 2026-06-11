@@ -147,6 +147,12 @@ func RunActive() error {
 	return nil
 }
 
+// RunPipeline runs a full scan against a pre-determined URL (no prompts).
+// Used by the webintel pipeline module.
+func RunPipeline(targetURL string, eng *engagement.Engagement) {
+	runFull(targetURL, eng)
+}
+
 func promptTarget() (string, *engagement.Engagement) {
 	targetURL := ui.Prompt("Target URL (e.g. https://example.com)")
 	if targetURL == "" {

@@ -27,6 +27,40 @@ var noRedirectClient = &http.Client{
 	},
 }
 
+// DiscoverSubdomains brute-forces common subdomain names for a domain and returns live ones.
+// Used by the webintel pipeline module.
+func DiscoverSubdomains(domain string) []string {
+	subs := commonSubdomains()
+	found := make(chan string, len(subs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 20)
+
+	for _, sub := range subs {
+		wg.Add(1)
+		go func(s string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			fqdn := s + "." + domain
+			addrs, err := net.LookupHost(fqdn)
+			if err == nil && len(addrs) > 0 {
+				found <- "https://" + fqdn
+			}
+		}(sub)
+	}
+
+	go func() {
+		wg.Wait()
+		close(found)
+	}()
+
+	var results []string
+	for u := range found {
+		results = append(results, u)
+	}
+	return results
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 func Run() error {

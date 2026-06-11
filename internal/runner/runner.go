@@ -14,13 +14,15 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/ghosthub"
 	"github.com/bryanparreira/davoid/internal/modules/godmode"
 	"github.com/bryanparreira/davoid/internal/modules/looter"
-	"github.com/bryanparreira/davoid/internal/modules/payloads"
 	"github.com/bryanparreira/davoid/internal/modules/mitm"
 	"github.com/bryanparreira/davoid/internal/modules/msfengine"
+	"github.com/bryanparreira/davoid/internal/modules/netintercept"
 	"github.com/bryanparreira/davoid/internal/modules/osint"
+	"github.com/bryanparreira/davoid/internal/modules/payloads"
 	"github.com/bryanparreira/davoid/internal/modules/persistence"
 	"github.com/bryanparreira/davoid/internal/modules/phishing"
 	"github.com/bryanparreira/davoid/internal/modules/purpleteam"
+	"github.com/bryanparreira/davoid/internal/modules/recon"
 	"github.com/bryanparreira/davoid/internal/modules/scanner"
 	"github.com/bryanparreira/davoid/internal/modules/sniff"
 	"github.com/bryanparreira/davoid/internal/modules/webrecon"
@@ -52,9 +54,7 @@ var Categories = []string{
 // Registry is the full list of available modules.
 var Registry = []Module{
 	// ── [1] Recon & OSINT ────────────────────────────────────────────────
-	{Key: "scanner", Name: "Net-Mapper", Description: "Nmap orchestration with live CVE lookup (NVD)", Category: "Recon & OSINT"},
-	{Key: "osint", Name: "Holmes Engine", Description: "URL / domain / IP / username OSINT — auto-detect routing", Category: "Recon & OSINT"},
-	{Key: "web_recon", Name: "Web Recon", Description: "robots.txt, domain reputation, Google Dorks, CT logs", Category: "Recon & OSINT"},
+	{Key: "recon", Name: "Recon Suite", Description: "Net-Mapper + OSINT Engine + Web Recon — unified intelligence gathering", Category: "Recon & OSINT"},
 
 	// ── [9] Web App Scanning ──────────────────────────────────────────────
 	{Key: "webscan", Name: "Full Scan", Description: "Spider → passive analysis → active injection — complete web audit", Category: "Web App Scanning"},
@@ -63,16 +63,14 @@ var Registry = []Module{
 	{Key: "webscan_active", Name: "Active Scanner", Description: "SQLi, XSS, path traversal, open redirect, command injection, SSTI", Category: "Web App Scanning"},
 
 	// ── [2] Network Attacks ───────────────────────────────────────────────
-	{Key: "mitm", Name: "MITM Engine", Description: "ARP poisoning + automatic IP forwarding (Linux/macOS)", Category: "Network Attacks"},
-	{Key: "sniff", Name: "Live Interceptor", Description: "Real-time traffic capture, DNS tracking, credential extraction", Category: "Network Attacks"},
+	{Key: "net_intercept", Name: "Network Intercept", Description: "ARP poison + live packet capture — full MITM suite", Category: "Network Attacks"},
 
 	// ── [3] Social Engineering ────────────────────────────────────────────
 	{Key: "phishing", Name: "Phantom Cloner", Description: "Dynamic page cloning with JS credential harvesting portal", Category: "Social Engineering"},
 	{Key: "ghost_hub", Name: "GHOST-HUB C2", Description: "AES-encrypted async HTTP command & control server", Category: "Social Engineering"},
 
 	// ── [4] Exploitation ──────────────────────────────────────────────────
-	{Key: "payloads", Name: "Shell Forge", Description: "Payload generator (Bash/Python/PHP/PS/MSF) + TCP shell catcher", Category: "Exploitation"},
-	{Key: "crypt_keeper", Name: "Crypt-Keeper", Description: "Payload encryption + self-decrypting AES loaders", Category: "Exploitation"},
+	{Key: "payloads", Name: "Shell Forge", Description: "Payload generator (Bash/Python/PHP/PS/MSF) + encrypt + TCP shell catcher", Category: "Exploitation"},
 	{Key: "msf_engine", Name: "Metasploit Bridge", Description: "MSF RPC client — auto exploit selection & execution", Category: "Exploitation"},
 
 	// ── [5] Post-Exploitation ─────────────────────────────────────────────
@@ -107,14 +105,27 @@ func ByCategory(category string) []Module {
 // RunModule routes the execution to the native Go module.
 func RunModule(key string) error {
 	switch key {
+	// ── Consolidated suites ───────────────────────────────────────────────
+	case "recon":
+		return recon.Run()
+	case "net_intercept":
+		return netintercept.Run()
+
+	// ── Legacy keys (kept for CLI / playbook / campaign backwards compat) ─
 	case "scanner":
 		return scanner.Run()
-	case "sniff":
-		return sniff.Run()
 	case "osint":
 		return osint.Run()
 	case "web_recon":
 		return webrecon.Run()
+	case "mitm":
+		return mitm.Run()
+	case "sniff":
+		return sniff.Run()
+	case "crypt_keeper":
+		return cryptkeeper.Run()
+
+	// ── Web App Scanning ──────────────────────────────────────────────────
 	case "webscan":
 		return webscan.RunFull()
 	case "webscan_spider":
@@ -123,44 +134,40 @@ func RunModule(key string) error {
 		return webscan.RunPassive()
 	case "webscan_active":
 		return webscan.RunActive()
-	case "mitm":
-		return mitm.Run()
+
+	// ── Social Engineering ────────────────────────────────────────────────
 	case "phishing":
 		return phishing.Run()
 	case "ghost_hub":
 		return ghosthub.Run()
-	case "crypt_keeper":
-		return cryptkeeper.Run()
-	case "persistence":
-		return persistence.Run()
+
+	// ── Exploitation ──────────────────────────────────────────────────────
+	case "payloads":
+		return payloads.Run()
+	case "msf_engine":
+		return msfengine.Run()
+
+	// ── Post-Exploitation ─────────────────────────────────────────────────
+	case "looter":
+		return looter.Run()
 	case "credops":
 		return credops.Run()
-	// legacy keys — redirect to merged modules
+	case "persistence":
+		return persistence.Run()
+
+	// ── Legacy sub-keys ───────────────────────────────────────────────────
 	case "bruteforce":
 		return credops.RunHashCracker()
 	case "cred_tester":
 		return credops.RunCredTester()
 	case "catcher":
 		return payloads.RunCatch()
-	case "looter":
-		return looter.Run()
+
+	// ── Active Directory ──────────────────────────────────────────────────
 	case "ad_ops":
 		return adops.Run()
-	case "msf_engine":
-		return msfengine.Run()
-	case "ai_assist":
-		return aiassist.Run()
-	case "cloud_ops":
-		return cloudops.Run()
-	case "purple_team":
-		return purpleteam.Run()
-	case "auditor":
-		return auditor.Run()
-	case "god_mode":
-		return godmode.Run()
-	case "payloads":
-		return payloads.Run()
-	// Unified WiFi suite — individual keys kept for `davoid run wifi_*` CLI
+
+	// ── WiFi ──────────────────────────────────────────────────────────────
 	case "wifi":
 		return wifi.RunSuite()
 	case "wifi_monitor":
@@ -175,12 +182,27 @@ func RunModule(key string) error {
 		return wifi.RunCrack()
 	case "wifi_eviltwin":
 		return wifi.RunEvilTwin()
+
+	// ── Advanced ──────────────────────────────────────────────────────────
+	case "ai_assist":
+		return aiassist.Run()
+	case "cloud_ops":
+		return cloudops.Run()
+	case "purple_team":
+		return purpleteam.Run()
+	case "god_mode":
+		return godmode.Run()
+	case "auditor":
+		return auditor.Run()
+
+	// ── Campaign / orchestration ──────────────────────────────────────────
 	case "campaign":
 		metas := make([]campaign.ModuleMeta, len(Registry))
 		for i, m := range Registry {
 			metas[i] = campaign.ModuleMeta{Key: m.Key, Name: m.Name, Description: m.Description}
 		}
 		return campaign.Run(metas, RunModule)
+
 	default:
 		return fmt.Errorf("module not found: %s", key)
 	}

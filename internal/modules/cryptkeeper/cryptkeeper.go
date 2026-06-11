@@ -15,6 +15,13 @@ import (
 	"github.com/bryanparreira/davoid/internal/modules/ui"
 )
 
+// RunFromFile encrypts a specific file without prompting for its path.
+// Called by the payloads module after payload generation.
+func RunFromFile(payloadPath string) error {
+	ui.Header("Crypt-Keeper — Payload Encryption & AV Evasion")
+	return runEncrypt(payloadPath)
+}
+
 func Run() error {
 	ui.Header("Crypt-Keeper — Payload Encryption & AV Evasion")
 
@@ -22,7 +29,10 @@ func Run() error {
 	if payloadPath == "" {
 		return nil
 	}
+	return runEncrypt(payloadPath)
+}
 
+func runEncrypt(payloadPath string) error {
 	data, err := os.ReadFile(payloadPath)
 	if err != nil {
 		ui.Fail(fmt.Sprintf("Cannot read file: %v", err))

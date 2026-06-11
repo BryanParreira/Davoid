@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bryanparreira/davoid/internal/engagement"
+	"github.com/bryanparreira/davoid/internal/modules/cryptkeeper"
 	"github.com/bryanparreira/davoid/internal/modules/ui"
 	"github.com/bryanparreira/davoid/internal/notify"
 )
@@ -230,6 +231,12 @@ func runGenerate() error {
 	os.MkdirAll("payloads", 0700)
 	os.WriteFile(outFile, []byte(payload), 0700)
 	ui.Success(fmt.Sprintf("Saved to: %s", outFile))
+
+	if ui.Confirm("Encrypt payload (AV evasion)?") {
+		if err := cryptkeeper.RunFromFile(outFile); err != nil {
+			ui.Warn(fmt.Sprintf("Encryption skipped: %v", err))
+		}
+	}
 
 	if ui.Confirm("Start shell catcher now?") {
 		return RunCatch()
